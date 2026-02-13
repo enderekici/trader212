@@ -8,6 +8,7 @@ export default defineConfig({
     passWithNoTests: true,
     coverage: {
       provider: 'v8',
+      reporter: ['text', 'lcov'],
       include: ['src/**/*.ts'],
       exclude: ['src/index.ts'],
       // TODO: Raise thresholds as test coverage improves

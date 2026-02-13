@@ -32,8 +32,7 @@ jobs:
         run: npm run typecheck
 
       - name: Security audit
-        run: npm audit
-        continue-on-error: true
+        run: npm audit --audit-level=high
 
   test:
     name: Test
@@ -52,7 +51,7 @@ jobs:
         run: npm run test:coverage
 
       - name: Upload coverage
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
           file: ./coverage/lcov.info
         continue-on-error: true
@@ -129,7 +128,7 @@ jobs:
             type=sha
 
       - name: Build
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: false
@@ -149,7 +148,7 @@ jobs:
 
       - name: Push
         if: github.event_name != 'pull_request'
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: true
@@ -160,7 +159,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
 
       - name: Trivy scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.34.0
         with:
           image-ref: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
           format: sarif

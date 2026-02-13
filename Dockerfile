@@ -1,10 +1,12 @@
 FROM node:20-slim AS builder
 WORKDIR /app
+ENV npm_config_update_notifier=false
 COPY package*.json ./
 RUN npm ci
 COPY tsconfig.json tsup.config.ts ./
 COPY src/ src/
 RUN npm run build
+RUN npm ci --omit=dev
 
 FROM node:20-slim
 WORKDIR /app
