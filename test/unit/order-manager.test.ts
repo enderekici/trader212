@@ -560,7 +560,7 @@ describe('OrderManager', () => {
     it('returns price from yahoo finance', async () => {
       const mockYahoo = { getQuote: vi.fn().mockResolvedValue({ price: 150.25 }) };
       vi.doMock('../../src/data/yahoo-finance.js', () => ({
-        YahooFinanceClient: vi.fn().mockImplementation(() => mockYahoo),
+        YahooFinanceClient: vi.fn().mockImplementation(function () { return mockYahoo; }),
       }));
 
       // Re-import to pick up mock
@@ -573,7 +573,7 @@ describe('OrderManager', () => {
     it('returns null when quote is null', async () => {
       const mockYahoo = { getQuote: vi.fn().mockResolvedValue(null) };
       vi.doMock('../../src/data/yahoo-finance.js', () => ({
-        YahooFinanceClient: vi.fn().mockImplementation(() => mockYahoo),
+        YahooFinanceClient: vi.fn().mockImplementation(function () { return mockYahoo; }),
       }));
 
       const { OrderManager: OM } = await import('../../src/execution/order-manager.js');
@@ -584,9 +584,9 @@ describe('OrderManager', () => {
 
     it('returns null on error', async () => {
       vi.doMock('../../src/data/yahoo-finance.js', () => ({
-        YahooFinanceClient: vi.fn().mockImplementation(() => ({
-          getQuote: vi.fn().mockRejectedValue(new Error('Network error')),
-        })),
+        YahooFinanceClient: vi.fn().mockImplementation(function () {
+          return { getQuote: vi.fn().mockRejectedValue(new Error('Network error')) };
+        }),
       }));
 
       const { OrderManager: OM } = await import('../../src/execution/order-manager.js');

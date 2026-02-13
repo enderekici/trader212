@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 ## Project Overview
-Autonomous AI trading bot for Trading212. ESM TypeScript, Node.js 20+.
+Autonomous AI trading bot for Trading212. ESM TypeScript, Node.js 24+.
 
 ## Commands
 
@@ -73,9 +73,10 @@ Autonomous AI trading bot for Trading212. ESM TypeScript, Node.js 20+.
     - `model-tracker.ts` - ModelTracker: recordPrediction(), evaluatePendingPredictions(), getModelStats()
     - `audit-log.ts` - AuditLogger: logTrade(), logSignal(), logRisk(), logConfig(), logError(), logControl(), logResearch(), getRecent(), getByType(), getBySymbol(), getEntriesForDate(), generateDailyReport()
   - `src/api/` - HTTP + WebSocket
-    - `server.ts` - ApiServer: Express app setup, CORS, JSON parsing, starts HTTP + WS
-    - `routes.ts` - All REST endpoint definitions (15+ endpoints)
+    - `server.ts` - ApiServer: Express app setup, CORS whitelist, JSON parsing, auth middleware, rate limiting, starts HTTP + WS
+    - `routes.ts` - All REST endpoint definitions (15+ endpoints), Zod input validation on mutation endpoints
     - `websocket.ts` - WebSocketManager: broadcast(), 10 event types
+    - `middleware/auth.ts` - Bearer token auth middleware (`API_SECRET_KEY` env var); skips `/api/status`; disabled if no key set
     - `trading212/client.ts` - Trading212 API client
     - `trading212/types.ts` - Trading212 type definitions
     - `trading212/errors.ts` - Trading212 error handling
@@ -121,11 +122,12 @@ Autonomous AI trading bot for Trading212. ESM TypeScript, Node.js 20+.
 - ConfigManager for all runtime config -- DB-backed, reads/writes to `config` table
 - Secrets (API keys) stay in `.env` only, never in DB
 - All timestamps in UTC ISO 8601 format
-- Zod for runtime validation of external data
+- Zod for runtime validation of external data (API input validation on mutation endpoints)
 - biome for linting and formatting (not eslint/prettier)
 - vitest for testing (not jest)
 - Singleton pattern for AuditLogger (`getAuditLogger()`)
 - Trade execution goes through Trade Planner -> Approval Manager -> Risk Guard -> Order Manager
+- `NODE_ENV` is NOT in `.env` -- it is a deployment concern owned by Dockerfiles / launch commands. Locally it defaults to `undefined` (dev mode); Docker sets `production`.
 
 ## Architecture
 Pairlist Pipeline -> Data Aggregation -> Analysis (Technical + Fundamental + Sentiment) -> AI Decision -> Trade Planner -> Approval -> Risk Guard -> Execution -> Position Re-evaluation -> Monitoring
@@ -215,6 +217,25 @@ Three adapters in `src/ai/adapters/`: anthropic.ts, ollama.ts, openai-compat.ts.
 - `alert` - Alert/notification
 - `trade_plan_created` - New trade plan awaiting approval
 - `research_completed` - AI research report finished
+
+## API Security
+- **Authentication**: Bearer token via `API_SECRET_KEY` env var. Middleware in `src/api/middleware/auth.ts`. Skips `/api/status` (health check). Disabled if env var is empty/unset.
+- **CORS**: Whitelist via `CORS_ORIGINS` env var (comma-separated, default: `http://localhost:3000`).
+- **Rate Limiting**: `express-rate-limit` — 100 req/min general, 10 req/min on `/api/control/*` and `/api/config/*`.
+- **Input Validation**: Zod schemas on `PUT /api/config/:key`, `POST /api/pairlist/static`, `POST /api/research/run`.
+- **Dashboard Auth**: `NEXT_PUBLIC_API_SECRET_KEY` env var (same value as `API_SECRET_KEY`) sent as Bearer token in `web/lib/api.ts`.
+
+## Docker
+- `docker compose up` — starts bot (port 3001) + web dashboard (port 3000)
+- `docker compose build` — builds both images
+- **Files**: `Dockerfile` (bot), `Dockerfile.web` (Next.js dashboard), `docker-compose.yml`, `.dockerignore`
+- **Bot image**: multi-stage build, `node:24-alpine`, `tsup` bundle, `NODE_ENV=production` set in Dockerfile. Builder stage uses `apk add python3 make g++` for `better-sqlite3` native compilation
+- **Web image**: multi-stage build, `node:24-alpine`, Next.js standalone output, build args for `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_API_SECRET_KEY`
+- **Healthcheck**: bot uses Node.js `fetch()` against `/api/status` (not curl — `node:24-alpine` has no curl)
+- **Volumes**: `./data:/app/data` for SQLite persistence
+- **Environment**: `.env` file is passed via `env_file:` for secrets/config. `NODE_ENV` is NOT in `.env` — Dockerfiles own it (set to `production`). For local dev, `NODE_ENV` is left unset (defaults to dev mode).
+- **Web depends on bot**: `depends_on: bot: condition: service_healthy` — web waits for bot healthcheck
+- **Build args**: `NEXT_PUBLIC_API_URL` (default: `http://bot:3001`) and `NEXT_PUBLIC_API_SECRET_KEY` are injected at build time for Next.js static rendering
 
 ## Audit Log
 All bot actions logged to `audit_log` table via `getAuditLogger()` singleton. Event types: trade, signal, pairlist, config, error, control, research. Categories: execution, analysis, risk, system, user. Severity levels: info, warn, error. Viewable on Activity page in dashboard. Supports daily report generation.

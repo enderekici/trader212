@@ -1,0 +1,15 @@
+node_modules
+web/node_modules
+web/.next
+data
+dist
+.env
+.env.*
+!.env.example
+.git
+*.md
+test
+coverage
+.claude
+.vscode
+.idea

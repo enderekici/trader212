@@ -2,24 +2,21 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 // Mock the adapters before importing the module under test
 vi.mock('../../src/ai/adapters/anthropic.js', () => ({
-  AnthropicAdapter: vi.fn().mockImplementation(() => ({
-    analyze: vi.fn(),
-    rawChat: vi.fn(),
-  })),
+  AnthropicAdapter: vi.fn().mockImplementation(function () {
+    return { analyze: vi.fn(), rawChat: vi.fn() };
+  }),
 }));
 
 vi.mock('../../src/ai/adapters/ollama.js', () => ({
-  OllamaAdapter: vi.fn().mockImplementation(() => ({
-    analyze: vi.fn(),
-    rawChat: vi.fn(),
-  })),
+  OllamaAdapter: vi.fn().mockImplementation(function () {
+    return { analyze: vi.fn(), rawChat: vi.fn() };
+  }),
 }));
 
 vi.mock('../../src/ai/adapters/openai-compat.js', () => ({
-  OpenAICompatibleAdapter: vi.fn().mockImplementation(() => ({
-    analyze: vi.fn(),
-    rawChat: vi.fn(),
-  })),
+  OpenAICompatibleAdapter: vi.fn().mockImplementation(function () {
+    return { analyze: vi.fn(), rawChat: vi.fn() };
+  }),
 }));
 
 vi.mock('../../src/config/manager.js', () => ({

@@ -1,8 +1,7 @@
 import { eq } from 'drizzle-orm';
 import type { Trading212Client } from '../api/trading212/client.js';
-import { configManager } from '../config/manager.js';
 import { getDb } from '../db/index.js';
-import { positions } from '../db/schema.js';
+import { positions, trades } from '../db/schema.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('position-tracker');
@@ -61,13 +60,37 @@ export class PositionTracker {
         p.ticker ?? p.instrument?.ticker ?? '';
       const t212TickerSet = new Set(t212Positions.map(getTicker));
 
-      // Check for positions in DB but not in T212
+      // Check for positions in DB but not in T212 — auto-reconcile
       for (const [ticker, dbPos] of dbSymbolMap) {
         if (!t212TickerSet.has(ticker)) {
           log.warn(
             { symbol: dbPos.symbol, t212Ticker: ticker },
-            'Position in DB but not found in T212 — may have been closed externally',
+            'Position in DB but not in T212 — auto-reconciling (external close)',
           );
+          const exitPrice = dbPos.currentPrice ?? dbPos.entryPrice;
+          const pnl = (exitPrice - dbPos.entryPrice) * dbPos.shares;
+          const pnlPct = (exitPrice - dbPos.entryPrice) / dbPos.entryPrice;
+          const now = new Date().toISOString();
+
+          db.insert(trades)
+            .values({
+              symbol: dbPos.symbol,
+              t212Ticker: dbPos.t212Ticker,
+              side: 'SELL',
+              shares: dbPos.shares,
+              entryPrice: dbPos.entryPrice,
+              exitPrice,
+              pnl,
+              pnlPct,
+              entryTime: dbPos.entryTime,
+              exitTime: now,
+              exitReason: 'External close (T212 sync)',
+              accountType: dbPos.accountType ?? 'INVEST',
+            })
+            .run();
+
+          db.delete(positions).where(eq(positions.symbol, dbPos.symbol)).run();
+          log.info({ symbol: dbPos.symbol, pnl, pnlPct }, 'Position auto-reconciled');
         }
       }
 

@@ -3,9 +3,6 @@ import type { OHLCVCandle } from '../../data/yahoo-finance.js';
 import { createLogger } from '../../utils/logger.js';
 import {
   type BollingerResult,
-  type MACDResult,
-  type StochasticResult,
-  type SupportResistance,
   calcADX,
   calcATR,
   calcBollingerBands,
@@ -21,9 +18,12 @@ import {
   calcSMA,
   calcStochastic,
   calcSupportResistance,
-  calcVWAP,
   calcVolumeRatio,
+  calcVWAP,
   calcWilliamsR,
+  type MACDResult,
+  type StochasticResult,
+  type SupportResistance,
 } from './indicators.js';
 
 const log = createLogger('technical-scorer');

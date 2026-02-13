@@ -1,6 +1,6 @@
-import { and, desc, eq, isNull } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { getDb } from '../db/index.js';
-import { modelPerformance, signals } from '../db/schema.js';
+import { modelPerformance } from '../db/schema.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('model-tracker');
@@ -10,6 +10,7 @@ export interface ModelStats {
   totalPredictions: number;
   correctPredictions: number;
   accuracy: number;
+  convictionWeightedAccuracy: number;
   avgConviction: number;
   buyAccuracy: number;
   sellAccuracy: number;
@@ -70,11 +71,11 @@ export class ModelTracker {
         const currentPrice = quote.price;
         const returnPct = (currentPrice - pred.priceAtSignal) / pred.priceAtSignal;
 
-        // Determine if prediction was correct
+        // Determine if prediction was correct (require meaningful moves)
         let outcome: 'correct' | 'incorrect' = 'incorrect';
-        if (pred.decision === 'BUY' && returnPct > 0) outcome = 'correct';
-        else if (pred.decision === 'SELL' && returnPct < 0) outcome = 'correct';
-        else if (pred.decision === 'HOLD' && Math.abs(returnPct) < 0.02) outcome = 'correct';
+        if (pred.decision === 'BUY' && returnPct > 0.01) outcome = 'correct';
+        else if (pred.decision === 'SELL' && returnPct < -0.01) outcome = 'correct';
+        else if (pred.decision === 'HOLD' && Math.abs(returnPct) < 0.01) outcome = 'correct';
 
         const updates: Record<string, string | number | null> = {
           actualOutcome: outcome,
@@ -118,11 +119,15 @@ export class ModelTracker {
       const sells = evaluated.filter((r) => r.decision === 'SELL');
       const holds = evaluated.filter((r) => r.decision === 'HOLD');
 
+      const weightedCorrect = correct.reduce((sum, r) => sum + r.conviction, 0);
+      const totalConviction = evaluated.reduce((sum, r) => sum + r.conviction, 0);
+
       stats.push({
         model,
         totalPredictions: rows.length,
         correctPredictions: correct.length,
         accuracy: evaluated.length > 0 ? correct.length / evaluated.length : 0,
+        convictionWeightedAccuracy: totalConviction > 0 ? weightedCorrect / totalConviction : 0,
         avgConviction: rows.reduce((s, r) => s + r.conviction, 0) / rows.length,
         buyAccuracy:
           buys.length > 0

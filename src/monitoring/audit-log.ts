@@ -1,6 +1,7 @@
-import { and, desc, eq, gte } from 'drizzle-orm';
+import { desc, eq, gte } from 'drizzle-orm';
 import { getDb } from '../db/index.js';
 import { auditLog } from '../db/schema.js';
+import { safeJsonParse } from '../utils/helpers.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('audit-log');
@@ -198,7 +199,7 @@ export class AuditLogger {
       category: row.category as AuditCategory,
       symbol: row.symbol,
       summary: row.summary,
-      details: row.details ? JSON.parse(row.details) : null,
+      details: row.details ? safeJsonParse<Record<string, unknown>>(row.details, {}) : null,
       severity: row.severity as AuditSeverity,
     };
   }

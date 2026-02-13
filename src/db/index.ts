@@ -1,6 +1,4 @@
 import { createRequire } from 'node:module';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { createLogger } from '../utils/logger.js';
 import * as schema from './schema.js';

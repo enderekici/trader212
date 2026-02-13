@@ -15,10 +15,12 @@ import type {
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
 async function fetchApi<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = process.env.NEXT_PUBLIC_API_SECRET_KEY || '';
   const res = await fetch(`${BASE_URL}${path}`, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...init?.headers,
     },
   });

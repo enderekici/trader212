@@ -52,9 +52,9 @@ vi.mock('../../src/db/schema.js', () => ({
 // Yahoo Finance mock
 const mockGetQuote = vi.fn();
 vi.mock('../../src/data/yahoo-finance.js', () => ({
-  YahooFinanceClient: vi.fn().mockImplementation(() => ({
-    getQuote: mockGetQuote,
-  })),
+  YahooFinanceClient: vi.fn().mockImplementation(function () {
+    return { getQuote: mockGetQuote };
+  }),
 }));
 
 // ── Import SUT ──────────────────────────────────────────────────────────────

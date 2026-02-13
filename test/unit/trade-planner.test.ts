@@ -18,6 +18,8 @@ vi.mock('../../src/utils/logger.js', () => ({
 vi.mock('drizzle-orm', () => ({
   eq: vi.fn(),
   desc: vi.fn(),
+  and: vi.fn(),
+  lte: vi.fn(),
 }));
 
 // DB mock

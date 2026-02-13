@@ -1,12 +1,5 @@
-import { configManager } from '../config/manager.js';
 import { createLogger } from '../utils/logger.js';
-import type {
-  EarningsEvent,
-  FinnhubClient,
-  FinnhubNews,
-  FinnhubQuote,
-  InsiderTx,
-} from './finnhub.js';
+import type { EarningsEvent, FinnhubClient, FinnhubNews, InsiderTx } from './finnhub.js';
 import type { MarketauxArticle, MarketauxClient } from './marketaux.js';
 import type {
   FundamentalData,

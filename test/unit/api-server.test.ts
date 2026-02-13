@@ -62,10 +62,19 @@ class MockWSManager {
 let mockWsManagerInstance: MockWSManager;
 
 vi.mock('../../src/api/websocket.js', () => ({
-  WebSocketManager: vi.fn().mockImplementation(() => {
+  WebSocketManager: vi.fn().mockImplementation(function () {
     mockWsManagerInstance = new MockWSManager();
     return mockWsManagerInstance;
   }),
+}));
+
+vi.mock('express-rate-limit', () => ({
+  default: vi.fn(() => 'rate-limit-middleware'),
+  __esModule: true,
+}));
+
+vi.mock('../../src/api/middleware/auth.js', () => ({
+  authMiddleware: vi.fn((_req: any, _res: any, next: any) => next()),
 }));
 
 describe('api/server', () => {

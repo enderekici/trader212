@@ -1,4 +1,5 @@
 import { configManager } from '../config/manager.js';
+import type { PairlistFilter } from './filters.js';
 import {
   BlacklistFilter,
   MarketCapFilter,
@@ -7,7 +8,6 @@ import {
   VolatilityFilter,
   VolumeFilter,
 } from './filters.js';
-import type { PairlistFilter } from './filters.js';
 import { PairlistPipeline } from './pipeline.js';
 
 const filterMap: Record<string, () => PairlistFilter> = {
@@ -35,13 +35,13 @@ export function createPairlistPipeline(): PairlistPipeline {
   return new PairlistPipeline(filters);
 }
 
-export { PairlistPipeline } from './pipeline.js';
-export type { StockInfo, PairlistFilter } from './filters.js';
+export type { PairlistFilter, StockInfo } from './filters.js';
 export {
-  VolumeFilter,
-  PriceFilter,
-  MarketCapFilter,
-  VolatilityFilter,
   BlacklistFilter,
+  MarketCapFilter,
   MaxPairsFilter,
+  PriceFilter,
+  VolatilityFilter,
+  VolumeFilter,
 } from './filters.js';
+export { PairlistPipeline } from './pipeline.js';

@@ -10,6 +10,7 @@ export interface PortfolioState {
   todayPnl: number;
   todayPnlPct: number;
   sectorExposure: Record<string, number>;
+  sectorExposureValue: Record<string, number>;
   peakValue: number;
 }
 
@@ -63,6 +64,14 @@ export class RiskGuard {
         const sectorCount = portfolio.sectorExposure[proposal.sector] ?? 0;
         if (sectorCount >= maxSectorConcentration) {
           const reason = `Sector '${proposal.sector}' already has ${sectorCount}/${maxSectorConcentration} positions`;
+          log.warn({ symbol: proposal.symbol, reason }, 'Trade rejected');
+          return { allowed: false, reason };
+        }
+
+        const sectorValuePct = portfolio.sectorExposureValue[proposal.sector] ?? 0;
+        const maxSectorValuePct = configManager.get<number>('risk.maxSectorValuePct');
+        if (sectorValuePct >= maxSectorValuePct) {
+          const reason = `Sector '${proposal.sector}' value ${(sectorValuePct * 100).toFixed(1)}% exceeds max ${(maxSectorValuePct * 100).toFixed(1)}%`;
           log.warn({ symbol: proposal.symbol, reason }, 'Trade rejected');
           return { allowed: false, reason };
         }

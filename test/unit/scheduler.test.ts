@@ -56,7 +56,7 @@ describe('Scheduler', () => {
       expect(mockSchedule).toHaveBeenCalledWith(
         '*/5 * * * *',
         expect.any(Function),
-        { scheduled: true, timezone: 'America/New_York' },
+        { timezone: 'America/New_York' },
       );
     });
 

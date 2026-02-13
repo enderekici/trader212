@@ -60,12 +60,22 @@ Respond ONLY with valid JSON matching the exact schema provided. No additional t
     .map(([sector, count]) => `  - ${sector}: ${count} position(s)`)
     .join('\n');
 
-  const historicalSignals = context.historicalSignals
-    .map(
-      (sig) =>
-        `  [${sig.timestamp}] Tech: ${sig.technicalScore.toFixed(0)} | Sent: ${sig.sentimentScore.toFixed(0)} | Fund: ${sig.fundamentalScore.toFixed(0)} | Decision: ${sig.decision} | RSI: ${fmt(sig.rsi)} | MACD-H: ${fmt(sig.macdHistogram)}`,
-    )
-    .join('\n');
+  const historicalSignals =
+    context.historicalSignals.length > 0
+      ? context.historicalSignals
+          .slice(0, 3) // Limit to reduce anchoring
+          .map(
+            (sig) =>
+              `  [${sig.timestamp}] Tech: ${sig.technicalScore.toFixed(0)} | Sent: ${sig.sentimentScore.toFixed(0)} | Fund: ${sig.fundamentalScore.toFixed(0)} | RSI: ${fmt(sig.rsi)} | MACD-H: ${fmt(sig.macdHistogram)}`,
+          )
+          .join('\n')
+      : '';
+
+  const correlationWarnings = context.correlationWarnings ?? [];
+  const correlationSection =
+    correlationWarnings.length > 0
+      ? `\nCORRELATION WARNINGS:\n${correlationWarnings.map((w) => `- ${w}`).join('\n')}\nNote: High correlation with existing positions increases portfolio risk.\n`
+      : '';
 
   const user = `=== CURRENT ANALYSIS FOR ${context.symbol} ===
 
@@ -133,7 +143,7 @@ PORTFOLIO STATE:
 ${sectorExposure || '  (none)'}
 - Existing Positions:
 ${positions || '  (none)'}
-
+${correlationSection}
 RISK CONSTRAINTS:
 - Max Position Size: ${fmtPct(r.maxPositionSizePct)} of portfolio
 - Stop-Loss Range: ${fmtPct(r.minStopLossPct)} to ${fmtPct(r.maxStopLossPct)}

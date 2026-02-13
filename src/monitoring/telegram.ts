@@ -16,12 +16,10 @@ export interface TelegramCommandHandlers {
 export class TelegramNotifier {
   private bot: TelegramBot | null = null;
   private chatId: string | null;
-  private enabled: boolean;
 
   constructor() {
     const token = process.env.TELEGRAM_BOT_TOKEN;
     this.chatId = process.env.TELEGRAM_CHAT_ID ?? null;
-    this.enabled = !!token && !!this.chatId;
 
     if (!token) {
       log.warn('TELEGRAM_BOT_TOKEN not set — Telegram notifications disabled');

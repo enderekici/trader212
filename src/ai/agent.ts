@@ -99,6 +99,7 @@ export interface AIContext {
     maxRiskPerTradePct: number;
     dailyLossLimitPct: number;
   };
+  correlationWarnings?: string[];
 }
 
 export interface AIDecision {

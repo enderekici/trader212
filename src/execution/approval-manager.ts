@@ -7,7 +7,6 @@ const log = createLogger('approval-manager');
 export type ApprovalCallback = (planId: number, approved: boolean) => void;
 
 export class ApprovalManager {
-  private pendingCallbacks: Map<number, ApprovalCallback> = new Map();
   private tradePlanner: TradePlanner;
 
   constructor(tradePlanner: TradePlanner) {

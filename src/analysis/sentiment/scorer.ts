@@ -25,7 +25,8 @@ export interface SentimentAnalysis {
   score: number;
 }
 
-const BULLISH_KEYWORDS = [
+// Pre-compiled word-boundary regex patterns to avoid partial matches (e.g. "bull" in "bulletin")
+const BULLISH_PATTERNS = [
   'upgrade',
   'beat',
   'exceeds',
@@ -48,9 +49,9 @@ const BULLISH_KEYWORDS = [
   'gains',
   'optimistic',
   'expansion',
-];
+].map((kw) => new RegExp(`\\b${kw}\\b`, 'i'));
 
-const BEARISH_KEYWORDS = [
+const BEARISH_PATTERNS = [
   'downgrade',
   'miss',
   'decline',
@@ -73,7 +74,7 @@ const BEARISH_KEYWORDS = [
   'risk',
   'pessimistic',
   'contraction',
-];
+].map((kw) => new RegExp(`\\b${kw}\\b`, 'i'));
 
 export function scoreSentiment(input: SentimentInput): number {
   const analysis = analyzeSentiment(input);
@@ -176,15 +177,14 @@ function computeRecencyWeight(ageMs: number): number {
 }
 
 function keywordScore(text: string): number {
-  const lower = text.toLowerCase();
   let bullish = 0;
   let bearish = 0;
 
-  for (const kw of BULLISH_KEYWORDS) {
-    if (lower.includes(kw)) bullish++;
+  for (const pattern of BULLISH_PATTERNS) {
+    if (pattern.test(text)) bullish++;
   }
-  for (const kw of BEARISH_KEYWORDS) {
-    if (lower.includes(kw)) bearish++;
+  for (const pattern of BEARISH_PATTERNS) {
+    if (pattern.test(text)) bearish++;
   }
 
   const total = bullish + bearish;

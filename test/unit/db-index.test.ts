@@ -7,7 +7,7 @@ const mockSqliteInstance = {
   exec: mockExec,
   pragma: mockPragma,
 };
-const MockDatabase = vi.fn(() => mockSqliteInstance);
+const MockDatabase = vi.fn(function () { return mockSqliteInstance; });
 
 vi.mock('node:module', () => ({
   createRequire: () => () => MockDatabase,

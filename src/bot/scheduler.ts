@@ -13,6 +13,11 @@ interface ScheduledJob {
 
 export class Scheduler {
   private jobs: ScheduledJob[] = [];
+  private onJobFailureCb?: (jobName: string, error: unknown) => void;
+
+  setOnJobFailure(cb: (jobName: string, error: unknown) => void): void {
+    this.onJobFailureCb = cb;
+  }
 
   registerJob(
     name: string,
@@ -30,11 +35,17 @@ export class Scheduler {
         await handler();
       } catch (err) {
         log.error({ job: name, err }, 'Scheduled job failed');
+        if (this.onJobFailureCb) {
+          try {
+            this.onJobFailureCb(name, err);
+          } catch {
+            /* ignore callback errors */
+          }
+        }
       }
     };
 
     const task = cron.schedule(cronExpression, wrappedHandler, {
-      scheduled: true,
       timezone: 'America/New_York',
     });
 
@@ -43,7 +54,7 @@ export class Scheduler {
   }
 
   start(): void {
-    // Jobs auto-start on register via scheduled: true
+    // Jobs auto-start on register in node-cron 4
     log.info({ jobCount: this.jobs.length }, 'Scheduler running');
   }
 

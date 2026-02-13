@@ -101,9 +101,9 @@ vi.mock('../../src/monitoring/audit-log.js', () => ({
 const mockCorrelationMatrix = { symbols: ['AAPL'], matrix: [[1]] };
 
 vi.mock('../../src/analysis/correlation.js', () => ({
-  CorrelationAnalyzer: vi.fn().mockImplementation(() => ({
-    getPortfolioCorrelationMatrix: () => mockCorrelationMatrix,
-  })),
+  CorrelationAnalyzer: vi.fn().mockImplementation(function () {
+    return { getPortfolioCorrelationMatrix: () => mockCorrelationMatrix };
+  }),
 }));
 
 // ── Helpers ─────────────────────────────────────────────────────────────
@@ -1453,7 +1453,7 @@ describe('api/routes', () => {
       expect(res.json).toHaveBeenCalledWith({ report: { result: 'data' } });
     });
 
-    it('handles null body', async () => {
+    it('handles null body with validation error', async () => {
       const { registerBotCallbacks } = await import('../../src/api/routes.js');
       const runResearch = vi.fn().mockResolvedValue(null);
       registerBotCallbacks({
@@ -1476,7 +1476,8 @@ describe('api/routes', () => {
       const res = mockRes();
       await handler(mockReq({ body: null }), res);
 
-      expect(runResearch).toHaveBeenCalledWith({ focus: undefined, symbols: undefined });
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ error: expect.any(String) }));
     });
 
     it('handles errors', async () => {

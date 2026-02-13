@@ -4,13 +4,13 @@ import type { DataAggregator, StockData } from '../data/data-aggregator.js';
 import { getDb } from '../db/index.js';
 import * as dbSchema from '../db/schema.js';
 import { createLogger } from '../utils/logger.js';
-import { type FundamentalAnalysis, analyzeFundamentals } from './fundamental/scorer.js';
+import { analyzeFundamentals, type FundamentalAnalysis } from './fundamental/scorer.js';
 import {
+  analyzeSentiment,
   type SentimentAnalysis,
   type SentimentInput,
-  analyzeSentiment,
 } from './sentiment/scorer.js';
-import { type TechnicalAnalysis, analyzeTechnicals } from './technical/scorer.js';
+import { analyzeTechnicals, type TechnicalAnalysis } from './technical/scorer.js';
 
 const log = createLogger('analyzer');
 

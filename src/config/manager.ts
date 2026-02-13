@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { getDb } from '../db/index.js';
 import { config } from '../db/schema.js';
+import { safeJsonParse } from '../utils/helpers.js';
 import { createLogger } from '../utils/logger.js';
 import { CONFIG_DEFAULTS } from './defaults.js';
 
@@ -41,9 +42,13 @@ export class ConfigManager {
     const db = getDb();
     const row = db.select().from(config).where(eq(config.key, key)).get();
     if (row) {
-      const parsed = JSON.parse(row.value);
-      this.cache.set(key, { value: parsed, expiresAt: Date.now() + this.cacheTTL });
-      return parsed as T;
+      try {
+        const parsed = JSON.parse(row.value);
+        this.cache.set(key, { value: parsed, expiresAt: Date.now() + this.cacheTTL });
+        return parsed as T;
+      } catch (err) {
+        log.error({ key, err }, 'Failed to parse config value, falling back to default');
+      }
     }
 
     const def = CONFIG_DEFAULTS.find((d) => d.key === key);
@@ -86,7 +91,7 @@ export class ConfigManager {
     const rows = db.select().from(config).all();
     const result: Record<string, unknown> = {};
     for (const row of rows) {
-      result[row.key] = JSON.parse(row.value);
+      result[row.key] = safeJsonParse(row.value, row.value);
     }
     return result;
   }
@@ -96,7 +101,7 @@ export class ConfigManager {
     const rows = db.select().from(config).where(eq(config.category, category)).all();
     const result: Record<string, unknown> = {};
     for (const row of rows) {
-      result[row.key] = JSON.parse(row.value);
+      result[row.key] = safeJsonParse(row.value, row.value);
     }
     return result;
   }

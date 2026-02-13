@@ -286,7 +286,7 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
   { key: 'ai.timeoutSeconds', value: '60', category: 'ai', description: 'AI call timeout' },
   {
     key: 'ai.includeHistoricalSignals',
-    value: 'true',
+    value: 'false',
     category: 'ai',
     description: 'Include historical signals in prompt',
   },
@@ -341,6 +341,18 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
     value: '3',
     category: 'risk',
     description: 'Max positions per sector',
+  },
+  {
+    key: 'risk.maxDailyTrades',
+    value: '10',
+    category: 'risk',
+    description: 'Max trades per day (overtrading protection)',
+  },
+  {
+    key: 'risk.maxSectorValuePct',
+    value: '0.35',
+    category: 'risk',
+    description: 'Max sector exposure as % of portfolio value',
   },
 
   // Execution

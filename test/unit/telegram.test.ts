@@ -7,11 +7,13 @@ const mockStopPolling = vi.fn();
 
 vi.mock('node-telegram-bot-api', () => {
   return {
-    default: vi.fn().mockImplementation(() => ({
-      sendMessage: mockSendMessage,
-      onText: mockOnText,
-      stopPolling: mockStopPolling,
-    })),
+    default: vi.fn().mockImplementation(function () {
+      return {
+        sendMessage: mockSendMessage,
+        onText: mockOnText,
+        stopPolling: mockStopPolling,
+      };
+    }),
   };
 });
 

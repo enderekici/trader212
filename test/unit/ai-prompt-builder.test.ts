@@ -221,7 +221,6 @@ describe('buildAnalysisPrompt', () => {
       const { user } = buildAnalysisPrompt(makeFullContext());
       expect(user).toContain('[2024-01-15T10:00:00Z]');
       expect(user).toContain('Tech: 70');
-      expect(user).toContain('Decision: BUY');
       expect(user).toContain('RSI: 45.00');
       expect(user).toContain('MACD-H: 0.15');
     });

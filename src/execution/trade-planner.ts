@@ -1,8 +1,8 @@
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq, lte } from 'drizzle-orm';
 import type { AIDecision } from '../ai/agent.js';
 import { configManager } from '../config/manager.js';
 import { getDb } from '../db/index.js';
-import { positions, tradePlans } from '../db/schema.js';
+import { tradePlans } from '../db/schema.js';
 import { createLogger } from '../utils/logger.js';
 import type { PortfolioState } from './risk-guard.js';
 
@@ -163,13 +163,12 @@ export class TradePlanner {
 
   expireOldPlans(): number {
     const db = getDb();
-    const _now = new Date().toISOString();
+    const now = new Date().toISOString();
     const result = db
       .update(tradePlans)
       .set({ status: 'expired' })
-      .where(eq(tradePlans.status, 'pending'))
+      .where(and(eq(tradePlans.status, 'pending'), lte(tradePlans.expiresAt, now)))
       .run();
-    // Note: ideally filter by expiresAt < now, but drizzle's lt with text comparison works for ISO dates
     return result.changes;
   }
 

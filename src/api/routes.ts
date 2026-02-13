@@ -1,12 +1,33 @@
 import { and, desc, eq, gte, lte, sql } from 'drizzle-orm';
 import { Router } from 'express';
+import { z } from 'zod';
 import { CorrelationAnalyzer } from '../analysis/correlation.js';
 import { configManager } from '../config/manager.js';
 import { getDb } from '../db/index.js';
 import * as schema from '../db/schema.js';
 import { getAuditLogger } from '../monitoring/audit-log.js';
+import { safeJsonParse } from '../utils/helpers.js';
 import { createLogger } from '../utils/logger.js';
 import { getMarketTimes } from '../utils/market-hours.js';
+
+const configUpdateSchema = z.object({
+  value: z.unknown().refine((v) => v !== undefined, 'Missing "value" in request body'),
+});
+
+const staticSymbolSchema = z.object({
+  symbol: z
+    .string()
+    .min(1)
+    .max(10)
+    .regex(/^[A-Za-z.]+$/, 'Invalid symbol format'),
+});
+
+const researchRunSchema = z
+  .object({
+    focus: z.string().max(500).optional(),
+    symbols: z.array(z.string().min(1).max(10)).max(20).optional(),
+  })
+  .optional();
 
 const log = createLogger('api-routes');
 
@@ -323,7 +344,7 @@ export function createRouter(): Router {
         return;
       }
 
-      const stocks = JSON.parse(latest.symbols);
+      const stocks = safeJsonParse(latest.symbols, []);
       res.json({ stocks, lastRefreshed: latest.timestamp });
     } catch (err) {
       log.error({ err }, 'Error fetching pairlist');
@@ -344,8 +365,8 @@ export function createRouter(): Router {
 
       const parsed = rows.map((r) => ({
         ...r,
-        symbols: JSON.parse(r.symbols),
-        filterStats: r.filterStats ? JSON.parse(r.filterStats) : null,
+        symbols: safeJsonParse(r.symbols, []),
+        filterStats: r.filterStats ? safeJsonParse(r.filterStats, null) : null,
       }));
 
       res.json({ history: parsed });
@@ -432,7 +453,7 @@ export function createRouter(): Router {
         if (!grouped[row.category]) grouped[row.category] = [];
         grouped[row.category].push({
           key: row.key,
-          value: JSON.parse(row.value),
+          value: safeJsonParse(row.value, row.value),
           description: row.description,
         });
       }
@@ -459,12 +480,12 @@ export function createRouter(): Router {
   router.put('/api/config/:key', async (req, res) => {
     try {
       const { key } = req.params;
-      const { value } = req.body;
-
-      if (value === undefined) {
-        res.status(400).json({ error: 'Missing "value" in request body' });
+      const parsed = configUpdateSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Invalid request body' });
         return;
       }
+      const { value } = parsed.data;
 
       await configManager.set(key, value);
       configManager.invalidateCache(key);
@@ -600,7 +621,12 @@ export function createRouter(): Router {
 
   router.post('/api/research/run', async (req, res) => {
     try {
-      const { focus, symbols } = req.body ?? {};
+      const parsed = researchRunSchema.safeParse(req.body);
+      if (parsed.success === false) {
+        res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Invalid request body' });
+        return;
+      }
+      const { focus, symbols } = parsed.data ?? {};
       const report = await callbacks.runResearch({ focus, symbols });
       res.json({ report });
     } catch (err) {
@@ -623,11 +649,12 @@ export function createRouter(): Router {
   // ── Pairlist: Static symbols management ───────────────────────────
   router.post('/api/pairlist/static', (req, res) => {
     try {
-      const { symbol } = req.body;
-      if (!symbol || typeof symbol !== 'string') {
-        res.status(400).json({ error: 'Missing symbol' });
+      const parsed = staticSymbolSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Invalid symbol' });
         return;
       }
+      const { symbol } = parsed.data;
       const current = configManager.get<string[]>('pairlist.staticSymbols');
       const upper = symbol.toUpperCase();
       if (!current.includes(upper)) {

@@ -1,6 +1,6 @@
 import axios, { type AxiosInstance } from 'axios';
 import { configManager } from '../config/manager.js';
-import { type KeyRotator, createMarketauxRotator } from '../utils/key-rotator.js';
+import { createMarketauxRotator, type KeyRotator } from '../utils/key-rotator.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('marketaux');

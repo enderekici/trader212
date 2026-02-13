@@ -26,6 +26,7 @@ function makePortfolio(overrides: Partial<PortfolioState> = {}): PortfolioState 
     todayPnl: 0,
     todayPnlPct: 0,
     sectorExposure: {},
+    sectorExposureValue: {},
     peakValue: 50000,
     ...overrides,
   };

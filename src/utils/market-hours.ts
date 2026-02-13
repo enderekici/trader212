@@ -1,6 +1,6 @@
 import {
-  getNYSECloseMinutes,
   getNextTradingDay,
+  getNYSECloseMinutes,
   isNYSEEarlyClose,
   isNYSEHoliday,
 } from './holidays.js';

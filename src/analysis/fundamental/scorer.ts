@@ -1,7 +1,47 @@
+import { and, desc, eq, gt, isNotNull } from 'drizzle-orm';
 import type { FundamentalData } from '../../data/yahoo-finance.js';
+import { getDb } from '../../db/index.js';
+import { fundamentalCache } from '../../db/schema.js';
 import { createLogger } from '../../utils/logger.js';
 
 const log = createLogger('fundamental-scorer');
+
+/** Get sector median P/E from fundamental_cache (only valid P/E > 0) */
+function getSectorMedianPE(sector: string | null): number | null {
+  if (!sector) return null;
+  try {
+    const db = getDb();
+    // Get the latest P/E for each symbol in this sector
+    const rows = db
+      .selectDistinct({ symbol: fundamentalCache.symbol, peRatio: fundamentalCache.peRatio })
+      .from(fundamentalCache)
+      .where(
+        and(
+          eq(fundamentalCache.sector, sector),
+          isNotNull(fundamentalCache.peRatio),
+          gt(fundamentalCache.peRatio, 0),
+        ),
+      )
+      .orderBy(desc(fundamentalCache.fetchedAt))
+      .all();
+
+    // Deduplicate by symbol (keep most recent)
+    const bySymbol = new Map<string, number>();
+    for (const row of rows) {
+      if (!bySymbol.has(row.symbol) && row.peRatio != null) {
+        bySymbol.set(row.symbol, row.peRatio);
+      }
+    }
+
+    const peValues = [...bySymbol.values()].sort((a, b) => a - b);
+    if (peValues.length < 3) return null; // Not enough data for meaningful median
+
+    const mid = Math.floor(peValues.length / 2);
+    return peValues.length % 2 === 0 ? (peValues[mid - 1] + peValues[mid]) / 2 : peValues[mid];
+  } catch {
+    return null;
+  }
+}
 
 export interface FundamentalAnalysis {
   peRatio: number | null;
@@ -33,16 +73,30 @@ export function analyzeFundamentals(data: FundamentalData): FundamentalAnalysis 
     weightedSum += signal * weight;
   };
 
-  // P/E Ratio (weight 15)
+  // P/E Ratio (weight 15) — sector-relative when possible
   if (data.peRatio != null && data.peRatio > 0) {
+    const sectorMedianPE = getSectorMedianPE(data.sector);
     let peSignal: number;
-    if (data.peRatio < 10) peSignal = 85;
-    else if (data.peRatio < 15) peSignal = 75;
-    else if (data.peRatio < 20) peSignal = 65;
-    else if (data.peRatio < 25) peSignal = 55;
-    else if (data.peRatio < 35) peSignal = 40;
-    else if (data.peRatio < 50) peSignal = 25;
-    else peSignal = 15;
+    if (sectorMedianPE != null) {
+      // Score relative to sector median
+      const ratio = data.peRatio / sectorMedianPE;
+      if (ratio < 0.5) peSignal = 85;
+      else if (ratio < 0.75) peSignal = 75;
+      else if (ratio < 1.0) peSignal = 65;
+      else if (ratio < 1.25) peSignal = 55;
+      else if (ratio < 1.75) peSignal = 40;
+      else if (ratio < 2.5) peSignal = 25;
+      else peSignal = 15;
+    } else {
+      // Absolute fallback (< 3 sector data points)
+      if (data.peRatio < 10) peSignal = 85;
+      else if (data.peRatio < 15) peSignal = 75;
+      else if (data.peRatio < 20) peSignal = 65;
+      else if (data.peRatio < 25) peSignal = 55;
+      else if (data.peRatio < 35) peSignal = 40;
+      else if (data.peRatio < 50) peSignal = 25;
+      else peSignal = 15;
+    }
     add(peSignal, 15);
   }
 

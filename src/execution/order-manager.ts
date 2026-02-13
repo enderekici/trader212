@@ -157,7 +157,23 @@ export class OrderManager {
           'Stop-loss order placed',
         );
       } catch (err) {
-        log.error({ symbol: params.symbol, err }, 'Failed to place stop-loss order');
+        log.error(
+          { symbol: params.symbol, err },
+          'Failed to place stop-loss — closing unprotected position',
+        );
+        try {
+          await client.placeMarketOrder({
+            ticker: params.t212Ticker,
+            quantity: params.shares,
+            timeValidity: 'DAY',
+          });
+          log.warn({ symbol: params.symbol }, 'Position closed after stop-loss failure');
+        } catch (closeErr) {
+          log.fatal(
+            { symbol: params.symbol, closeErr },
+            'FATAL: Cannot close unprotected position — MANUAL INTERVENTION REQUIRED',
+          );
+        }
       }
 
       // Record trade
@@ -388,7 +404,29 @@ export class OrderManager {
       await sleep(500);
     }
 
-    log.error({ orderId, timeoutSecs }, 'Order fill timed out');
+    // Timeout — attempt to cancel the order
+    log.warn({ orderId, timeoutSecs }, 'Order fill timed out — attempting cancel');
+    try {
+      await client.cancelOrder(orderId);
+      log.info({ orderId }, 'Timed-out order cancelled');
+    } catch (cancelErr) {
+      // Cancel failed — order may have filled in the meantime
+      log.warn({ orderId, cancelErr }, 'Cancel failed — checking final status');
+      try {
+        const finalOrder: Order = await client.getOrder(orderId);
+        if (finalOrder.status === 'FILLED') {
+          if (
+            finalOrder.filledValue != null &&
+            finalOrder.filledQuantity != null &&
+            finalOrder.filledQuantity > 0
+          ) {
+            return finalOrder.filledValue / finalOrder.filledQuantity;
+          }
+        }
+      } catch (statusErr) {
+        log.error({ orderId, statusErr }, 'Failed to check final order status');
+      }
+    }
     return null;
   }
 }

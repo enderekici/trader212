@@ -1,7 +1,7 @@
 import axios, { type AxiosInstance } from 'axios';
 import { configManager } from '../config/manager.js';
 import { sleep } from '../utils/helpers.js';
-import { type KeyRotator, createFinnhubRotator } from '../utils/key-rotator.js';
+import { createFinnhubRotator, type KeyRotator } from '../utils/key-rotator.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('finnhub');

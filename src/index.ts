@@ -1,9 +1,4 @@
 import 'dotenv/config';
-import { configManager } from './config/manager.js';
-import { initDatabase } from './db/index.js';
-import { formatCurrency, formatPercent } from './utils/helpers.js';
-import { createLogger } from './utils/logger.js';
-import { getMarketStatus, isUSMarketOpen } from './utils/market-hours.js';
 
 import { desc, eq } from 'drizzle-orm';
 import { type AIAgent, type AIContext, type AIDecision, createAIAgent } from './ai/agent.js';
@@ -11,18 +6,19 @@ import { MarketResearcher } from './ai/market-research.js';
 import { CorrelationAnalyzer } from './analysis/correlation.js';
 import { scoreFundamentals } from './analysis/fundamental/scorer.js';
 import { type SentimentInput, scoreSentiment } from './analysis/sentiment/scorer.js';
-import { analyzeTechnicals, scoreTechnicals } from './analysis/technical/scorer.js';
+import { analyzeTechnicals } from './analysis/technical/scorer.js';
 import { registerBotCallbacks } from './api/routes.js';
 import { ApiServer } from './api/server.js';
 import { Trading212Client } from './api/trading212/client.js';
 import type { WebSocketManager } from './api/websocket.js';
-import { Scheduler, minutesToWeekdayCron, timeToCron } from './bot/scheduler.js';
+import { minutesToWeekdayCron, Scheduler, timeToCron } from './bot/scheduler.js';
+import { configManager } from './config/manager.js';
 import { DataAggregator, type StockData } from './data/data-aggregator.js';
 import { FinnhubClient } from './data/finnhub.js';
 import { MarketauxClient } from './data/marketaux.js';
 import { TickerMapper } from './data/ticker-mapper.js';
 import { YahooFinanceClient } from './data/yahoo-finance.js';
-import { getDb } from './db/index.js';
+import { getDb, initDatabase } from './db/index.js';
 import * as schema from './db/schema.js';
 import { ApprovalManager } from './execution/approval-manager.js';
 import { type BuyParams, type CloseParams, OrderManager } from './execution/order-manager.js';
@@ -36,6 +32,9 @@ import { TelegramNotifier } from './monitoring/telegram.js';
 import type { StockInfo } from './pairlist/filters.js';
 import { createPairlistPipeline } from './pairlist/index.js';
 import type { PairlistPipeline } from './pairlist/pipeline.js';
+import { formatCurrency, formatPercent } from './utils/helpers.js';
+import { createLogger } from './utils/logger.js';
+import { getMarketStatus, isUSMarketOpen } from './utils/market-hours.js';
 
 const log = createLogger('bot');
 
@@ -62,6 +61,7 @@ class TradingBot {
   private paused = false;
   private startedAt = '';
   private activeStocks: StockInfo[] = [];
+  private lastKnownPortfolio: { cash: number; value: number; timestamp: string } | null = null;
 
   async start(): Promise<void> {
     log.info('Starting Trading Bot...');
@@ -222,6 +222,16 @@ class TradingBot {
 
     // 13. Scheduler
     this.scheduler = new Scheduler();
+    this.scheduler.setOnJobFailure((jobName, error) => {
+      const criticalJobs = ['positionMonitor', 'analysisLoop', 't212Sync', 'expirePlans'];
+      if (criticalJobs.includes(jobName)) {
+        this.telegram
+          .sendAlert('Job Failed', `Critical job '${jobName}' failed: ${error}`)
+          .catch(() => {
+            /* swallow telegram failures */
+          });
+      }
+    });
 
     const pairlistMinutes = configManager.get<number>('pairlist.refreshMinutes');
     const analysisMinutes = configManager.get<number>('analysis.intervalMinutes');
@@ -343,6 +353,24 @@ class TradingBot {
   }
 
   async stop(): Promise<void> {
+    log.info('Shutting down — cancelling pending orders...');
+    try {
+      const orders = await this.t212Client.getOrders();
+      const pending = orders.filter((o) => o.status === 'NEW' || o.status === 'PARTIALLY_FILLED');
+      for (const order of pending) {
+        try {
+          await this.t212Client.cancelOrder(order.id);
+          log.info({ orderId: order.id }, 'Cancelled pending order during shutdown');
+        } catch (err) {
+          log.error({ orderId: order.id, err }, 'Failed to cancel order during shutdown');
+        }
+      }
+      if (pending.length > 0) {
+        log.info({ count: pending.length }, 'Pending orders cancelled');
+      }
+    } catch (err) {
+      log.error({ err }, 'Failed to cancel orders during shutdown');
+    }
     this.scheduler.stop();
     await this.apiServer.stop();
     this.telegram.stop();
@@ -553,6 +581,20 @@ class TradingBot {
     const price = data.quote?.price ?? 0;
     const audit = getAuditLogger();
 
+    // Overtrading protection
+    const maxDailyTrades = configManager.get<number>('risk.maxDailyTrades');
+    const todayStr = new Date().toISOString().split('T')[0];
+    const todayTradeCount = getDb()
+      .select()
+      .from(schema.trades)
+      .all()
+      .filter((t) => t.entryTime.startsWith(todayStr)).length;
+    if (todayTradeCount >= maxDailyTrades) {
+      log.warn({ todayTradeCount, maxDailyTrades }, 'Daily trade limit reached');
+      audit.logRisk(`Daily trade limit: ${todayTradeCount}/${maxDailyTrades}`);
+      return;
+    }
+
     // Record AI prediction for model tracking
     this.modelTracker.recordPrediction({
       aiModel: configManager.get<string>('ai.model'),
@@ -575,6 +617,7 @@ class TradingBot {
           `${symbol} highly correlated with ${highCorr.map((c) => c.symbol2).join(', ')}`,
           { correlations: highCorr },
         );
+        return; // Hard block: don't trade highly correlated positions
       }
     }
 
@@ -1074,24 +1117,51 @@ class TradingBot {
         .all()
         .filter((t) => t.entryTime.startsWith(today) && t.exitPrice != null);
 
-      const todayPnl = todayTrades.reduce((sum: number, t) => sum + (t.pnl ?? 0), 0);
+      const closedTradePnl = todayTrades.reduce((sum: number, t) => sum + (t.pnl ?? 0), 0);
+
+      // Include unrealized P&L from open positions
+      const unrealizedPnl = allPositions.reduce(
+        (sum: number, p) => sum + ((p.currentPrice ?? p.entryPrice) - p.entryPrice) * p.shares,
+        0,
+      );
+      const todayPnl = closedTradePnl + unrealizedPnl;
 
       // Use T212 API for actual cash balance when available
-      let cashAvailable = 10_000;
-      let portfolioValue = 10_000;
+      let cashAvailable = 0;
+      let portfolioValue = 0;
       try {
         const accountCash = await this.t212Client.getAccountCash();
-        cashAvailable = accountCash.free ?? accountCash.availableToTrade ?? 10_000;
+        cashAvailable = accountCash.free ?? accountCash.availableToTrade ?? 0;
         portfolioValue = (accountCash.total ?? cashAvailable) + positionsValue;
         if (portfolioValue <= 0) portfolioValue = cashAvailable + positionsValue;
+        this.lastKnownPortfolio = {
+          cash: cashAvailable,
+          value: portfolioValue,
+          timestamp: new Date().toISOString(),
+        };
       } catch (err) {
-        log.debug({ err }, 'Failed to fetch T212 account cash, using estimates');
-        portfolioValue = positionsValue > 0 ? positionsValue + 10_000 : 10_000;
-        cashAvailable = portfolioValue - positionsValue;
+        log.debug({ err }, 'Failed to fetch T212 account cash');
+        if (this.lastKnownPortfolio) {
+          const cacheAgeMs = Date.now() - new Date(this.lastKnownPortfolio.timestamp).getTime();
+          if (cacheAgeMs < 30 * 60 * 1000) {
+            log.warn({ cacheAge: Math.round(cacheAgeMs / 1000) }, 'Using cached portfolio values');
+            cashAvailable = this.lastKnownPortfolio.cash;
+            portfolioValue = this.lastKnownPortfolio.value;
+          } else {
+            log.error('Portfolio cache stale and T212 API unavailable — pausing trading');
+            this.paused = true;
+          }
+        } else {
+          log.error('No portfolio cache and T212 API unavailable — pausing trading');
+          this.paused = true;
+        }
       }
 
+      // Sector exposure: count and dollar-weighted
       const sectorExposure: Record<string, number> = {};
+      const sectorExposureValue: Record<string, number> = {};
       for (const p of allPositions) {
+        const posValue = (p.currentPrice ?? p.entryPrice) * p.shares;
         const fundRow = db
           .select({ sector: schema.fundamentalCache.sector })
           .from(schema.fundamentalCache)
@@ -1101,6 +1171,13 @@ class TradingBot {
           .get();
         const sector = fundRow?.sector ?? 'Unknown';
         sectorExposure[sector] = (sectorExposure[sector] ?? 0) + 1;
+        sectorExposureValue[sector] = (sectorExposureValue[sector] ?? 0) + posValue;
+      }
+      // Convert to percentages
+      if (portfolioValue > 0) {
+        for (const sector of Object.keys(sectorExposureValue)) {
+          sectorExposureValue[sector] = sectorExposureValue[sector] / portfolioValue;
+        }
       }
 
       // Track peak value in DB for drawdown calculation
@@ -1119,17 +1196,21 @@ class TradingBot {
         todayPnl,
         todayPnlPct: portfolioValue > 0 ? todayPnl / portfolioValue : 0,
         sectorExposure,
+        sectorExposureValue,
         peakValue,
       };
     } catch {
+      log.error('getPortfolioState failed completely — pausing trading');
+      this.paused = true;
       return {
-        cashAvailable: 10_000,
-        portfolioValue: 10_000,
+        cashAvailable: 0,
+        portfolioValue: 0,
         openPositions: 0,
         todayPnl: 0,
         todayPnlPct: 0,
         sectorExposure: {},
-        peakValue: 10_000,
+        sectorExposureValue: {},
+        peakValue: 0,
       };
     }
   }

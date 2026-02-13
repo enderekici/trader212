@@ -19,7 +19,7 @@ let mockWssInstance: MockWebSocketServer;
 
 vi.mock('ws', () => {
   return {
-    WebSocketServer: vi.fn().mockImplementation(() => {
+    WebSocketServer: vi.fn().mockImplementation(function () {
       mockWssInstance = new MockWebSocketServer();
       return mockWssInstance;
     }),

@@ -1,7 +1,9 @@
-import { type Server, createServer } from 'node:http';
+import { createServer, type Server } from 'node:http';
 import cors from 'cors';
 import express, { type Express } from 'express';
+import rateLimit from 'express-rate-limit';
 import { createLogger } from '../utils/logger.js';
+import { authMiddleware } from './middleware/auth.js';
 import { createRouter } from './routes.js';
 import { WebSocketManager } from './websocket.js';
 
@@ -16,15 +18,43 @@ export class ApiServer {
   constructor() {
     this.port = Number(process.env.API_PORT) || 3001;
     this.app = express();
+
+    // CORS whitelist
+    const corsOrigins = process.env.CORS_ORIGINS
+      ? process.env.CORS_ORIGINS.split(',').map((s) => s.trim())
+      : ['http://localhost:3000'];
     this.app.use(
       cors({
-        origin: true,
+        origin: corsOrigins,
         methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
         allowedHeaders: ['Content-Type', 'Authorization'],
         credentials: true,
       }),
     );
     this.app.use(express.json());
+
+    // Authentication
+    this.app.use(authMiddleware);
+
+    // Rate limiting
+    const generalLimiter = rateLimit({
+      windowMs: 60 * 1000,
+      max: 100,
+      standardHeaders: true,
+      legacyHeaders: false,
+      message: { error: 'Too many requests, please try again later' },
+    });
+    this.app.use(generalLimiter);
+
+    const controlLimiter = rateLimit({
+      windowMs: 60 * 1000,
+      max: 10,
+      standardHeaders: true,
+      legacyHeaders: false,
+      message: { error: 'Too many control requests, please try again later' },
+    });
+    this.app.use('/api/control', controlLimiter);
+    this.app.use('/api/config', controlLimiter);
 
     const router = createRouter();
     this.app.use(router);

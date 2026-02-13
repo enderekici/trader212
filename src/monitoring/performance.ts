@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, isNotNull, lte, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, isNotNull } from 'drizzle-orm';
 import { getDb } from '../db/index.js';
 import * as schema from '../db/schema.js';
 import { formatCurrency, formatPercent, round } from '../utils/helpers.js';
@@ -60,11 +60,32 @@ export class PerformanceTracker {
 
     const avgReturnPct = returns.reduce((a, b) => a + b, 0) / totalTrades;
 
-    // Sharpe ratio: annualized
-    const meanReturn = returns.reduce((a, b) => a + b, 0) / returns.length;
-    const variance = returns.reduce((sum, r) => sum + (r - meanReturn) ** 2, 0) / returns.length;
-    const stdDev = Math.sqrt(variance);
-    const sharpeRatio = stdDev > 0 ? (meanReturn / stdDev) * Math.sqrt(252) : 0;
+    // Sharpe ratio from daily portfolio returns (not per-trade returns)
+    let sharpeRatio = 0;
+    const dailyMetricsRows = db
+      .select()
+      .from(schema.dailyMetrics)
+      .orderBy(desc(schema.dailyMetrics.date))
+      .all();
+    if (dailyMetricsRows.length >= 5) {
+      const dailyReturns: number[] = [];
+      for (let i = 0; i < dailyMetricsRows.length - 1; i++) {
+        const current = dailyMetricsRows[i].portfolioValue;
+        const previous = dailyMetricsRows[i + 1].portfolioValue;
+        if (current != null && previous != null && previous > 0) {
+          dailyReturns.push((current - previous) / previous);
+        }
+      }
+      if (dailyReturns.length >= 5) {
+        const riskFreeDaily = 0.05 / 252;
+        const excessReturns = dailyReturns.map((r) => r - riskFreeDaily);
+        const meanExcess = excessReturns.reduce((a, b) => a + b, 0) / excessReturns.length;
+        const excessVariance =
+          excessReturns.reduce((sum, r) => sum + (r - meanExcess) ** 2, 0) / excessReturns.length;
+        const excessStdDev = Math.sqrt(excessVariance);
+        sharpeRatio = excessStdDev > 0 ? (meanExcess / excessStdDev) * Math.sqrt(252) : 0;
+      }
+    }
 
     // Max drawdown from cumulative P&L
     let peak = 0;
@@ -76,6 +97,17 @@ export class PerformanceTracker {
       const drawdown = peak > 0 ? (peak - cumulative) / peak : 0;
       if (drawdown > maxDrawdown) maxDrawdown = drawdown;
     }
+
+    // Include unrealized P&L from open positions for accurate drawdown
+    const openPositions = db.select().from(schema.positions).all();
+    const unrealizedPnl = openPositions.reduce(
+      (sum, p) => sum + ((p.currentPrice ?? p.entryPrice) - p.entryPrice) * p.shares,
+      0,
+    );
+    const totalCumulative = cumulative + unrealizedPnl;
+    if (totalCumulative > peak) peak = totalCumulative;
+    const unrealizedDrawdown = peak > 0 ? (peak - totalCumulative) / peak : 0;
+    if (unrealizedDrawdown > maxDrawdown) maxDrawdown = unrealizedDrawdown;
 
     // Profit factor
     const totalWins = wins.reduce((sum, t) => sum + (t.pnl ?? 0), 0);
