@@ -1,0 +1,598 @@
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+
+// ── Mock external dependencies ─────────────────────────────────────────────
+
+// Mock configManager
+const mockConfigGet = vi.fn();
+vi.mock('../../src/config/manager.js', () => ({
+  configManager: { get: (...args: unknown[]) => mockConfigGet(...args) },
+}));
+
+// Mock logger
+vi.mock('../../src/utils/logger.js', () => ({
+  createLogger: () => ({
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+  }),
+}));
+
+// Mock sleep to be instant
+vi.mock('../../src/utils/helpers.js', () => ({
+  sleep: vi.fn().mockResolvedValue(undefined),
+}));
+
+// Mock DB
+const mockDbRun = vi.fn().mockReturnValue({ lastInsertRowid: 1n, changes: 1 });
+const mockDbGet = vi.fn();
+const mockDbAll = vi.fn().mockReturnValue([]);
+const mockDbDelete = vi.fn();
+const mockDbInsert = vi.fn();
+const mockDbUpdate = vi.fn();
+const mockDbSelect = vi.fn();
+
+function createChainableQuery(terminal: Record<string, unknown> = {}) {
+  const chain: Record<string, unknown> = {};
+  const methods = ['from', 'where', 'set', 'values', 'orderBy', 'limit', 'onConflictDoUpdate'];
+  for (const m of methods) {
+    chain[m] = vi.fn().mockReturnValue(chain);
+  }
+  chain.run = terminal.run ?? mockDbRun;
+  chain.get = terminal.get ?? mockDbGet;
+  chain.all = terminal.all ?? mockDbAll;
+  return chain;
+}
+
+const mockSelectChain = createChainableQuery();
+const mockInsertChain = createChainableQuery();
+const mockDeleteChain = createChainableQuery();
+
+vi.mock('../../src/db/index.js', () => ({
+  getDb: () => ({
+    select: () => mockSelectChain,
+    insert: () => mockInsertChain,
+    delete: () => mockDeleteChain,
+    update: () => createChainableQuery(),
+  }),
+}));
+
+vi.mock('../../src/db/schema.js', () => ({
+  positions: { symbol: 'symbol' },
+  trades: { id: 'id' },
+}));
+
+vi.mock('drizzle-orm', () => ({
+  eq: vi.fn((_col: unknown, _val: unknown) => 'eq_condition'),
+}));
+
+// ── Import SUT after mocks ─────────────────────────────────────────────────
+import { OrderManager, type BuyParams, type CloseParams } from '../../src/execution/order-manager.js';
+
+function makeBuyParams(overrides: Partial<BuyParams> = {}): BuyParams {
+  return {
+    symbol: 'AAPL',
+    t212Ticker: 'AAPL_US_EQ',
+    shares: 10,
+    price: 150,
+    stopLossPct: 0.05,
+    takeProfitPct: 0.10,
+    aiReasoning: 'Strong technical indicators',
+    conviction: 85,
+    aiModel: 'claude-sonnet-4-5-20250929',
+    accountType: 'INVEST',
+    ...overrides,
+  };
+}
+
+function makeCloseParams(overrides: Partial<CloseParams> = {}): CloseParams {
+  return {
+    symbol: 'AAPL',
+    t212Ticker: 'AAPL_US_EQ',
+    shares: 10,
+    exitReason: 'Take profit reached',
+    accountType: 'INVEST',
+    ...overrides,
+  };
+}
+
+function makeMockT212Client() {
+  return {
+    placeMarketOrder: vi.fn(),
+    placeStopOrder: vi.fn(),
+    getOrder: vi.fn(),
+    cancelOrder: vi.fn(),
+  } as any;
+}
+
+describe('OrderManager', () => {
+  let orderManager: OrderManager;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    orderManager = new OrderManager();
+    // Default config values
+    mockConfigGet.mockImplementation((key: string) => {
+      const defaults: Record<string, unknown> = {
+        'execution.dryRun': true,
+        'execution.orderTimeoutSeconds': 10,
+        'execution.stopLossDelay': 3000,
+      };
+      return defaults[key];
+    });
+  });
+
+  // ── setT212Client ──────────────────────────────────────────────────────
+  describe('setT212Client', () => {
+    it('sets the T212 client', () => {
+      const client = makeMockT212Client();
+      orderManager.setT212Client(client);
+      // No throw, client is stored internally
+      expect(client).toBeDefined();
+    });
+  });
+
+  // ── executeBuy: dry run ────────────────────────────────────────────────
+  describe('executeBuy - dry run', () => {
+    it('records trade and position in DB and returns success', async () => {
+      mockSelectChain.get.mockReturnValueOnce(undefined); // no existing position
+      mockInsertChain.run.mockReturnValue({ lastInsertRowid: 42n });
+
+      const result = await orderManager.executeBuy(makeBuyParams());
+
+      expect(result.success).toBe(true);
+      expect(result.tradeId).toBe(42);
+    });
+
+    it('rejects duplicate buy when position already exists', async () => {
+      mockSelectChain.get.mockReturnValueOnce({ symbol: 'AAPL', shares: 10 });
+
+      const result = await orderManager.executeBuy(makeBuyParams());
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Position already exists');
+    });
+
+    it('computes correct stop-loss and take-profit prices', async () => {
+      mockSelectChain.get.mockReturnValueOnce(undefined);
+      const capturedValues: Record<string, unknown>[] = [];
+      mockInsertChain.values = vi.fn().mockImplementation((val: Record<string, unknown>) => {
+        capturedValues.push(val);
+        return mockInsertChain;
+      });
+      mockInsertChain.run.mockReturnValue({ lastInsertRowid: 1n });
+
+      const params = makeBuyParams({ price: 200, stopLossPct: 0.05, takeProfitPct: 0.10 });
+      await orderManager.executeBuy(params);
+
+      // The first insert is for trades
+      const tradeInsert = capturedValues[0];
+      expect(tradeInsert.stopLoss).toBe(190); // 200 * (1 - 0.05)
+      expect(tradeInsert.takeProfit).toBeCloseTo(220, 5); // 200 * (1 + 0.10)
+    });
+  });
+
+  // ── executeBuy: live ───────────────────────────────────────────────────
+  describe('executeBuy - live', () => {
+    beforeEach(() => {
+      mockConfigGet.mockImplementation((key: string) => {
+        const defaults: Record<string, unknown> = {
+          'execution.dryRun': false,
+          'execution.orderTimeoutSeconds': 10,
+          'execution.stopLossDelay': 3000,
+        };
+        return defaults[key];
+      });
+    });
+
+    it('returns error when T212 client is not set', async () => {
+      mockSelectChain.get.mockReturnValueOnce(undefined);
+
+      const result = await orderManager.executeBuy(makeBuyParams());
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('T212 client not initialized');
+    });
+
+    it('places market order, waits for fill, places stop-loss, records trade', async () => {
+      const client = makeMockT212Client();
+      client.placeMarketOrder.mockResolvedValue({ id: 101 });
+      client.getOrder.mockResolvedValue({
+        status: 'FILLED',
+        filledValue: 1500,
+        filledQuantity: 10,
+      });
+      client.placeStopOrder.mockResolvedValue({ id: 201 });
+
+      orderManager.setT212Client(client);
+      mockSelectChain.get.mockReturnValueOnce(undefined);
+      mockInsertChain.run.mockReturnValue({ lastInsertRowid: 5n });
+
+      const result = await orderManager.executeBuy(makeBuyParams());
+
+      expect(result.success).toBe(true);
+      expect(result.tradeId).toBe(5);
+      expect(result.orderId).toBe('101');
+      expect(client.placeMarketOrder).toHaveBeenCalledOnce();
+      expect(client.placeStopOrder).toHaveBeenCalledOnce();
+    });
+
+    it('returns error when order fill times out', async () => {
+      const client = makeMockT212Client();
+      client.placeMarketOrder.mockResolvedValue({ id: 102 });
+      // Always return NEW status to simulate timeout
+      client.getOrder.mockResolvedValue({ status: 'NEW' });
+
+      orderManager.setT212Client(client);
+      mockSelectChain.get.mockReturnValueOnce(undefined);
+
+      const result = await orderManager.executeBuy(makeBuyParams());
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Order fill timeout');
+      expect(result.orderId).toBe('102');
+    });
+
+    it('handles stop-loss order failure gracefully', async () => {
+      const client = makeMockT212Client();
+      client.placeMarketOrder.mockResolvedValue({ id: 103 });
+      client.getOrder.mockResolvedValue({
+        status: 'FILLED',
+        filledValue: 1500,
+        filledQuantity: 10,
+      });
+      client.placeStopOrder.mockRejectedValue(new Error('Stop order failed'));
+
+      orderManager.setT212Client(client);
+      mockSelectChain.get.mockReturnValueOnce(undefined);
+      mockInsertChain.run.mockReturnValue({ lastInsertRowid: 6n });
+
+      // Should still succeed; stop-loss error is logged but not fatal
+      const result = await orderManager.executeBuy(makeBuyParams());
+
+      expect(result.success).toBe(true);
+      expect(result.tradeId).toBe(6);
+    });
+
+    it('returns error when placeMarketOrder throws', async () => {
+      const client = makeMockT212Client();
+      client.placeMarketOrder.mockRejectedValue(new Error('API down'));
+
+      orderManager.setT212Client(client);
+      mockSelectChain.get.mockReturnValueOnce(undefined);
+
+      const result = await orderManager.executeBuy(makeBuyParams());
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('API down');
+    });
+
+    it('handles non-Error thrown values', async () => {
+      const client = makeMockT212Client();
+      client.placeMarketOrder.mockRejectedValue('string error');
+
+      orderManager.setT212Client(client);
+      mockSelectChain.get.mockReturnValueOnce(undefined);
+
+      const result = await orderManager.executeBuy(makeBuyParams());
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('string error');
+    });
+
+    it('handles order filled with fallback pricing (value/quantity)', async () => {
+      const client = makeMockT212Client();
+      client.placeMarketOrder.mockResolvedValue({ id: 104 });
+      client.getOrder.mockResolvedValue({
+        status: 'FILLED',
+        filledValue: null,
+        filledQuantity: null,
+        value: 1500,
+        quantity: 10,
+      });
+      client.placeStopOrder.mockResolvedValue({ id: 202 });
+
+      orderManager.setT212Client(client);
+      mockSelectChain.get.mockReturnValueOnce(undefined);
+      mockInsertChain.run.mockReturnValue({ lastInsertRowid: 7n });
+
+      const result = await orderManager.executeBuy(makeBuyParams());
+      expect(result.success).toBe(true);
+    });
+
+    it('returns null fill when order is CANCELLED', async () => {
+      const client = makeMockT212Client();
+      client.placeMarketOrder.mockResolvedValue({ id: 105 });
+      client.getOrder.mockResolvedValue({ status: 'CANCELLED' });
+
+      orderManager.setT212Client(client);
+      mockSelectChain.get.mockReturnValueOnce(undefined);
+
+      const result = await orderManager.executeBuy(makeBuyParams());
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Order fill timeout');
+    });
+
+    it('returns null fill when order is REJECTED', async () => {
+      const client = makeMockT212Client();
+      client.placeMarketOrder.mockResolvedValue({ id: 106 });
+      client.getOrder.mockResolvedValue({ status: 'REJECTED' });
+
+      orderManager.setT212Client(client);
+      mockSelectChain.get.mockReturnValueOnce(undefined);
+
+      const result = await orderManager.executeBuy(makeBuyParams());
+      expect(result.success).toBe(false);
+    });
+
+    it('returns null fill when order is FILLED but no price data', async () => {
+      const client = makeMockT212Client();
+      client.placeMarketOrder.mockResolvedValue({ id: 107 });
+      client.getOrder.mockResolvedValue({
+        status: 'FILLED',
+        filledValue: null,
+        filledQuantity: null,
+        value: null,
+        quantity: null,
+      });
+
+      orderManager.setT212Client(client);
+      mockSelectChain.get.mockReturnValueOnce(undefined);
+
+      const result = await orderManager.executeBuy(makeBuyParams());
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Order fill timeout');
+    });
+  });
+
+  // ── executeClose: dry run ──────────────────────────────────────────────
+  describe('executeClose - dry run', () => {
+    it('returns error when no position exists', async () => {
+      mockSelectChain.get.mockReturnValueOnce(undefined);
+
+      const result = await orderManager.executeClose(makeCloseParams());
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('No position for');
+    });
+
+    it('records closing trade, deletes position, returns success', async () => {
+      mockSelectChain.get.mockReturnValueOnce({
+        symbol: 'AAPL',
+        shares: 10,
+        entryPrice: 140,
+        currentPrice: 155,
+        entryTime: '2024-01-01T00:00:00Z',
+      });
+      mockInsertChain.run.mockReturnValue({ lastInsertRowid: 10n });
+
+      const result = await orderManager.executeClose(makeCloseParams());
+
+      expect(result.success).toBe(true);
+    });
+
+    it('uses entryPrice when currentPrice is null', async () => {
+      mockSelectChain.get.mockReturnValueOnce({
+        symbol: 'AAPL',
+        shares: 10,
+        entryPrice: 140,
+        currentPrice: null,
+        entryTime: '2024-01-01T00:00:00Z',
+      });
+      const capturedValues: Record<string, unknown>[] = [];
+      mockInsertChain.values = vi.fn().mockImplementation((val: Record<string, unknown>) => {
+        capturedValues.push(val);
+        return mockInsertChain;
+      });
+      mockInsertChain.run.mockReturnValue({ lastInsertRowid: 11n });
+
+      await orderManager.executeClose(makeCloseParams());
+
+      const tradeInsert = capturedValues[0];
+      expect(tradeInsert.exitPrice).toBe(140);
+    });
+  });
+
+  // ── executeClose: live ─────────────────────────────────────────────────
+  describe('executeClose - live', () => {
+    beforeEach(() => {
+      mockConfigGet.mockImplementation((key: string) => {
+        const defaults: Record<string, unknown> = {
+          'execution.dryRun': false,
+          'execution.orderTimeoutSeconds': 10,
+          'execution.stopLossDelay': 3000,
+        };
+        return defaults[key];
+      });
+    });
+
+    it('returns error when T212 client is not set', async () => {
+      mockSelectChain.get.mockReturnValueOnce({
+        symbol: 'AAPL',
+        shares: 10,
+        entryPrice: 140,
+        currentPrice: 155,
+        entryTime: '2024-01-01T00:00:00Z',
+      });
+
+      const result = await orderManager.executeClose(makeCloseParams());
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('T212 client not initialized');
+    });
+
+    it('cancels existing stop order, sells, records trade, deletes position', async () => {
+      const client = makeMockT212Client();
+      client.cancelOrder.mockResolvedValue(undefined);
+      client.placeMarketOrder.mockResolvedValue({ id: 301 });
+      client.getOrder.mockResolvedValue({
+        status: 'FILLED',
+        filledValue: 1550,
+        filledQuantity: 10,
+      });
+
+      orderManager.setT212Client(client);
+      mockSelectChain.get.mockReturnValueOnce({
+        symbol: 'AAPL',
+        shares: 10,
+        entryPrice: 140,
+        currentPrice: 155,
+        entryTime: '2024-01-01T00:00:00Z',
+        stopOrderId: '999',
+      });
+      mockInsertChain.run.mockReturnValue({ lastInsertRowid: 12n });
+
+      const result = await orderManager.executeClose(makeCloseParams());
+
+      expect(result.success).toBe(true);
+      expect(result.orderId).toBe('301');
+      expect(client.cancelOrder).toHaveBeenCalledWith(999);
+    });
+
+    it('handles cancel stop order failure gracefully', async () => {
+      const client = makeMockT212Client();
+      client.cancelOrder.mockRejectedValue(new Error('Already cancelled'));
+      client.placeMarketOrder.mockResolvedValue({ id: 302 });
+      client.getOrder.mockResolvedValue({
+        status: 'FILLED',
+        filledValue: 1550,
+        filledQuantity: 10,
+      });
+
+      orderManager.setT212Client(client);
+      mockSelectChain.get.mockReturnValueOnce({
+        symbol: 'AAPL',
+        shares: 10,
+        entryPrice: 140,
+        currentPrice: 155,
+        entryTime: '2024-01-01T00:00:00Z',
+        stopOrderId: '998',
+      });
+      mockInsertChain.run.mockReturnValue({ lastInsertRowid: 13n });
+
+      const result = await orderManager.executeClose(makeCloseParams());
+      expect(result.success).toBe(true);
+    });
+
+    it('returns error when sell order fill times out', async () => {
+      const client = makeMockT212Client();
+      client.placeMarketOrder.mockResolvedValue({ id: 303 });
+      client.getOrder.mockResolvedValue({ status: 'NEW' });
+
+      orderManager.setT212Client(client);
+      mockSelectChain.get.mockReturnValueOnce({
+        symbol: 'AAPL',
+        shares: 10,
+        entryPrice: 140,
+        currentPrice: 155,
+        entryTime: '2024-01-01T00:00:00Z',
+      });
+
+      const result = await orderManager.executeClose(makeCloseParams());
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Sell order fill timeout');
+    });
+
+    it('returns error when market sell throws', async () => {
+      const client = makeMockT212Client();
+      client.placeMarketOrder.mockRejectedValue(new Error('Exchange closed'));
+
+      orderManager.setT212Client(client);
+      mockSelectChain.get.mockReturnValueOnce({
+        symbol: 'AAPL',
+        shares: 10,
+        entryPrice: 140,
+        currentPrice: 155,
+        entryTime: '2024-01-01T00:00:00Z',
+      });
+
+      const result = await orderManager.executeClose(makeCloseParams());
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Exchange closed');
+    });
+
+    it('handles non-Error thrown in close path', async () => {
+      const client = makeMockT212Client();
+      client.placeMarketOrder.mockRejectedValue(42);
+
+      orderManager.setT212Client(client);
+      mockSelectChain.get.mockReturnValueOnce({
+        symbol: 'AAPL',
+        shares: 10,
+        entryPrice: 140,
+        currentPrice: 155,
+        entryTime: '2024-01-01T00:00:00Z',
+      });
+
+      const result = await orderManager.executeClose(makeCloseParams());
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('42');
+    });
+
+    it('skips cancel when no stopOrderId exists', async () => {
+      const client = makeMockT212Client();
+      client.placeMarketOrder.mockResolvedValue({ id: 304 });
+      client.getOrder.mockResolvedValue({
+        status: 'FILLED',
+        filledValue: 1550,
+        filledQuantity: 10,
+      });
+
+      orderManager.setT212Client(client);
+      mockSelectChain.get.mockReturnValueOnce({
+        symbol: 'AAPL',
+        shares: 10,
+        entryPrice: 140,
+        currentPrice: 155,
+        entryTime: '2024-01-01T00:00:00Z',
+        stopOrderId: null,
+      });
+      mockInsertChain.run.mockReturnValue({ lastInsertRowid: 14n });
+
+      const result = await orderManager.executeClose(makeCloseParams());
+      expect(result.success).toBe(true);
+      expect(client.cancelOrder).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── getCurrentPrice ────────────────────────────────────────────────────
+  describe('getCurrentPrice', () => {
+    it('returns price from yahoo finance', async () => {
+      const mockYahoo = { getQuote: vi.fn().mockResolvedValue({ price: 150.25 }) };
+      vi.doMock('../../src/data/yahoo-finance.js', () => ({
+        YahooFinanceClient: vi.fn().mockImplementation(() => mockYahoo),
+      }));
+
+      // Re-import to pick up mock
+      const { OrderManager: OM } = await import('../../src/execution/order-manager.js');
+      const om = new OM();
+      const price = await om.getCurrentPrice('AAPL');
+      expect(price).toBe(150.25);
+    });
+
+    it('returns null when quote is null', async () => {
+      const mockYahoo = { getQuote: vi.fn().mockResolvedValue(null) };
+      vi.doMock('../../src/data/yahoo-finance.js', () => ({
+        YahooFinanceClient: vi.fn().mockImplementation(() => mockYahoo),
+      }));
+
+      const { OrderManager: OM } = await import('../../src/execution/order-manager.js');
+      const om = new OM();
+      const price = await om.getCurrentPrice('AAPL');
+      expect(price).toBeNull();
+    });
+
+    it('returns null on error', async () => {
+      vi.doMock('../../src/data/yahoo-finance.js', () => ({
+        YahooFinanceClient: vi.fn().mockImplementation(() => ({
+          getQuote: vi.fn().mockRejectedValue(new Error('Network error')),
+        })),
+      }));
+
+      const { OrderManager: OM } = await import('../../src/execution/order-manager.js');
+      const om = new OM();
+      const price = await om.getCurrentPrice('AAPL');
+      expect(price).toBeNull();
+    });
+  });
+});

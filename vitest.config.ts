@@ -11,12 +11,11 @@ export default defineConfig({
       reporter: ['text', 'lcov'],
       include: ['src/**/*.ts'],
       exclude: ['src/index.ts'],
-      // TODO: Raise thresholds as test coverage improves
       thresholds: {
-        lines: 0,
-        functions: 0,
-        branches: 0,
-        statements: 0,
+        lines: 99,
+        functions: 97,
+        branches: 97,
+        statements: 99,
       },
     },
   },
