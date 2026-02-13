@@ -248,6 +248,149 @@ describe('PerformanceTracker', () => {
       expect(metrics.totalTrades).toBe(1);
       expect(metrics.winRate).toBe(0);
     });
+
+    it('calculates Sharpe ratio from daily metrics when >= 5 data points', () => {
+      // closedTrades
+      mockTradesAll.mockReturnValueOnce([
+        { symbol: 'A', pnl: 100, pnlPct: 0.05, entryTime: '2025-01-01', exitTime: '2025-01-02', exitPrice: 105 },
+      ]);
+      // dailyMetrics (need >= 5 rows with portfolio values to trigger daily Sharpe calc)
+      // Ordered by date desc, so first row is most recent
+      mockTradesAll.mockReturnValueOnce([
+        { portfolioValue: 10600, date: '2025-01-07' },
+        { portfolioValue: 10500, date: '2025-01-06' },
+        { portfolioValue: 10300, date: '2025-01-05' },
+        { portfolioValue: 10200, date: '2025-01-04' },
+        { portfolioValue: 10100, date: '2025-01-03' },
+        { portfolioValue: 10000, date: '2025-01-02' },
+      ]);
+      // positions
+      mockTradesAll.mockReturnValueOnce([]);
+
+      const metrics = tracker.getMetrics();
+
+      // dailyReturns: (10600-10500)/10500, (10500-10300)/10300, (10300-10200)/10200, (10200-10100)/10100, (10100-10000)/10000
+      // All positive returns → positive Sharpe
+      expect(metrics.sharpeRatio).toBeGreaterThan(0);
+    });
+
+    it('returns Sharpe ratio 0 when daily metrics have zero variance', () => {
+      mockTradesAll.mockReturnValueOnce([
+        { symbol: 'A', pnl: 100, pnlPct: 0.05, entryTime: '2025-01-01', exitTime: '2025-01-02', exitPrice: 105 },
+      ]);
+      // All same portfolio value → zero returns → zero std dev → Sharpe = 0
+      mockTradesAll.mockReturnValueOnce([
+        { portfolioValue: 10000, date: '2025-01-07' },
+        { portfolioValue: 10000, date: '2025-01-06' },
+        { portfolioValue: 10000, date: '2025-01-05' },
+        { portfolioValue: 10000, date: '2025-01-04' },
+        { portfolioValue: 10000, date: '2025-01-03' },
+        { portfolioValue: 10000, date: '2025-01-02' },
+      ]);
+      mockTradesAll.mockReturnValueOnce([]);
+
+      const metrics = tracker.getMetrics();
+
+      expect(metrics.sharpeRatio).toBe(0);
+    });
+
+    it('skips daily metrics rows with null portfolio values', () => {
+      mockTradesAll.mockReturnValueOnce([
+        { symbol: 'A', pnl: 100, pnlPct: 0.05, entryTime: '2025-01-01', exitTime: '2025-01-02', exitPrice: 105 },
+      ]);
+      // Some null values — should skip those pairs
+      mockTradesAll.mockReturnValueOnce([
+        { portfolioValue: 10600, date: '2025-01-07' },
+        { portfolioValue: null, date: '2025-01-06' },
+        { portfolioValue: 10300, date: '2025-01-05' },
+        { portfolioValue: 10200, date: '2025-01-04' },
+        { portfolioValue: 10100, date: '2025-01-03' },
+        { portfolioValue: 10000, date: '2025-01-02' },
+      ]);
+      mockTradesAll.mockReturnValueOnce([]);
+
+      const metrics = tracker.getMetrics();
+
+      // With a null in the middle, some daily return pairs get skipped
+      // Remaining dailyReturns < 5 means Sharpe stays 0
+      expect(typeof metrics.sharpeRatio).toBe('number');
+    });
+
+    it('does not calculate Sharpe when fewer than 5 daily metric rows', () => {
+      mockTradesAll.mockReturnValueOnce([
+        { symbol: 'A', pnl: 100, pnlPct: 0.05, entryTime: '2025-01-01', exitTime: '2025-01-02', exitPrice: 105 },
+      ]);
+      // Only 3 rows (< 5 threshold)
+      mockTradesAll.mockReturnValueOnce([
+        { portfolioValue: 10200, date: '2025-01-03' },
+        { portfolioValue: 10100, date: '2025-01-02' },
+        { portfolioValue: 10000, date: '2025-01-01' },
+      ]);
+      mockTradesAll.mockReturnValueOnce([]);
+
+      const metrics = tracker.getMetrics();
+
+      expect(metrics.sharpeRatio).toBe(0);
+    });
+
+    it('includes unrealized P&L in max drawdown calculation', () => {
+      // Closed trades: cumulative = 100, peak = 100
+      mockTradesAll.mockReturnValueOnce([
+        { symbol: 'A', pnl: 100, pnlPct: 0.05, entryTime: '2025-01-01', exitTime: '2025-01-02', exitPrice: 105 },
+      ]);
+      // dailyMetrics
+      mockTradesAll.mockReturnValueOnce([]);
+      // Open positions with unrealized loss
+      mockTradesAll.mockReturnValueOnce([
+        { symbol: 'B', entryPrice: 100, currentPrice: 50, shares: 2 },
+      ]);
+
+      const metrics = tracker.getMetrics();
+
+      // cumulative from closed = 100, peak = 100
+      // unrealizedPnl = (50 - 100) * 2 = -100
+      // totalCumulative = 100 + (-100) = 0
+      // peak stays at 100 (since 0 < 100)
+      // unrealizedDrawdown = (100 - 0) / 100 = 1.0
+      expect(metrics.maxDrawdown).toBe(1);
+    });
+
+    it('updates peak when unrealized P&L exceeds closed peak', () => {
+      // Closed trades: cumulative = 100, peak = 100
+      mockTradesAll.mockReturnValueOnce([
+        { symbol: 'A', pnl: 100, pnlPct: 0.05, entryTime: '2025-01-01', exitTime: '2025-01-02', exitPrice: 105 },
+      ]);
+      mockTradesAll.mockReturnValueOnce([]);
+      // Open positions with unrealized gain
+      mockTradesAll.mockReturnValueOnce([
+        { symbol: 'B', entryPrice: 100, currentPrice: 200, shares: 2 },
+      ]);
+
+      const metrics = tracker.getMetrics();
+
+      // unrealizedPnl = (200 - 100) * 2 = 200
+      // totalCumulative = 100 + 200 = 300 > peak(100) → peak updated to 300
+      // unrealizedDrawdown = (300 - 300) / 300 = 0
+      // maxDrawdown from closed trades was 0, unrealized drawdown is 0
+      expect(metrics.maxDrawdown).toBe(0);
+    });
+
+    it('uses entryPrice as currentPrice fallback for unrealized P&L', () => {
+      mockTradesAll.mockReturnValueOnce([
+        { symbol: 'A', pnl: 100, pnlPct: 0.05, entryTime: '2025-01-01', exitTime: '2025-01-02', exitPrice: 105 },
+      ]);
+      mockTradesAll.mockReturnValueOnce([]);
+      // Position with null currentPrice
+      mockTradesAll.mockReturnValueOnce([
+        { symbol: 'B', entryPrice: 100, currentPrice: null, shares: 2 },
+      ]);
+
+      const metrics = tracker.getMetrics();
+
+      // unrealizedPnl = (100 - 100) * 2 = 0 (uses entryPrice as fallback)
+      // totalCumulative = 100 + 0 = 100, peak = 100, drawdown = 0
+      expect(metrics.maxDrawdown).toBe(0);
+    });
   });
 
   // ── getPerSectorBreakdown ──────────────────────────────────────────────
@@ -359,6 +502,17 @@ describe('PerformanceTracker', () => {
       expect(summary).toContain('Best trade: AAPL');
       expect(summary).toContain('Worst trade: GOOG');
     });
+
+    it('handles null pnl and pnlPct in weekly trades', () => {
+      mockTradesAll.mockReturnValueOnce([
+        { symbol: 'AAPL', pnl: null, pnlPct: null, exitPrice: 105, entryTime: '2025-01-01', exitTime: '2025-01-02' },
+      ]);
+      mockTradesAll.mockReturnValueOnce([]);
+
+      const summary = tracker.generateWeeklySummary();
+
+      expect(summary).toContain('Trades this week: 1');
+    });
   });
 
   // ── saveDailyMetrics ───────────────────────────────────────────────────
@@ -386,6 +540,17 @@ describe('PerformanceTracker', () => {
       });
 
       await expect(tracker.saveDailyMetrics()).resolves.not.toThrow();
+    });
+
+    it('handles null pnl and pnlPct in daily metrics', async () => {
+      mockTradesAll.mockReturnValueOnce([
+        { symbol: 'AAPL', pnl: null, pnlPct: null, exitPrice: 105, entryTime: '2025-01-01', exitTime: '2025-01-02' },
+      ]);
+      mockTradesAll.mockReturnValueOnce([]);
+
+      await tracker.saveDailyMetrics();
+
+      expect(insertChain.run).toHaveBeenCalled();
     });
   });
 });

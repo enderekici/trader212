@@ -81,10 +81,12 @@ describe('api/server', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     delete process.env.API_PORT;
+    delete process.env.CORS_ORIGINS;
   });
 
   afterEach(() => {
     delete process.env.API_PORT;
+    delete process.env.CORS_ORIGINS;
   });
 
   describe('ApiServer constructor', () => {
@@ -106,6 +108,16 @@ describe('api/server', () => {
     it('sets up CORS middleware', async () => {
       const { ApiServer } = await import('../../src/api/server.js');
       new ApiServer();
+      expect(mockUse).toHaveBeenCalled();
+    });
+
+    it('uses CORS_ORIGINS env var when set', async () => {
+      process.env.CORS_ORIGINS = 'http://example.com,http://other.com';
+      vi.resetModules();
+      const { ApiServer } = await import('../../src/api/server.js');
+      const server = new ApiServer();
+      expect(server).toBeDefined();
+      // Verify cors was called (middleware was set up)
       expect(mockUse).toHaveBeenCalled();
     });
 

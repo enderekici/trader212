@@ -9,19 +9,20 @@ services:
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:3001/api/status').then(r=>{if(!r.ok)throw 1})"]
-      interval: 30s
-      timeout: 10s
+      interval: 5s
+      timeout: 5s
       retries: 3
+      start_period: 10s
 
   web:
     build:
       context: .
       dockerfile: Dockerfile.web
       args:
-        - NEXT_PUBLIC_API_URL=http://bot:3001
+        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:3001}
         - NEXT_PUBLIC_API_SECRET_KEY=${NEXT_PUBLIC_API_SECRET_KEY:-}
     environment:
-      - NEXT_PUBLIC_API_URL=http://bot:3001
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:3001}
       - NEXT_PUBLIC_API_SECRET_KEY=${NEXT_PUBLIC_API_SECRET_KEY:-}
     ports:
       - "3000:3000"

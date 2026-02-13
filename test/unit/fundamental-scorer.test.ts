@@ -11,6 +11,38 @@ vi.mock('../../src/utils/logger.js', () => ({
   }),
 }));
 
+// Mock DB for getSectorMedianPE
+const mockFundRows = vi.fn().mockReturnValue([]);
+const mockFundChain: Record<string, any> = {};
+for (const m of ['from', 'where', 'orderBy', 'limit']) {
+  mockFundChain[m] = vi.fn().mockReturnValue(mockFundChain);
+}
+mockFundChain.all = mockFundRows;
+
+vi.mock('../../src/db/index.js', () => ({
+  getDb: () => ({
+    selectDistinct: () => mockFundChain,
+    select: () => mockFundChain,
+  }),
+}));
+
+vi.mock('../../src/db/schema.js', () => ({
+  fundamentalCache: {
+    symbol: 'symbol',
+    peRatio: 'peRatio',
+    sector: 'sector',
+    fetchedAt: 'fetchedAt',
+  },
+}));
+
+vi.mock('drizzle-orm', () => ({
+  and: vi.fn((...args: unknown[]) => args),
+  desc: vi.fn((col: unknown) => col),
+  eq: vi.fn(),
+  gt: vi.fn(),
+  isNotNull: vi.fn(),
+}));
+
 import {
   analyzeFundamentals,
   scoreFundamentals,
@@ -54,6 +86,132 @@ describe('Fundamental Scorer', () => {
   });
 
   describe('analyzeFundamentals', () => {
+    // ── Sector-relative P/E scoring ───────────────────────────────────────
+
+    it('uses sector-relative P/E when getSectorMedianPE returns a value', () => {
+      // Provide 3+ symbols in the sector so median is computed
+      mockFundRows.mockReturnValueOnce([
+        { symbol: 'X', peRatio: 15 },
+        { symbol: 'Y', peRatio: 20 },
+        { symbol: 'Z', peRatio: 25 },
+      ]);
+
+      // peRatio = 10, sectorMedianPE = 20, ratio = 0.5 → peSignal = 85 (ratio < 0.5 boundary)
+      // Actually ratio = 10/20 = 0.5, which is NOT < 0.5, so it hits < 0.75 → peSignal = 75
+      const result = analyzeFundamentals(makeFundamentals({ peRatio: 10, sector: 'Technology' }));
+      expect(result.score).toBe(75);
+    });
+
+    it('scores high P/E relative to sector median as low', () => {
+      // Median of [15, 20, 25] = 20
+      mockFundRows.mockReturnValueOnce([
+        { symbol: 'X', peRatio: 15 },
+        { symbol: 'Y', peRatio: 20 },
+        { symbol: 'Z', peRatio: 25 },
+      ]);
+
+      // peRatio = 50, sectorMedianPE = 20, ratio = 2.5 → peSignal = 15 (ratio >= 2.5)
+      const result = analyzeFundamentals(makeFundamentals({ peRatio: 50, sector: 'Technology' }));
+      expect(result.score).toBe(15);
+    });
+
+    it('falls back to absolute P/E thresholds when sector has < 3 data points', () => {
+      // Only 2 symbols → getSectorMedianPE returns null
+      mockFundRows.mockReturnValueOnce([
+        { symbol: 'X', peRatio: 15 },
+        { symbol: 'Y', peRatio: 20 },
+      ]);
+
+      // peRatio = 8 → absolute fallback → peSignal = 85
+      const result = analyzeFundamentals(makeFundamentals({ peRatio: 8, sector: 'Technology' }));
+      expect(result.score).toBe(85);
+    });
+
+    it('falls back to absolute P/E when sector is null', () => {
+      // No sector → getSectorMedianPE returns null immediately
+      const result = analyzeFundamentals(makeFundamentals({ peRatio: 8, sector: null }));
+      expect(result.score).toBe(85);
+    });
+
+    it('deduplicates symbols in getSectorMedianPE (keeps most recent)', () => {
+      // Same symbol appears twice — should be deduplicated
+      mockFundRows.mockReturnValueOnce([
+        { symbol: 'X', peRatio: 15 },
+        { symbol: 'X', peRatio: 10 }, // duplicate, should be ignored
+        { symbol: 'Y', peRatio: 20 },
+        { symbol: 'Z', peRatio: 25 },
+      ]);
+
+      // Only 3 unique symbols: X=15, Y=20, Z=25, median=20
+      // peRatio = 20, ratio = 20/20 = 1.0, which is NOT < 1.0, hits < 1.25 → peSignal = 55
+      const result = analyzeFundamentals(makeFundamentals({ peRatio: 20, sector: 'Technology' }));
+      expect(result.score).toBe(55);
+    });
+
+    it('calculates even median correctly', () => {
+      // 4 symbols → even count → average of two middle
+      mockFundRows.mockReturnValueOnce([
+        { symbol: 'A', peRatio: 10 },
+        { symbol: 'B', peRatio: 15 },
+        { symbol: 'C', peRatio: 20 },
+        { symbol: 'D', peRatio: 25 },
+      ]);
+
+      // sorted: [10, 15, 20, 25], median = (15 + 20) / 2 = 17.5
+      // peRatio = 17.5, ratio = 17.5/17.5 = 1.0 → hits < 1.25 → peSignal = 55
+      const result = analyzeFundamentals(makeFundamentals({ peRatio: 17.5, sector: 'Finance' }));
+      expect(result.score).toBe(55);
+    });
+
+    it('covers all sector-relative P/E ratio branches', () => {
+      // Median = 20 in all tests below
+      const setupMedian = () => {
+        mockFundRows.mockReturnValueOnce([
+          { symbol: 'X', peRatio: 15 },
+          { symbol: 'Y', peRatio: 20 },
+          { symbol: 'Z', peRatio: 25 },
+        ]);
+      };
+
+      // ratio < 0.5 → 85
+      setupMedian();
+      expect(analyzeFundamentals(makeFundamentals({ peRatio: 9, sector: 'Tech' })).score).toBe(85);
+
+      // ratio 0.5 to 0.75 → 75
+      setupMedian();
+      expect(analyzeFundamentals(makeFundamentals({ peRatio: 12, sector: 'Tech' })).score).toBe(75);
+
+      // ratio 0.75 to 1.0 → 65
+      setupMedian();
+      expect(analyzeFundamentals(makeFundamentals({ peRatio: 18, sector: 'Tech' })).score).toBe(65);
+
+      // ratio 1.0 to 1.25 → 55
+      setupMedian();
+      expect(analyzeFundamentals(makeFundamentals({ peRatio: 22, sector: 'Tech' })).score).toBe(55);
+
+      // ratio 1.25 to 1.75 → 40
+      setupMedian();
+      expect(analyzeFundamentals(makeFundamentals({ peRatio: 30, sector: 'Tech' })).score).toBe(40);
+
+      // ratio 1.75 to 2.5 → 25
+      setupMedian();
+      expect(analyzeFundamentals(makeFundamentals({ peRatio: 40, sector: 'Tech' })).score).toBe(25);
+
+      // ratio >= 2.5 → 15
+      setupMedian();
+      expect(analyzeFundamentals(makeFundamentals({ peRatio: 55, sector: 'Tech' })).score).toBe(15);
+    });
+
+    it('handles DB error in getSectorMedianPE gracefully', () => {
+      mockFundRows.mockImplementationOnce(() => {
+        throw new Error('DB error');
+      });
+
+      // Should fall back to absolute thresholds
+      const result = analyzeFundamentals(makeFundamentals({ peRatio: 8, sector: 'Technology' }));
+      expect(result.score).toBe(85);
+    });
+
     // ── Score = 50 when all nulls ─────────────────────────────────────────
 
     it('returns score 50 when all data is null', () => {

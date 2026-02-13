@@ -15,6 +15,7 @@ vi.mock('../../src/utils/logger.js', () => ({
     warn: vi.fn(),
     error: vi.fn(),
     debug: vi.fn(),
+    fatal: vi.fn(),
   }),
 }));
 
@@ -254,6 +255,31 @@ describe('OrderManager', () => {
       expect(result.tradeId).toBe(6);
     });
 
+    it('logs FATAL when both stop-loss and close-position fail', async () => {
+      const client = makeMockT212Client();
+      // First call: buy order succeeds. Second call: close after stop-loss failure fails.
+      client.placeMarketOrder
+        .mockResolvedValueOnce({ id: 103 })
+        .mockRejectedValueOnce(new Error('Close also failed'));
+      client.getOrder.mockResolvedValue({
+        status: 'FILLED',
+        filledValue: 1500,
+        filledQuantity: 10,
+      });
+      client.placeStopOrder.mockRejectedValue(new Error('Stop order failed'));
+
+      orderManager.setT212Client(client);
+      mockSelectChain.get.mockReturnValueOnce(undefined);
+      mockInsertChain.run.mockReturnValue({ lastInsertRowid: 7n });
+
+      const result = await orderManager.executeBuy(makeBuyParams());
+
+      // Trade is still recorded despite FATAL situation
+      expect(result.success).toBe(true);
+      // Verify both placeMarketOrder calls happened (buy + attempted close)
+      expect(client.placeMarketOrder).toHaveBeenCalledTimes(2);
+    });
+
     it('returns error when placeMarketOrder throws', async () => {
       const client = makeMockT212Client();
       client.placeMarketOrder.mockRejectedValue(new Error('API down'));
@@ -335,6 +361,111 @@ describe('OrderManager', () => {
         value: null,
         quantity: null,
       });
+
+      orderManager.setT212Client(client);
+      mockSelectChain.get.mockReturnValueOnce(undefined);
+
+      const result = await orderManager.executeBuy(makeBuyParams());
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Order fill timeout');
+    });
+
+    it('reconciles filled order when cancel fails after timeout', async () => {
+      mockConfigGet.mockImplementation((key: string) => {
+        const defaults: Record<string, unknown> = {
+          'execution.dryRun': false,
+          'execution.orderTimeoutSeconds': 1,
+          'execution.stopLossDelay': 0,
+        };
+        return defaults[key];
+      });
+
+      const client = makeMockT212Client();
+      client.placeMarketOrder.mockResolvedValue({ id: 108 });
+      // Polling: 2 calls return NEW (timeout with 1s = 2 attempts)
+      // Final status check after cancel fails: FILLED
+      client.getOrder
+        .mockResolvedValueOnce({ status: 'NEW' })
+        .mockResolvedValueOnce({ status: 'NEW' })
+        .mockResolvedValueOnce({ status: 'FILLED', filledValue: 1500, filledQuantity: 10 });
+      client.cancelOrder.mockRejectedValue(new Error('Cancel failed'));
+      client.placeStopOrder.mockResolvedValue({ id: 300 });
+
+      orderManager.setT212Client(client);
+      mockSelectChain.get.mockReturnValueOnce(undefined);
+      mockInsertChain.run.mockReturnValue({ lastInsertRowid: 8n });
+
+      const result = await orderManager.executeBuy(makeBuyParams());
+      expect(result.success).toBe(true);
+      expect(result.tradeId).toBe(8);
+    });
+
+    it('returns timeout when cancel fails and final status is not FILLED', async () => {
+      mockConfigGet.mockImplementation((key: string) => {
+        const defaults: Record<string, unknown> = {
+          'execution.dryRun': false,
+          'execution.orderTimeoutSeconds': 1,
+          'execution.stopLossDelay': 0,
+        };
+        return defaults[key];
+      });
+
+      const client = makeMockT212Client();
+      client.placeMarketOrder.mockResolvedValue({ id: 109 });
+      client.getOrder.mockResolvedValue({ status: 'NEW' });
+      client.cancelOrder.mockRejectedValue(new Error('Cancel failed'));
+
+      orderManager.setT212Client(client);
+      mockSelectChain.get.mockReturnValueOnce(undefined);
+
+      const result = await orderManager.executeBuy(makeBuyParams());
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Order fill timeout');
+    });
+
+    it('returns timeout when cancel fails and status check also throws', async () => {
+      mockConfigGet.mockImplementation((key: string) => {
+        const defaults: Record<string, unknown> = {
+          'execution.dryRun': false,
+          'execution.orderTimeoutSeconds': 1,
+          'execution.stopLossDelay': 0,
+        };
+        return defaults[key];
+      });
+
+      const client = makeMockT212Client();
+      client.placeMarketOrder.mockResolvedValue({ id: 110 });
+      client.getOrder
+        .mockResolvedValueOnce({ status: 'NEW' })
+        .mockResolvedValueOnce({ status: 'NEW' })
+        .mockRejectedValueOnce(new Error('Status check failed'));
+      client.cancelOrder.mockRejectedValue(new Error('Cancel failed'));
+
+      orderManager.setT212Client(client);
+      mockSelectChain.get.mockReturnValueOnce(undefined);
+
+      const result = await orderManager.executeBuy(makeBuyParams());
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Order fill timeout');
+    });
+
+    it('returns timeout when cancel fails and filled order has no price data', async () => {
+      mockConfigGet.mockImplementation((key: string) => {
+        const defaults: Record<string, unknown> = {
+          'execution.dryRun': false,
+          'execution.orderTimeoutSeconds': 1,
+          'execution.stopLossDelay': 0,
+        };
+        return defaults[key];
+      });
+
+      const client = makeMockT212Client();
+      client.placeMarketOrder.mockResolvedValue({ id: 111 });
+      client.getOrder
+        .mockResolvedValueOnce({ status: 'NEW' })
+        .mockResolvedValueOnce({ status: 'NEW' })
+        .mockResolvedValueOnce({ status: 'FILLED', filledValue: null, filledQuantity: null });
+      client.cancelOrder.mockRejectedValue(new Error('Cancel failed'));
 
       orderManager.setT212Client(client);
       mockSelectChain.get.mockReturnValueOnce(undefined);

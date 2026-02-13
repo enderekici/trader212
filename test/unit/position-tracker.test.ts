@@ -49,6 +49,7 @@ vi.mock('../../src/db/index.js', () => ({
 
 vi.mock('../../src/db/schema.js', () => ({
   positions: { symbol: 'symbol' },
+  trades: { id: 'id' },
 }));
 
 // Yahoo Finance mock
@@ -121,7 +122,7 @@ describe('PositionTracker', () => {
   describe('syncWithT212', () => {
     it('logs warnings for DB positions not in T212', async () => {
       mockDbAll.mockReturnValueOnce([
-        { symbol: 'AAPL', t212Ticker: 'AAPL_US_EQ', shares: 10 },
+        { symbol: 'AAPL', t212Ticker: 'AAPL_US_EQ', shares: 10, entryPrice: 150, currentPrice: 160, entryTime: '2024-01-01T00:00:00Z' },
       ]);
 
       const mockClient = {
@@ -130,8 +131,22 @@ describe('PositionTracker', () => {
 
       await tracker.syncWithT212(mockClient);
 
-      // No throw expected; warns about DB position not in T212
+      // Auto-reconciles the position (insert trade + delete position)
       expect(mockClient.getPortfolio).toHaveBeenCalledOnce();
+      expect(mockDbRun).toHaveBeenCalled();
+    });
+
+    it('auto-reconciles with accountType when defined', async () => {
+      mockDbAll.mockReturnValueOnce([
+        { symbol: 'AAPL', t212Ticker: 'AAPL_US_EQ', shares: 10, entryPrice: 150, currentPrice: 160, entryTime: '2024-01-01T00:00:00Z', accountType: 'CFD' },
+      ]);
+
+      const mockClient = {
+        getPortfolio: vi.fn().mockResolvedValue([]),
+      } as any;
+
+      await tracker.syncWithT212(mockClient);
+      expect(mockDbRun).toHaveBeenCalled();
     });
 
     it('logs warnings for T212 positions not in DB', async () => {
@@ -170,6 +185,19 @@ describe('PositionTracker', () => {
       const mockClient = {
         getPortfolio: vi.fn().mockResolvedValue([
           { instrument: { ticker: 'AAPL_US_EQ' }, quantity: 10, currentPrice: 150 },
+        ]),
+      } as any;
+
+      await tracker.syncWithT212(mockClient);
+      expect(mockClient.getPortfolio).toHaveBeenCalledOnce();
+    });
+
+    it('falls back to empty string when T212 position has no ticker', async () => {
+      mockDbAll.mockReturnValueOnce([]);
+
+      const mockClient = {
+        getPortfolio: vi.fn().mockResolvedValue([
+          { quantity: 5, currentPrice: 100 },
         ]),
       } as any;
 

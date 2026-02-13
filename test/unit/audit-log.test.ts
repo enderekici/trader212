@@ -470,6 +470,48 @@ describe('AuditLogger', () => {
       const tradeDetailLine = lines.find((l: string) => l.startsWith('  ') && l.includes(' - '));
       expect(tradeDetailLine).toBeUndefined();
     });
+
+    it('handles entries with non-standard timestamps and null symbols', () => {
+      mockDbAll.mockReturnValueOnce([
+        {
+          id: 1,
+          timestamp: '2025-01-15',
+          eventType: 'trade',
+          category: 'execution',
+          symbol: null,
+          summary: 'Buy shares',
+          details: null,
+          severity: 'info',
+        },
+        {
+          id: 2,
+          timestamp: '2025-01-15',
+          eventType: 'error',
+          category: 'system',
+          symbol: null,
+          summary: 'Timeout',
+          details: null,
+          severity: 'error',
+        },
+        {
+          id: 3,
+          timestamp: '2025-01-15',
+          eventType: 'control',
+          category: 'risk',
+          symbol: null,
+          summary: 'Alert',
+          details: null,
+          severity: 'warn',
+        },
+      ]);
+
+      const report = logger.generateDailyReport('2025-01-15');
+
+      // Timestamps without 'T' hit the ?? '' fallback branches
+      expect(report).toContain('Buy shares');
+      expect(report).toContain('Timeout');
+      expect(report).toContain('Alert');
+    });
   });
 
   // ── getAuditLogger singleton ───────────────────────────────────────────

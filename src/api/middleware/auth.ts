@@ -10,7 +10,7 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction):
     return;
   }
 
-  const apiKey = process.env.API_SECRET_KEY;
+  const apiKey = process.env.API_SECRET_KEY?.trim();
   if (!apiKey) {
     // No key configured — auth disabled
     next();

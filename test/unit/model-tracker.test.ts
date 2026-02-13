@@ -197,7 +197,7 @@ describe('ModelTracker', () => {
           actualOutcome: 'pending',
         },
       ]);
-      mockGetQuote.mockResolvedValueOnce({ price: 101 }); // +1% < 2% threshold
+      mockGetQuote.mockResolvedValueOnce({ price: 100.5 }); // +0.5% < 1% threshold
 
       const result = await tracker.evaluatePendingPredictions();
       expect(result).toBe(1);
@@ -423,6 +423,17 @@ describe('ModelTracker', () => {
       const stats = tracker.getModelStats();
 
       expect(stats[0].avgReturnOnBuy).toBe(0);
+    });
+
+    it('calculates holdAccuracy when evaluated HOLD predictions exist', () => {
+      mockDbAll.mockReturnValueOnce([
+        { aiModel: 'claude', decision: 'HOLD', conviction: 50, actualOutcome: 'correct', actualReturnPct: 0.002 },
+        { aiModel: 'claude', decision: 'HOLD', conviction: 40, actualOutcome: 'incorrect', actualReturnPct: 0.05 },
+      ]);
+
+      const stats = tracker.getModelStats();
+
+      expect(stats[0].holdAccuracy).toBe(0.5); // 1/2
     });
   });
 });

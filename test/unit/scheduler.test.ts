@@ -113,6 +113,44 @@ describe('Scheduler', () => {
       await expect(wrappedHandler()).resolves.toBeUndefined();
     });
 
+    it('calls onJobFailure callback when handler throws', async () => {
+      const failureCb = vi.fn();
+      scheduler.setOnJobFailure(failureCb);
+
+      const error = new Error('handler error');
+      const handler = vi.fn().mockRejectedValue(error);
+      scheduler.registerJob('failing-job', '*/5 * * * *', handler, false);
+
+      const wrappedHandler = mockSchedule.mock.calls[0][1] as () => Promise<void>;
+      await wrappedHandler();
+
+      expect(failureCb).toHaveBeenCalledWith('failing-job', error);
+    });
+
+    it('silently catches errors from onJobFailure callback', async () => {
+      const failureCb = vi.fn().mockImplementation(() => {
+        throw new Error('callback error');
+      });
+      scheduler.setOnJobFailure(failureCb);
+
+      const handler = vi.fn().mockRejectedValue(new Error('handler error'));
+      scheduler.registerJob('failing-job', '*/5 * * * *', handler, false);
+
+      const wrappedHandler = mockSchedule.mock.calls[0][1] as () => Promise<void>;
+      // Should not throw even when callback throws
+      await expect(wrappedHandler()).resolves.toBeUndefined();
+      expect(failureCb).toHaveBeenCalled();
+    });
+
+    it('does not call onJobFailure when no callback is set', async () => {
+      const handler = vi.fn().mockRejectedValue(new Error('handler error'));
+      scheduler.registerJob('failing-job', '*/5 * * * *', handler, false);
+
+      const wrappedHandler = mockSchedule.mock.calls[0][1] as () => Promise<void>;
+      // Should not throw
+      await expect(wrappedHandler()).resolves.toBeUndefined();
+    });
+
     it('wrapped handler handles async handlers', async () => {
       const handler = vi.fn().mockResolvedValue(undefined);
       scheduler.registerJob('async-job', '*/5 * * * *', handler, false);

@@ -129,6 +129,31 @@ describe('RiskGuard', () => {
       expect(result.allowed).toBe(true);
     });
 
+    it('rejects when sector value percentage exceeds limit', () => {
+      mockConfigGet.mockImplementation((key: string) => {
+        const defaults: Record<string, unknown> = {
+          'risk.maxPositions': 5,
+          'risk.maxPositionSizePct': 0.15,
+          'risk.maxRiskPerTradePct': 0.02,
+          'risk.maxSectorConcentration': 3,
+          'risk.dailyLossLimitPct': 0.05,
+          'risk.maxDrawdownAlertPct': 0.10,
+          'risk.maxSectorValuePct': 0.35,
+        };
+        return defaults[key];
+      });
+
+      const result = guard.validateTrade(
+        makeProposal({ sector: 'Technology' }),
+        makePortfolio({
+          sectorExposure: { Technology: 2 },
+          sectorExposureValue: { Technology: 0.40 },
+        }),
+      );
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain('value');
+    });
+
     it('allows when sector not in exposure map', () => {
       const result = guard.validateTrade(
         makeProposal({ sector: 'Healthcare' }),

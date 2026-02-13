@@ -1767,5 +1767,131 @@ describe('api/routes', () => {
       handler(mockReq({ params: { id: '1' } }), res);
       expect(res.json).toHaveBeenCalledWith({ message: 'Plan rejected' });
     });
+
+    it('default closePosition returns not connected', async () => {
+      vi.resetModules();
+      const routesMod = await import('../../src/api/routes.js');
+      const router = routesMod.createRouter();
+
+      const route = (router as any).stack.find(
+        (l: any) => l.route?.path === '/api/control/close/:symbol'
+      );
+      const handler = route.route.stack[0].handle;
+      const res = mockRes();
+      await handler(mockReq({ params: { symbol: 'AAPL' } }), res);
+      expect(res.json).toHaveBeenCalledWith({ message: 'Not connected to bot' });
+    });
+
+    it('default analyzeSymbol returns not connected', async () => {
+      vi.resetModules();
+      const routesMod = await import('../../src/api/routes.js');
+      const router = routesMod.createRouter();
+
+      const route = (router as any).stack.find(
+        (l: any) => l.route?.path === '/api/control/analyze/:symbol'
+      );
+      const handler = route.route.stack[0].handle;
+      const res = mockRes();
+      await handler(mockReq({ params: { symbol: 'AAPL' } }), res);
+      expect(res.json).toHaveBeenCalledWith({ message: 'Not connected to bot' });
+    });
+
+    it('default refreshPairlist returns not connected', async () => {
+      vi.resetModules();
+      const routesMod = await import('../../src/api/routes.js');
+      const router = routesMod.createRouter();
+
+      const route = (router as any).stack.find(
+        (l: any) => l.route?.path === '/api/control/refresh-pairlist'
+      );
+      const handler = route.route.stack[0].handle;
+      const res = mockRes();
+      await handler(mockReq(), res);
+      expect(res.json).toHaveBeenCalledWith({ message: 'Not connected to bot' });
+    });
+
+    it('default emergencyStop returns not connected', async () => {
+      vi.resetModules();
+      const routesMod = await import('../../src/api/routes.js');
+      const router = routesMod.createRouter();
+
+      const route = (router as any).stack.find(
+        (l: any) => l.route?.path === '/api/control/emergency-stop'
+      );
+      const handler = route.route.stack[0].handle;
+      const res = mockRes();
+      await handler(mockReq(), res);
+      expect(res.json).toHaveBeenCalledWith({ message: 'Not connected to bot' });
+    });
+
+    it('default getTradePlans returns empty array', async () => {
+      vi.resetModules();
+      const routesMod = await import('../../src/api/routes.js');
+      const router = routesMod.createRouter();
+
+      const route = (router as any).stack.find(
+        (l: any) => l.route?.path === '/api/trade-plans' && l.route?.methods?.get
+      );
+      const handler = route.route.stack[0].handle;
+      const res = mockRes();
+      handler(mockReq(), res);
+      expect(res.json).toHaveBeenCalledWith({ plans: [] });
+    });
+
+    it('default approveTradePlan returns null (404)', async () => {
+      vi.resetModules();
+      const routesMod = await import('../../src/api/routes.js');
+      const router = routesMod.createRouter();
+
+      const route = (router as any).stack.find(
+        (l: any) => l.route?.path === '/api/trade-plans/:id/approve'
+      );
+      const handler = route.route.stack[0].handle;
+      const res = mockRes();
+      handler(mockReq({ params: { id: '1' } }), res);
+      expect(res.status).toHaveBeenCalledWith(404);
+    });
+
+    it('default runResearch returns null', async () => {
+      vi.resetModules();
+      const routesMod = await import('../../src/api/routes.js');
+      const router = routesMod.createRouter();
+
+      const route = (router as any).stack.find(
+        (l: any) => l.route?.path === '/api/research/run'
+      );
+      const handler = route.route.stack[0].handle;
+      const res = mockRes();
+      await handler(mockReq({ body: {} }), res);
+      expect(res.json).toHaveBeenCalledWith({ report: null });
+    });
+
+    it('default getResearchReports returns empty array', async () => {
+      vi.resetModules();
+      const routesMod = await import('../../src/api/routes.js');
+      const router = routesMod.createRouter();
+
+      const route = (router as any).stack.find(
+        (l: any) => l.route?.path === '/api/research' && l.route?.methods?.get
+      );
+      const handler = route.route.stack[0].handle;
+      const res = mockRes();
+      handler(mockReq(), res);
+      expect(res.json).toHaveBeenCalledWith({ reports: [] });
+    });
+
+    it('default getModelStats returns empty array', async () => {
+      vi.resetModules();
+      const routesMod = await import('../../src/api/routes.js');
+      const router = routesMod.createRouter();
+
+      const route = (router as any).stack.find(
+        (l: any) => l.route?.path === '/api/model-stats'
+      );
+      const handler = route.route.stack[0].handle;
+      const res = mockRes();
+      handler(mockReq(), res);
+      expect(res.json).toHaveBeenCalledWith({ stats: [] });
+    });
   });
 });

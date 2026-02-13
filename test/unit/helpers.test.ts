@@ -5,6 +5,7 @@ import {
   formatPercent,
   generateId,
   round,
+  safeJsonParse,
   sleep,
   retryAsync,
 } from '../../src/utils/helpers.js';
@@ -135,6 +136,32 @@ describe('helpers', () => {
 
     it('handles large decimal places', () => {
       expect(round(3.14159265, 4)).toBe(3.1416);
+    });
+  });
+
+  describe('safeJsonParse', () => {
+    it('parses valid JSON', () => {
+      expect(safeJsonParse('{"a":1}', {})).toEqual({ a: 1 });
+    });
+
+    it('parses JSON array', () => {
+      expect(safeJsonParse('[1,2,3]', [])).toEqual([1, 2, 3]);
+    });
+
+    it('returns fallback for null input', () => {
+      expect(safeJsonParse(null, 'default')).toBe('default');
+    });
+
+    it('returns fallback for undefined input', () => {
+      expect(safeJsonParse(undefined, 'default')).toBe('default');
+    });
+
+    it('returns fallback for invalid JSON', () => {
+      expect(safeJsonParse('{invalid', 'fallback')).toBe('fallback');
+    });
+
+    it('returns fallback for empty string', () => {
+      expect(safeJsonParse('', [])).toEqual([]);
     });
   });
 
