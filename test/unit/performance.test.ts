@@ -453,6 +453,45 @@ describe('PerformanceTracker', () => {
       expect(summary).toContain('Open positions: 1');
     });
 
+    it('includes trade details with positive and negative pnl formatting', () => {
+      // Trades with positive and negative pnl
+      mockTradesAll.mockReturnValueOnce([
+        { symbol: 'AAPL', side: 'BUY', pnl: 100, pnlPct: 0.05, exitPrice: 105 },
+        { symbol: 'GOOG', side: 'SELL', pnl: -50, pnlPct: -0.025, exitPrice: 95 },
+      ]);
+      // Open positions with non-null pnl
+      mockTradesAll.mockReturnValueOnce([
+        { symbol: 'MSFT', pnl: 75 },
+        { symbol: 'TSLA', pnl: -30 },
+      ]);
+
+      const summary = tracker.generateDailySummary();
+
+      expect(summary).toContain('Trades today: 2');
+      // Positive trade should have '+' prefix
+      expect(summary).toContain('BUY AAPL: +');
+      // Negative trade should NOT have '+' prefix
+      expect(summary).toContain('SELL GOOG:');
+      expect(summary).not.toContain('SELL GOOG: +');
+      expect(summary).toContain('Open positions: 2');
+      // Unrealized P&L: 75 + (-30) = 45
+      expect(summary).toContain('Unrealized P');
+    });
+
+    it('handles trades with null pnl in daily summary', () => {
+      mockTradesAll.mockReturnValueOnce([
+        { symbol: 'AAPL', side: 'BUY', pnl: null, pnlPct: null, exitPrice: 105 },
+      ]);
+      mockTradesAll.mockReturnValueOnce([
+        { symbol: 'MSFT', pnl: null },
+      ]);
+
+      const summary = tracker.generateDailySummary();
+
+      expect(summary).toContain('Trades today: 1');
+      expect(summary).toContain('Open positions: 1');
+    });
+
     it('generates summary with no trades', () => {
       mockTradesAll.mockReturnValueOnce([]);
       mockTradesAll.mockReturnValueOnce([]);

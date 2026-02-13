@@ -395,6 +395,17 @@ describe('RiskGuard', () => {
       expect(result).toBe(0.5);
     });
 
+    it('counts as loss when both pnl and exitPrice are null', () => {
+      // pnl is null, exitPrice is null -> (0 < entryPrice) -> counted as loss
+      mockAll.mockReturnValueOnce([
+        { pnl: null, exitPrice: null, entryPrice: 150 },
+        { pnl: null, exitPrice: null, entryPrice: 140 },
+        { pnl: null, exitPrice: null, entryPrice: 130 },
+      ]);
+      const result = guard.getLosingStreakMultiplier();
+      expect(result).toBe(0.5);
+    });
+
     it('returns 1.0 when threshold is 0', () => {
       mockConfigGet.mockImplementation((key: string) => {
         if (key === 'risk.streakReductionThreshold') return 0;

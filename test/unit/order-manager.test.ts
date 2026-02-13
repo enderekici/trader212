@@ -323,6 +323,69 @@ describe('OrderManager', () => {
       expect(result.error).toBe('string error');
     });
 
+    it('places take-profit limit order when takeProfitPct > 0', async () => {
+      const client = makeMockT212Client();
+      client.placeMarketOrder.mockResolvedValue({ id: 120 });
+      client.getOrder.mockResolvedValue({
+        status: 'FILLED',
+        filledValue: 1500,
+        filledQuantity: 10,
+      });
+      client.placeStopOrder.mockResolvedValue({ id: 220 });
+      client.placeLimitOrder.mockResolvedValue({ id: 320 });
+
+      orderManager.setT212Client(client);
+      mockSelectChain.get.mockReturnValueOnce(undefined);
+      mockTxInsertChain.run.mockReturnValue({ lastInsertRowid: 20n });
+
+      const result = await orderManager.executeBuy(makeBuyParams({ takeProfitPct: 0.10 }));
+
+      expect(result.success).toBe(true);
+      expect(client.placeLimitOrder).toHaveBeenCalledOnce();
+    });
+
+    it('skips take-profit order when takeProfitPct is 0', async () => {
+      const client = makeMockT212Client();
+      client.placeMarketOrder.mockResolvedValue({ id: 121 });
+      client.getOrder.mockResolvedValue({
+        status: 'FILLED',
+        filledValue: 1500,
+        filledQuantity: 10,
+      });
+      client.placeStopOrder.mockResolvedValue({ id: 221 });
+
+      orderManager.setT212Client(client);
+      mockSelectChain.get.mockReturnValueOnce(undefined);
+      mockTxInsertChain.run.mockReturnValue({ lastInsertRowid: 21n });
+
+      const result = await orderManager.executeBuy(makeBuyParams({ takeProfitPct: 0 }));
+
+      expect(result.success).toBe(true);
+      expect(client.placeLimitOrder).not.toHaveBeenCalled();
+    });
+
+    it('handles take-profit order failure gracefully', async () => {
+      const client = makeMockT212Client();
+      client.placeMarketOrder.mockResolvedValue({ id: 122 });
+      client.getOrder.mockResolvedValue({
+        status: 'FILLED',
+        filledValue: 1500,
+        filledQuantity: 10,
+      });
+      client.placeStopOrder.mockResolvedValue({ id: 222 });
+      client.placeLimitOrder.mockRejectedValue(new Error('TP placement failed'));
+
+      orderManager.setT212Client(client);
+      mockSelectChain.get.mockReturnValueOnce(undefined);
+      mockTxInsertChain.run.mockReturnValue({ lastInsertRowid: 22n });
+
+      const result = await orderManager.executeBuy(makeBuyParams({ takeProfitPct: 0.10 }));
+
+      // Should still succeed; TP failure is non-fatal
+      expect(result.success).toBe(true);
+      expect(client.placeLimitOrder).toHaveBeenCalledOnce();
+    });
+
     it('handles order filled with fallback pricing (value/quantity)', async () => {
       const client = makeMockT212Client();
       client.placeMarketOrder.mockResolvedValue({ id: 104 });
@@ -676,6 +739,86 @@ describe('OrderManager', () => {
       const result = await orderManager.executeClose(makeCloseParams());
       expect(result.success).toBe(false);
       expect(result.error).toBe('42');
+    });
+
+    it('cancels take-profit order when present', async () => {
+      const client = makeMockT212Client();
+      client.cancelOrder.mockResolvedValue(undefined);
+      client.placeMarketOrder.mockResolvedValue({ id: 310 });
+      client.getOrder.mockResolvedValue({
+        status: 'FILLED',
+        filledValue: 1550,
+        filledQuantity: 10,
+      });
+
+      orderManager.setT212Client(client);
+      mockSelectChain.get.mockReturnValueOnce({
+        symbol: 'AAPL',
+        shares: 10,
+        entryPrice: 140,
+        currentPrice: 155,
+        entryTime: '2024-01-01T00:00:00Z',
+        stopOrderId: '999',
+        takeProfitOrderId: '888',
+      });
+      mockTxInsertChain.run.mockReturnValue({ lastInsertRowid: 15n });
+
+      const result = await orderManager.executeClose(makeCloseParams());
+      expect(result.success).toBe(true);
+      // cancelOrder called for both stop and TP
+      expect(client.cancelOrder).toHaveBeenCalledWith(999);
+      expect(client.cancelOrder).toHaveBeenCalledWith(888);
+    });
+
+    it('handles take-profit cancel failure gracefully', async () => {
+      const client = makeMockT212Client();
+      client.cancelOrder
+        .mockResolvedValueOnce(undefined) // stop cancel OK
+        .mockRejectedValueOnce(new Error('TP already filled')); // TP cancel fails
+      client.placeMarketOrder.mockResolvedValue({ id: 311 });
+      client.getOrder.mockResolvedValue({
+        status: 'FILLED',
+        filledValue: 1550,
+        filledQuantity: 10,
+      });
+
+      orderManager.setT212Client(client);
+      mockSelectChain.get.mockReturnValueOnce({
+        symbol: 'AAPL',
+        shares: 10,
+        entryPrice: 140,
+        currentPrice: 155,
+        entryTime: '2024-01-01T00:00:00Z',
+        stopOrderId: '999',
+        takeProfitOrderId: '777',
+      });
+      mockTxInsertChain.run.mockReturnValue({ lastInsertRowid: 16n });
+
+      const result = await orderManager.executeClose(makeCloseParams());
+      expect(result.success).toBe(true); // should not fail the close
+    });
+
+    it('uses entryPrice as fallback for slippage when currentPrice is null (live close)', async () => {
+      const client = makeMockT212Client();
+      client.placeMarketOrder.mockResolvedValue({ id: 320 });
+      client.getOrder.mockResolvedValue({
+        status: 'FILLED',
+        filledValue: 1400,
+        filledQuantity: 10,
+      });
+
+      orderManager.setT212Client(client);
+      mockSelectChain.get.mockReturnValueOnce({
+        symbol: 'AAPL',
+        shares: 10,
+        entryPrice: 140,
+        currentPrice: null, // null -> fallback to entryPrice
+        entryTime: '2024-01-01T00:00:00Z',
+      });
+      mockTxInsertChain.run.mockReturnValue({ lastInsertRowid: 30n });
+
+      const result = await orderManager.executeClose(makeCloseParams());
+      expect(result.success).toBe(true);
     });
 
     it('skips cancel when no stopOrderId exists', async () => {

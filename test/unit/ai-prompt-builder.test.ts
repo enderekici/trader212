@@ -375,6 +375,75 @@ describe('buildAnalysisPrompt', () => {
     });
   });
 
+  describe('portfolio correlations section', () => {
+    it('renders high correlation label for abs >= 0.7', () => {
+      const ctx = makeFullContext();
+      ctx.portfolioCorrelations = [{ symbol: 'MSFT', correlation: 0.85 }];
+      const { user } = buildAnalysisPrompt(ctx);
+      expect(user).toContain('MSFT: 0.85 (high)');
+      expect(user).toContain('PORTFOLIO CORRELATIONS:');
+    });
+
+    it('renders moderate correlation label for abs >= 0.4 and < 0.7', () => {
+      const ctx = makeFullContext();
+      ctx.portfolioCorrelations = [{ symbol: 'GOOG', correlation: 0.55 }];
+      const { user } = buildAnalysisPrompt(ctx);
+      expect(user).toContain('GOOG: 0.55 (moderate)');
+    });
+
+    it('renders low correlation label for abs < 0.4', () => {
+      const ctx = makeFullContext();
+      ctx.portfolioCorrelations = [{ symbol: 'TSLA', correlation: 0.15 }];
+      const { user } = buildAnalysisPrompt(ctx);
+      expect(user).toContain('TSLA: 0.15 (low)');
+    });
+
+    it('renders negative high correlation', () => {
+      const ctx = makeFullContext();
+      ctx.portfolioCorrelations = [{ symbol: 'SQQQ', correlation: -0.80 }];
+      const { user } = buildAnalysisPrompt(ctx);
+      expect(user).toContain('SQQQ: -0.80 (high)');
+    });
+
+    it('renders only correlation warnings when no correlations but warnings present', () => {
+      const ctx = makeFullContext();
+      ctx.portfolioCorrelations = [];
+      ctx.correlationWarnings = ['High correlation with MSFT (0.85)'];
+      const { user } = buildAnalysisPrompt(ctx);
+      expect(user).toContain('CORRELATION WARNINGS:');
+      expect(user).toContain('- High correlation with MSFT (0.85)');
+      expect(user).not.toContain('PORTFOLIO CORRELATIONS:');
+    });
+
+    it('renders both correlations and warnings when both present', () => {
+      const ctx = makeFullContext();
+      ctx.portfolioCorrelations = [{ symbol: 'MSFT', correlation: 0.75 }];
+      ctx.correlationWarnings = ['Exceeds max correlation threshold'];
+      const { user } = buildAnalysisPrompt(ctx);
+      expect(user).toContain('PORTFOLIO CORRELATIONS:');
+      expect(user).toContain('MSFT: 0.75 (high)');
+      expect(user).toContain('CORRELATION WARNINGS:');
+      expect(user).toContain('- Exceeds max correlation threshold');
+    });
+
+    it('renders no correlation section when both empty', () => {
+      const ctx = makeFullContext();
+      ctx.portfolioCorrelations = [];
+      ctx.correlationWarnings = [];
+      const { user } = buildAnalysisPrompt(ctx);
+      expect(user).not.toContain('PORTFOLIO CORRELATIONS:');
+      expect(user).not.toContain('CORRELATION WARNINGS:');
+    });
+
+    it('renders no correlation section when both undefined', () => {
+      const ctx = makeFullContext();
+      // Do not set portfolioCorrelations or correlationWarnings
+      const { user } = buildAnalysisPrompt(ctx);
+      expect(user).not.toContain('PORTFOLIO CORRELATIONS:');
+      expect(user).not.toContain('CORRELATION WARNINGS:');
+    });
+  });
+
   describe('historical signal rsi/macdHistogram null handling', () => {
     it('formats null RSI and MACD histogram as N/A in historical signals', () => {
       const ctx = makeFullContext();

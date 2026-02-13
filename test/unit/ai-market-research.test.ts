@@ -455,6 +455,39 @@ some garbage in between
       expect(report.results[0].sector).toBe('Unknown');
     });
 
+    it('extracts individual blocks with targetPrice set', async () => {
+      const rawResponse = `Results:
+{"symbol": "NVDA", "recommendation": "strong_buy", "conviction": 90, "reasoning": "AI leader", "catalysts": ["Data center"], "risks": ["Valuation"], "targetPrice": 950, "timeHorizon": "long", "sector": "Technology"}`;
+
+      const agent = createMockAgent(rawResponse);
+      const researcher = new MarketResearcher(agent);
+
+      const report = await researcher.runResearch();
+      expect(report.results).toHaveLength(1);
+      expect(report.results[0].targetPrice).toBe(950);
+      expect(report.results[0].symbol).toBe('NVDA');
+      expect(report.results[0].conviction).toBe(90);
+    });
+
+    it('extracts individual blocks with missing symbol and conviction (nullish fallbacks)', async () => {
+      // The regex requires "symbol": "SOMETHING" so symbol will always exist in matched blocks.
+      // But recommendation/conviction/reasoning can be missing in the parsed object.
+      const rawResponse = `Results:
+{"symbol": "XYZ", "catalysts": "not-array", "risks": "not-array"}`;
+
+      const agent = createMockAgent(rawResponse);
+      const researcher = new MarketResearcher(agent);
+
+      const report = await researcher.runResearch();
+      expect(report.results).toHaveLength(1);
+      expect(report.results[0].recommendation).toBe('hold');
+      expect(report.results[0].conviction).toBe(50);
+      expect(report.results[0].catalysts).toEqual([]);
+      expect(report.results[0].risks).toEqual([]);
+      expect(report.results[0].targetPrice).toBeUndefined();
+      expect(report.results[0].sector).toBe('Unknown');
+    });
+
     it('skips malformed individual blocks that match regex but fail JSON.parse', async () => {
       // This block matches the regex /\{[^{}]*"symbol"\s*:\s*"[A-Z]+[^{}]*\}/g
       // but contains invalid JSON that will fail JSON.parse even after trailing comma repair
