@@ -481,6 +481,34 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
     description: 'Number of top stocks to analyze in research',
   },
 
+  // Risk - loss cool-down recovery
+  {
+    key: 'risk.lossCooldownMinutes',
+    value: '60',
+    category: 'risk',
+    description: 'Cool-down duration (minutes) after daily loss limit breach',
+  },
+  {
+    key: 'risk.lossCooldownSizeFactor',
+    value: '0.5',
+    category: 'risk',
+    description: 'Position size multiplier during cool-down (0-1)',
+  },
+
+  // Risk - streak-based position sizing
+  {
+    key: 'risk.streakReductionThreshold',
+    value: '3',
+    category: 'risk',
+    description: 'Consecutive losses before reducing position size',
+  },
+  {
+    key: 'risk.streakReductionFactor',
+    value: '0.5',
+    category: 'risk',
+    description: 'Position size multiplier per streak threshold',
+  },
+
   // Risk - correlation
   {
     key: 'risk.maxCorrelation',

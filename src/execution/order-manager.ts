@@ -95,6 +95,8 @@ export class OrderManager {
             aiReasoning: params.aiReasoning,
             convictionScore: params.conviction,
             aiModel: params.aiModel,
+            intendedPrice: params.price,
+            slippage: 0,
             accountType: params.accountType,
           })
           .run();
@@ -212,6 +214,7 @@ export class OrderManager {
       }
 
       // Record trade and position atomically
+      const buySlippage = (fillPrice - params.price) / params.price;
       let tradeRowId: number | bigint = 0;
       db.transaction((tx) => {
         const trade = tx
@@ -228,6 +231,8 @@ export class OrderManager {
             aiReasoning: params.aiReasoning,
             convictionScore: params.conviction,
             aiModel: params.aiModel,
+            intendedPrice: params.price,
+            slippage: buySlippage,
             accountType: params.accountType,
           })
           .run();
@@ -314,6 +319,8 @@ export class OrderManager {
             entryTime: position.entryTime,
             exitTime: now,
             exitReason: params.exitReason,
+            intendedPrice: exitPrice,
+            slippage: 0,
             accountType: params.accountType,
           })
           .run();
@@ -382,6 +389,10 @@ export class OrderManager {
       const pnl = (fillPrice - position.entryPrice) * position.shares;
       const pnlPct = (fillPrice - position.entryPrice) / position.entryPrice;
 
+      // Slippage tracking for sells: intended price is what the bot saw at decision time
+      const intendedExitPrice = position.currentPrice ?? position.entryPrice;
+      const sellSlippage = (intendedExitPrice - fillPrice) / intendedExitPrice;
+
       // Record closing trade and remove position atomically
       db.transaction((tx) => {
         tx.insert(trades)
@@ -397,6 +408,8 @@ export class OrderManager {
             entryTime: position.entryTime,
             exitTime: now,
             exitReason: params.exitReason,
+            intendedPrice: intendedExitPrice,
+            slippage: sellSlippage,
             accountType: params.accountType,
           })
           .run();

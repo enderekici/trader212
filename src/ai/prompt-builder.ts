@@ -72,9 +72,36 @@ Respond ONLY with valid JSON matching the exact schema provided. No additional t
       : '';
 
   const correlationWarnings = context.correlationWarnings ?? [];
+  const portfolioCorrelations = context.portfolioCorrelations ?? [];
+
+  const correlationLabel = (corr: number): string => {
+    const abs = Math.abs(corr);
+    if (abs >= 0.7) return 'high';
+    if (abs >= 0.4) return 'moderate';
+    return 'low';
+  };
+
+  const correlationLines =
+    portfolioCorrelations.length > 0
+      ? portfolioCorrelations
+          .map(
+            (c) =>
+              `  - ${c.symbol}: ${c.correlation.toFixed(2)} (${correlationLabel(c.correlation)})`,
+          )
+          .join('\n')
+      : '';
+
   const correlationSection =
-    correlationWarnings.length > 0
-      ? `\nCORRELATION WARNINGS:\n${correlationWarnings.map((w) => `- ${w}`).join('\n')}\nNote: High correlation with existing positions increases portfolio risk.\n`
+    correlationLines || correlationWarnings.length > 0
+      ? `\n${
+          correlationLines
+            ? `PORTFOLIO CORRELATIONS:\n${correlationLines}\nHigh correlation (>0.7) means this stock moves similarly to existing positions, increasing portfolio risk. Negative correlation indicates inverse movement.\n`
+            : ''
+        }${
+          correlationWarnings.length > 0
+            ? `CORRELATION WARNINGS:\n${correlationWarnings.map((w) => `- ${w}`).join('\n')}\n`
+            : ''
+        }`
       : '';
 
   const user = `=== CURRENT ANALYSIS FOR ${context.symbol} ===

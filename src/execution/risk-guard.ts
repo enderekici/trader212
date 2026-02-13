@@ -1,4 +1,7 @@
+import { desc, isNotNull } from 'drizzle-orm';
 import { configManager } from '../config/manager.js';
+import { getDb } from '../db/index.js';
+import * as schema from '../db/schema.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('risk-guard');
@@ -123,5 +126,75 @@ export class RiskGuard {
     }
 
     return shouldAlert;
+  }
+
+  /**
+   * Calculates a position size multiplier based on consecutive losing trades.
+   * Every `streakReductionThreshold` consecutive losses, the multiplier is reduced
+   * by `streakReductionFactor`. For example, with threshold=3 and factor=0.5:
+   *   - 0-2 consecutive losses: 1.0 (no reduction)
+   *   - 3-5 consecutive losses: 0.5
+   *   - 6-8 consecutive losses: 0.25
+   *   - etc.
+   * Returns 1.0 if no reduction is needed.
+   */
+  getLosingStreakMultiplier(): number {
+    const threshold = configManager.get<number>('risk.streakReductionThreshold');
+    const factor = configManager.get<number>('risk.streakReductionFactor');
+
+    if (!threshold || threshold <= 0 || !factor || factor <= 0 || factor >= 1) {
+      return 1.0;
+    }
+
+    try {
+      const db = getDb();
+
+      // Get recent closed trades ordered by exit time descending
+      const recentTrades = db
+        .select({
+          pnl: schema.trades.pnl,
+          exitPrice: schema.trades.exitPrice,
+          entryPrice: schema.trades.entryPrice,
+        })
+        .from(schema.trades)
+        .where(isNotNull(schema.trades.exitPrice))
+        .orderBy(desc(schema.trades.exitTime))
+        .limit(100)
+        .all();
+
+      if (recentTrades.length === 0) {
+        return 1.0;
+      }
+
+      // Count consecutive losses from most recent trade
+      let consecutiveLosses = 0;
+      for (const trade of recentTrades) {
+        const isLoss =
+          trade.pnl !== null ? trade.pnl < 0 : (trade.exitPrice ?? 0) < trade.entryPrice;
+        if (isLoss) {
+          consecutiveLosses++;
+        } else {
+          break;
+        }
+      }
+
+      if (consecutiveLosses < threshold) {
+        return 1.0;
+      }
+
+      // Calculate how many full threshold groups of losses
+      const streakMultiples = Math.floor(consecutiveLosses / threshold);
+      const multiplier = factor ** streakMultiples;
+
+      log.warn(
+        { consecutiveLosses, threshold, factor, multiplier },
+        'Losing streak detected — reducing position size',
+      );
+
+      return multiplier;
+    } catch (err) {
+      log.error({ err }, 'Failed to compute losing streak multiplier');
+      return 1.0;
+    }
   }
 }

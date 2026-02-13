@@ -62,6 +62,7 @@ class TradingBot {
   private startedAt = '';
   private activeStocks: StockInfo[] = [];
   private lastKnownPortfolio: { cash: number; value: number; timestamp: string } | null = null;
+  private lossCooldownUntil: Date | null = null;
 
   async start(): Promise<void> {
     log.info('Starting Trading Bot...');
@@ -404,16 +405,90 @@ class TradingBot {
       return;
     }
 
-    // Issue #5: Check daily loss limit and auto-pause if breached
+    // Clear cool-down if it has expired
+    if (this.lossCooldownUntil && new Date() >= this.lossCooldownUntil) {
+      log.info('Loss cool-down period expired, resuming normal position sizing');
+      this.lossCooldownUntil = null;
+    }
+
+    // Check daily loss limit — cool-down recovery instead of permanent pause
     const portfolio = await this.getPortfolioState();
     if (this.riskGuard.checkDailyLoss(portfolio)) {
-      this.paused = true;
-      log.warn('Daily loss limit breached — auto-pausing trading');
-      await this.telegram.sendAlert(
-        'Daily Loss Limit',
-        `Trading auto-paused. Today P&L: ${formatCurrency(portfolio.todayPnl)} (${formatPercent(portfolio.todayPnlPct)})`,
-      );
-      return;
+      const dailyLossLimitPct = configManager.get<number>('risk.dailyLossLimitPct');
+      const isInCooldown = this.lossCooldownUntil && new Date() < this.lossCooldownUntil;
+
+      if (isInCooldown) {
+        // Already in cool-down — check hard limit (2x daily loss)
+        const hardLimitPct = dailyLossLimitPct * 2;
+        if (Math.abs(portfolio.todayPnlPct) >= hardLimitPct) {
+          log.error(
+            { todayPnlPct: portfolio.todayPnlPct, hardLimit: -hardLimitPct },
+            'HARD LIMIT: Daily loss exceeded 2x limit during cool-down — emergency stop',
+          );
+          const audit = getAuditLogger();
+          audit.logRisk(
+            `Hard loss limit breached (2x): ${formatPercent(portfolio.todayPnlPct)}`,
+            { hardLimitPct, todayPnlPct: portfolio.todayPnlPct },
+            'error',
+          );
+          // Trigger emergency stop via the existing callback
+          this.paused = true;
+          this.lossCooldownUntil = null;
+          const db = getDb();
+          const allPositions = db.select().from(schema.positions).all();
+          const accountType = configManager.get<string>('t212.accountType') as 'INVEST' | 'ISA';
+          const results = await Promise.allSettled(
+            allPositions.map((pos) =>
+              this.orderManager.executeClose({
+                symbol: pos.symbol,
+                t212Ticker: pos.t212Ticker,
+                shares: pos.shares,
+                exitReason: 'Hard loss limit emergency stop',
+                accountType,
+              }),
+            ),
+          );
+          const closed = results.filter((r) => r.status === 'fulfilled' && r.value.success).length;
+          await this.telegram.sendAlert(
+            'HARD LOSS LIMIT',
+            `Emergency stop: daily loss ${formatPercent(portfolio.todayPnlPct)} exceeded 2x limit. ${closed}/${allPositions.length} positions closed.`,
+          );
+          this.wsManager.broadcast('bot_status', {
+            status: 'paused',
+            message: 'Hard loss limit emergency stop',
+          });
+          return;
+        }
+        // Still within hard limit — continue with reduced sizing (handled in executeApprovedPlan)
+        log.warn(
+          {
+            todayPnlPct: portfolio.todayPnlPct,
+            cooldownUntil: this.lossCooldownUntil?.toISOString(),
+          },
+          'Daily loss limit breached but in cool-down — continuing with reduced position sizes',
+        );
+      } else {
+        // First breach — activate cool-down instead of pausing
+        const cooldownMinutes = configManager.get<number>('risk.lossCooldownMinutes') ?? 60;
+        this.lossCooldownUntil = new Date(Date.now() + cooldownMinutes * 60_000);
+        const audit = getAuditLogger();
+        audit.logRisk(`Daily loss limit breached — entering ${cooldownMinutes}min cool-down`, {
+          todayPnlPct: portfolio.todayPnlPct,
+          cooldownUntil: this.lossCooldownUntil.toISOString(),
+        });
+        log.warn(
+          { cooldownMinutes, cooldownUntil: this.lossCooldownUntil.toISOString() },
+          'Daily loss limit breached — entering cool-down with reduced position sizing',
+        );
+        await this.telegram.sendAlert(
+          'Daily Loss Cool-Down',
+          `Loss limit breached (${formatPercent(portfolio.todayPnlPct)}). Entering ${cooldownMinutes}-minute cool-down with reduced position sizing. Hard stop at 2x loss.`,
+        );
+        this.wsManager.broadcast('bot_status', {
+          status: 'cooldown',
+          message: `Loss cool-down active until ${this.lossCooldownUntil.toISOString()}`,
+        });
+      }
     }
 
     // Check drawdown alert
@@ -463,7 +538,14 @@ class TradingBot {
     };
     const sentimentScore = scoreSentiment(sentimentInput);
 
-    // 3. Build AI context
+    // 3. Compute portfolio correlations
+    const correlationResults = this.correlationAnalyzer.checkCorrelationWithPortfolio(symbol);
+    const portfolioCorrelations = correlationResults.map((c) => ({
+      symbol: c.symbol2,
+      correlation: c.correlation,
+    }));
+
+    // 4. Build AI context
     const portfolio = await this.getPortfolioState();
     const aiContext = this.buildAIContext(
       symbol,
@@ -474,9 +556,10 @@ class TradingBot {
       sentimentScore,
       sentimentInput,
       portfolio,
+      portfolioCorrelations,
     );
 
-    // 4. AI decision
+    // 5. AI decision
     const aiEnabled = configManager.get<boolean>('ai.enabled');
     let decision: AIDecision = {
       decision: 'HOLD',
@@ -494,7 +577,7 @@ class TradingBot {
       decision = await this.aiAgent.analyze(aiContext);
     }
 
-    // 5. Store signal in DB
+    // 6. Store signal in DB
     const db = getDb();
     db.insert(schema.signals)
       .values({
@@ -543,7 +626,7 @@ class TradingBot {
       })
       .run();
 
-    // 6. Broadcast signal via WebSocket
+    // 7. Broadcast signal via WebSocket
     this.wsManager.broadcast('signal_generated', {
       symbol,
       decision: decision.decision,
@@ -553,7 +636,7 @@ class TradingBot {
       sentimentScore,
     });
 
-    // 7. Execute if actionable
+    // 8. Execute if actionable
     if (decision.decision === 'BUY' || decision.decision === 'SELL') {
       await this.executeTrade(
         symbol,
@@ -728,10 +811,51 @@ class TradingBot {
 
     try {
       if (plan.side === 'BUY') {
+        // Apply streak-based position size reduction
+        let adjustedShares = plan.shares;
+        const streakMultiplier = this.riskGuard.getLosingStreakMultiplier();
+        if (streakMultiplier < 1.0) {
+          adjustedShares = Math.max(1, Math.floor(plan.shares * streakMultiplier));
+          log.info(
+            {
+              symbol: plan.symbol,
+              originalShares: plan.shares,
+              adjustedShares,
+              streakMultiplier,
+            },
+            'Position size reduced due to losing streak',
+          );
+          audit.logRisk(
+            `Streak reduction: ${plan.symbol} shares ${plan.shares} -> ${adjustedShares} (x${streakMultiplier})`,
+            { planId: plan.id, streakMultiplier },
+          );
+        }
+
+        // Apply cool-down position size reduction (stacks with streak reduction)
+        if (this.lossCooldownUntil && new Date() < this.lossCooldownUntil) {
+          const factor = configManager.get<number>('risk.lossCooldownSizeFactor') ?? 0.5;
+          const beforeCooldown = adjustedShares;
+          adjustedShares = Math.max(1, Math.floor(adjustedShares * factor));
+          log.warn(
+            {
+              symbol: plan.symbol,
+              factor,
+              beforeCooldown,
+              afterCooldown: adjustedShares,
+              cooldownUntil: this.lossCooldownUntil.toISOString(),
+            },
+            'Cool-down: reduced position size',
+          );
+          audit.logRisk(
+            `Cool-down reduction: ${plan.symbol} shares ${beforeCooldown} -> ${adjustedShares} (x${factor})`,
+            { planId: plan.id, factor, cooldownUntil: this.lossCooldownUntil.toISOString() },
+          );
+        }
+
         const buyParams: BuyParams = {
           symbol: plan.symbol,
           t212Ticker: plan.t212Ticker,
-          shares: plan.shares,
+          shares: adjustedShares,
           price: plan.entryPrice,
           stopLossPct: plan.stopLossPct,
           takeProfitPct: plan.takeProfitPct,
@@ -839,6 +963,9 @@ class TradingBot {
         }
       }
 
+      // Check for correlation drift between held positions
+      await this.checkCorrelationDrift();
+
       // Broadcast updated positions
       const db = getDb();
       const allPositions = db.select().from(schema.positions).all();
@@ -863,6 +990,12 @@ class TradingBot {
       const summary = this.performanceTracker.generateDailySummary();
       await this.telegram.sendMessage(summary);
       await this.performanceTracker.saveDailyMetrics();
+
+      // Reset cool-down at end of trading day
+      if (this.lossCooldownUntil) {
+        log.info('Clearing loss cool-down at end of trading day');
+        this.lossCooldownUntil = null;
+      }
     } catch (err) {
       log.error({ err }, 'Failed to send daily summary');
     }
@@ -902,9 +1035,15 @@ class TradingBot {
     const portfolio = await this.getPortfolioState();
     const uptime = this.getUptime();
 
-    return [
+    const statusLabel = this.paused
+      ? 'PAUSED'
+      : this.lossCooldownUntil && new Date() < this.lossCooldownUntil
+        ? 'COOL-DOWN'
+        : 'RUNNING';
+
+    const lines = [
       '<b>Bot Status</b>',
-      `Status: ${this.paused ? 'PAUSED' : 'RUNNING'}`,
+      `Status: ${statusLabel}`,
       `Market: ${marketStatus}`,
       `Uptime: ${uptime}`,
       `Portfolio: ${formatCurrency(portfolio.portfolioValue)}`,
@@ -912,7 +1051,18 @@ class TradingBot {
       `Open positions: ${portfolio.openPositions}`,
       `Today P&L: ${formatCurrency(portfolio.todayPnl)} (${formatPercent(portfolio.todayPnlPct)})`,
       `Pairlist: ${this.activeStocks.length} stocks`,
-    ].join('\n');
+    ];
+
+    if (this.lossCooldownUntil && new Date() < this.lossCooldownUntil) {
+      const remainingMs = this.lossCooldownUntil.getTime() - Date.now();
+      const remainingMin = Math.ceil(remainingMs / 60_000);
+      const factor = configManager.get<number>('risk.lossCooldownSizeFactor') ?? 0.5;
+      lines.push(
+        `Cool-down: ${remainingMin}min remaining (${(factor * 100).toFixed(0)}% position sizing)`,
+      );
+    }
+
+    return lines.join('\n');
   }
 
   private async handlePauseCommand(): Promise<string> {
@@ -1042,6 +1192,14 @@ class TradingBot {
         };
         const sentimentScore = scoreSentiment(sentimentInput);
 
+        const correlationResults = this.correlationAnalyzer.checkCorrelationWithPortfolio(
+          pos.symbol,
+        );
+        const portfolioCorrelations = correlationResults.map((c) => ({
+          symbol: c.symbol2,
+          correlation: c.correlation,
+        }));
+
         const portfolio = await this.getPortfolioState();
         const aiContext = this.buildAIContext(
           pos.symbol,
@@ -1052,6 +1210,7 @@ class TradingBot {
           sentimentScore,
           sentimentInput,
           portfolio,
+          portfolioCorrelations,
         );
 
         // Add position context to signal re-evaluation
@@ -1098,6 +1257,46 @@ class TradingBot {
       } catch (err) {
         log.error({ symbol: pos.symbol, err }, 'Position re-evaluation failed');
       }
+    }
+  }
+
+  private async checkCorrelationDrift(): Promise<void> {
+    const db = getDb();
+    const allPositions = db.select().from(schema.positions).all();
+    if (allPositions.length < 2) return;
+
+    const audit = getAuditLogger();
+    const maxCorrelation = configManager.get<number>('risk.maxCorrelation');
+
+    try {
+      const { symbols, matrix } = this.correlationAnalyzer.getPortfolioCorrelationMatrix();
+
+      for (let i = 0; i < symbols.length; i++) {
+        for (let j = i + 1; j < symbols.length; j++) {
+          const corr = matrix[i][j];
+          if (Math.abs(corr) > maxCorrelation) {
+            const pair = `${symbols[i]}/${symbols[j]}`;
+            const corrStr = corr.toFixed(2);
+
+            log.warn(
+              { pair, correlation: corr, threshold: maxCorrelation },
+              'Correlation drift detected between held positions',
+            );
+
+            audit.logRisk(
+              `Correlation drift: ${pair} at ${corrStr} (threshold: ${maxCorrelation})`,
+              { symbol1: symbols[i], symbol2: symbols[j], correlation: corr },
+            );
+
+            await this.telegram.sendAlert(
+              'Correlation Drift',
+              `${pair} correlation spiked to ${corrStr} (max: ${maxCorrelation}). Consider reducing exposure.`,
+            );
+          }
+        }
+      }
+    } catch (err) {
+      log.error({ err }, 'Correlation drift check failed');
     }
   }
 
@@ -1240,6 +1439,7 @@ class TradingBot {
     sentimentScore: number,
     _sentimentInput: SentimentInput,
     portfolio: PortfolioState,
+    portfolioCorrelations?: Array<{ symbol: string; correlation: number }>,
   ): AIContext {
     const candles = data.candles;
     const latest = candles[candles.length - 1];
@@ -1385,6 +1585,7 @@ class TradingBot {
         maxRiskPerTradePct: configManager.get<number>('risk.maxRiskPerTradePct'),
         dailyLossLimitPct: configManager.get<number>('risk.dailyLossLimitPct'),
       },
+      portfolioCorrelations: portfolioCorrelations ?? [],
     };
   }
 

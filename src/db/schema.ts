@@ -18,6 +18,8 @@ export const trades = sqliteTable('trades', {
   aiReasoning: text('aiReasoning'),
   convictionScore: real('convictionScore'),
   aiModel: text('aiModel'),
+  intendedPrice: real('intendedPrice'),
+  slippage: real('slippage'),
   accountType: text('accountType', { enum: ['INVEST', 'ISA'] }).notNull(),
   createdAt: text('createdAt').default('CURRENT_TIMESTAMP'),
 });

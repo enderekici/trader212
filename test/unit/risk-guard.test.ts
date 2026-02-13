@@ -15,6 +15,31 @@ vi.mock('../../src/utils/logger.js', () => ({
   }),
 }));
 
+const mockAll = vi.fn().mockReturnValue([]);
+const mockLimit = vi.fn().mockReturnValue({ all: mockAll });
+const mockOrderBy = vi.fn().mockReturnValue({ limit: mockLimit });
+const mockWhere = vi.fn().mockReturnValue({ orderBy: mockOrderBy });
+const mockFrom = vi.fn().mockReturnValue({ where: mockWhere });
+const mockSelect = vi.fn().mockReturnValue({ from: mockFrom });
+
+vi.mock('../../src/db/index.js', () => ({
+  getDb: () => ({ select: mockSelect }),
+}));
+
+vi.mock('../../src/db/schema.js', () => ({
+  trades: {
+    exitPrice: 'exitPrice',
+    exitTime: 'exitTime',
+    pnl: 'pnl',
+    entryPrice: 'entryPrice',
+  },
+}));
+
+vi.mock('drizzle-orm', () => ({
+  desc: vi.fn((col: unknown) => col),
+  isNotNull: vi.fn((col: unknown) => col),
+}));
+
 // ── Import SUT ──────────────────────────────────────────────────────────────
 import { RiskGuard, type PortfolioState, type TradeProposal } from '../../src/execution/risk-guard.js';
 
@@ -273,6 +298,171 @@ describe('RiskGuard', () => {
         makePortfolio({ peakValue: 50000, portfolioValue: 44999 }),
       );
       expect(result).toBe(true);
+    });
+  });
+
+  // ── getLosingStreakMultiplier ────────────────────────────────────────────
+  describe('getLosingStreakMultiplier', () => {
+    beforeEach(() => {
+      mockConfigGet.mockImplementation((key: string) => {
+        const defaults: Record<string, unknown> = {
+          'risk.maxPositions': 5,
+          'risk.maxPositionSizePct': 0.15,
+          'risk.maxRiskPerTradePct': 0.02,
+          'risk.maxSectorConcentration': 3,
+          'risk.dailyLossLimitPct': 0.05,
+          'risk.maxDrawdownAlertPct': 0.10,
+          'risk.streakReductionThreshold': 3,
+          'risk.streakReductionFactor': 0.5,
+        };
+        return defaults[key];
+      });
+    });
+
+    it('returns 1.0 when no closed trades exist', () => {
+      mockAll.mockReturnValueOnce([]);
+      const result = guard.getLosingStreakMultiplier();
+      expect(result).toBe(1.0);
+    });
+
+    it('returns 1.0 when most recent trade is a win', () => {
+      mockAll.mockReturnValueOnce([
+        { pnl: 100, exitPrice: 160, entryPrice: 150 },
+      ]);
+      const result = guard.getLosingStreakMultiplier();
+      expect(result).toBe(1.0);
+    });
+
+    it('returns 1.0 when losses are below threshold', () => {
+      mockAll.mockReturnValueOnce([
+        { pnl: -50, exitPrice: 145, entryPrice: 150 },
+        { pnl: -30, exitPrice: 147, entryPrice: 150 },
+        { pnl: 100, exitPrice: 160, entryPrice: 150 },
+      ]);
+      const result = guard.getLosingStreakMultiplier();
+      expect(result).toBe(1.0);
+    });
+
+    it('returns factor when consecutive losses equal threshold', () => {
+      // 3 consecutive losses with threshold=3, factor=0.5 -> 0.5^1 = 0.5
+      mockAll.mockReturnValueOnce([
+        { pnl: -50, exitPrice: 145, entryPrice: 150 },
+        { pnl: -30, exitPrice: 147, entryPrice: 150 },
+        { pnl: -20, exitPrice: 148, entryPrice: 150 },
+        { pnl: 100, exitPrice: 160, entryPrice: 150 },
+      ]);
+      const result = guard.getLosingStreakMultiplier();
+      expect(result).toBe(0.5);
+    });
+
+    it('returns factor when consecutive losses exceed threshold but below 2x', () => {
+      // 4 consecutive losses with threshold=3 -> floor(4/3)=1 -> 0.5^1 = 0.5
+      mockAll.mockReturnValueOnce([
+        { pnl: -50, exitPrice: 145, entryPrice: 150 },
+        { pnl: -30, exitPrice: 147, entryPrice: 150 },
+        { pnl: -20, exitPrice: 148, entryPrice: 150 },
+        { pnl: -10, exitPrice: 149, entryPrice: 150 },
+        { pnl: 100, exitPrice: 160, entryPrice: 150 },
+      ]);
+      const result = guard.getLosingStreakMultiplier();
+      expect(result).toBe(0.5);
+    });
+
+    it('returns factor^2 when consecutive losses reach 2x threshold', () => {
+      // 6 consecutive losses with threshold=3, factor=0.5 -> 0.5^2 = 0.25
+      mockAll.mockReturnValueOnce([
+        { pnl: -50, exitPrice: 145, entryPrice: 150 },
+        { pnl: -30, exitPrice: 147, entryPrice: 150 },
+        { pnl: -20, exitPrice: 148, entryPrice: 150 },
+        { pnl: -10, exitPrice: 149, entryPrice: 150 },
+        { pnl: -5, exitPrice: 149.5, entryPrice: 150 },
+        { pnl: -15, exitPrice: 148.5, entryPrice: 150 },
+        { pnl: 100, exitPrice: 160, entryPrice: 150 },
+      ]);
+      const result = guard.getLosingStreakMultiplier();
+      expect(result).toBe(0.25);
+    });
+
+    it('uses exitPrice vs entryPrice when pnl is null', () => {
+      // pnl is null, exitPrice < entryPrice -> counted as loss
+      mockAll.mockReturnValueOnce([
+        { pnl: null, exitPrice: 145, entryPrice: 150 },
+        { pnl: null, exitPrice: 147, entryPrice: 150 },
+        { pnl: null, exitPrice: 148, entryPrice: 150 },
+        { pnl: 100, exitPrice: 160, entryPrice: 150 },
+      ]);
+      const result = guard.getLosingStreakMultiplier();
+      expect(result).toBe(0.5);
+    });
+
+    it('returns 1.0 when threshold is 0', () => {
+      mockConfigGet.mockImplementation((key: string) => {
+        if (key === 'risk.streakReductionThreshold') return 0;
+        if (key === 'risk.streakReductionFactor') return 0.5;
+        return undefined;
+      });
+      const result = guard.getLosingStreakMultiplier();
+      expect(result).toBe(1.0);
+    });
+
+    it('returns 1.0 when factor is 1.0 (no reduction)', () => {
+      mockConfigGet.mockImplementation((key: string) => {
+        if (key === 'risk.streakReductionThreshold') return 3;
+        if (key === 'risk.streakReductionFactor') return 1.0;
+        return undefined;
+      });
+      const result = guard.getLosingStreakMultiplier();
+      expect(result).toBe(1.0);
+    });
+
+    it('returns 1.0 when factor is 0 (invalid)', () => {
+      mockConfigGet.mockImplementation((key: string) => {
+        if (key === 'risk.streakReductionThreshold') return 3;
+        if (key === 'risk.streakReductionFactor') return 0;
+        return undefined;
+      });
+      const result = guard.getLosingStreakMultiplier();
+      expect(result).toBe(1.0);
+    });
+
+    it('returns 1.0 when getDb throws (graceful fallback)', () => {
+      mockSelect.mockImplementationOnce(() => {
+        throw new Error('DB not initialized');
+      });
+      const result = guard.getLosingStreakMultiplier();
+      expect(result).toBe(1.0);
+    });
+
+    it('stops counting at first win in the streak', () => {
+      // Pattern: loss, loss, win, loss, loss, loss
+      // Only 2 consecutive from most recent -> below threshold of 3
+      mockAll.mockReturnValueOnce([
+        { pnl: -50, exitPrice: 145, entryPrice: 150 },
+        { pnl: -30, exitPrice: 147, entryPrice: 150 },
+        { pnl: 100, exitPrice: 160, entryPrice: 150 }, // win breaks the streak
+        { pnl: -20, exitPrice: 148, entryPrice: 150 },
+        { pnl: -10, exitPrice: 149, entryPrice: 150 },
+        { pnl: -5, exitPrice: 149.5, entryPrice: 150 },
+      ]);
+      const result = guard.getLosingStreakMultiplier();
+      expect(result).toBe(1.0);
+    });
+
+    it('handles all losses with no wins', () => {
+      // 9 consecutive losses with threshold=3, factor=0.5 -> 0.5^3 = 0.125
+      mockAll.mockReturnValueOnce([
+        { pnl: -50, exitPrice: 145, entryPrice: 150 },
+        { pnl: -30, exitPrice: 147, entryPrice: 150 },
+        { pnl: -20, exitPrice: 148, entryPrice: 150 },
+        { pnl: -10, exitPrice: 149, entryPrice: 150 },
+        { pnl: -5, exitPrice: 149.5, entryPrice: 150 },
+        { pnl: -15, exitPrice: 148.5, entryPrice: 150 },
+        { pnl: -25, exitPrice: 147.5, entryPrice: 150 },
+        { pnl: -35, exitPrice: 146.5, entryPrice: 150 },
+        { pnl: -45, exitPrice: 145.5, entryPrice: 150 },
+      ]);
+      const result = guard.getLosingStreakMultiplier();
+      expect(result).toBe(0.125);
     });
   });
 });

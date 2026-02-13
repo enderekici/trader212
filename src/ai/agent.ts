@@ -100,6 +100,10 @@ export interface AIContext {
     dailyLossLimitPct: number;
   };
   correlationWarnings?: string[];
+  portfolioCorrelations?: Array<{
+    symbol: string;
+    correlation: number;
+  }>;
 }
 
 export interface AIDecision {

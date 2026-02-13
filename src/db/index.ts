@@ -56,6 +56,8 @@ function createTables(sqlite: InstanceType<typeof Database>) {
       aiReasoning TEXT,
       convictionScore REAL,
       aiModel TEXT,
+      intendedPrice REAL,
+      slippage REAL,
       accountType TEXT NOT NULL CHECK(accountType IN ('INVEST','ISA')),
       createdAt TEXT DEFAULT CURRENT_TIMESTAMP
     );
