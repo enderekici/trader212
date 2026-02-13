@@ -115,6 +115,7 @@ function makeMockT212Client() {
   return {
     placeMarketOrder: vi.fn(),
     placeStopOrder: vi.fn(),
+    placeLimitOrder: vi.fn(),
     getOrder: vi.fn(),
     cancelOrder: vi.fn(),
   } as any;

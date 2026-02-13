@@ -621,6 +621,22 @@ class TradingBot {
       }
     }
 
+    // Earnings blackout enforcement
+    const blackoutDays = configManager.get<number>('data.earningsBlackoutDays') ?? 3;
+    if (blackoutDays > 0 && data.earnings?.length) {
+      const now = new Date();
+      const hasUpcomingEarnings = data.earnings.some((e) => {
+        const earningsDate = new Date(e.date);
+        const daysUntil = (earningsDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
+        return daysUntil >= 0 && daysUntil <= blackoutDays;
+      });
+      if (hasUpcomingEarnings) {
+        log.info({ symbol, blackoutDays }, 'Skipping trade: earnings blackout period');
+        audit.logRisk(`Earnings blackout: ${symbol} has earnings within ${blackoutDays} days`);
+        return;
+      }
+    }
+
     // Create trade plan instead of executing immediately
     const plan = this.tradePlanner.createPlan({
       symbol,

@@ -61,6 +61,11 @@ export class OrderManager {
     const now = new Date().toISOString();
 
     if (dryRun) {
+      const dryTpOrderId =
+        params.takeProfitPct > 0
+          ? `tp-dry-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+          : undefined;
+
       log.info(
         {
           symbol: params.symbol,
@@ -68,6 +73,7 @@ export class OrderManager {
           price: params.price,
           stopLoss: stopLossPrice,
           takeProfit: takeProfitPrice,
+          takeProfitOrderId: dryTpOrderId,
           mode: 'DRY_RUN',
         },
         'Simulated BUY order',
@@ -108,6 +114,7 @@ export class OrderManager {
             stopLoss: stopLossPrice,
             takeProfit: takeProfitPrice,
             convictionScore: params.conviction,
+            takeProfitOrderId: dryTpOrderId,
             accountType: params.accountType,
             updatedAt: now,
           })
@@ -181,6 +188,29 @@ export class OrderManager {
         }
       }
 
+      // Place take-profit limit order (GTC) — only if takeProfitPct is set
+      let takeProfitOrderId: string | undefined;
+      if (params.takeProfitPct > 0) {
+        try {
+          const tpOrder = await client.placeLimitOrder({
+            ticker: params.t212Ticker,
+            quantity: params.shares,
+            limitPrice: actualTakeProfit,
+            timeValidity: 'GTC',
+          });
+          takeProfitOrderId = String(tpOrder.id);
+          log.info(
+            { symbol: params.symbol, takeProfitOrderId, takeProfitPrice: actualTakeProfit },
+            'Take-profit limit order placed',
+          );
+        } catch (err) {
+          log.warn(
+            { symbol: params.symbol, err },
+            'Failed to place take-profit order — position remains open without TP on exchange',
+          );
+        }
+      }
+
       // Record trade and position atomically
       let tradeRowId: number | bigint = 0;
       db.transaction((tx) => {
@@ -218,6 +248,7 @@ export class OrderManager {
             takeProfit: actualTakeProfit,
             convictionScore: params.conviction,
             stopOrderId,
+            takeProfitOrderId,
             accountType: params.accountType,
             updatedAt: now,
           })
@@ -314,6 +345,22 @@ export class OrderManager {
           log.warn(
             { symbol: params.symbol, err },
             'Failed to cancel stop order (may already be filled)',
+          );
+        }
+      }
+
+      // Cancel existing take-profit order if present
+      if (position.takeProfitOrderId) {
+        try {
+          await client.cancelOrder(Number(position.takeProfitOrderId));
+          log.info(
+            { symbol: params.symbol, takeProfitOrderId: position.takeProfitOrderId },
+            'Cancelled take-profit order',
+          );
+        } catch (err) {
+          log.warn(
+            { symbol: params.symbol, err },
+            'Failed to cancel take-profit order (may already be filled)',
           );
         }
       }

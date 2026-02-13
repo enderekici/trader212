@@ -92,7 +92,7 @@ function createTables(sqlite: InstanceType<typeof Database>) {
       entryTime TEXT NOT NULL,
       currentPrice REAL, pnl REAL, pnlPct REAL,
       stopLoss REAL, trailingStop REAL, takeProfit REAL,
-      convictionScore REAL, stopOrderId TEXT, aiExitConditions TEXT,
+      convictionScore REAL, stopOrderId TEXT, takeProfitOrderId TEXT, aiExitConditions TEXT,
       accountType TEXT NOT NULL CHECK(accountType IN ('INVEST','ISA')),
       updatedAt TEXT
     );

@@ -84,6 +84,7 @@ export const positions = sqliteTable('positions', {
   takeProfit: real('takeProfit'),
   convictionScore: real('convictionScore'),
   stopOrderId: text('stopOrderId'),
+  takeProfitOrderId: text('takeProfitOrderId'),
   aiExitConditions: text('aiExitConditions'),
   accountType: text('accountType', { enum: ['INVEST', 'ISA'] }).notNull(),
   updatedAt: text('updatedAt'),
