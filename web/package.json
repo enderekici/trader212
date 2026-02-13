@@ -1,0 +1,29 @@
+{
+  "name": "trader212-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --port 3000",
+    "build": "next build",
+    "start": "next start --port 3000",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "clsx": "^2.1.1",
+    "lightweight-charts": "^4.2.1",
+    "lucide-react": "^0.468.0",
+    "next": "^15.1.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "swr": "^2.3.0",
+    "tailwind-merge": "^2.6.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.0.0",
+    "@types/node": "^22.13.4",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.7.3"
+  }
+}

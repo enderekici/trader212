@@ -1,0 +1,38 @@
+@import 'tailwindcss';
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+}
+
+* {
+  border-color: hsl(240 3.7% 15.9%);
+}
+
+body {
+  background: hsl(240 10% 3.9%);
+  color: hsl(0 0% 98%);
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(240 3.7% 25%);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(240 3.7% 35%);
+}

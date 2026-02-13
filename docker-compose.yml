@@ -1,0 +1,26 @@
+services:
+  bot:
+    build: .
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "3001:3001"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/api/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  web:
+    build:
+      context: ./web
+      dockerfile: ../Dockerfile.web
+    environment:
+      - NEXT_PUBLIC_API_URL=http://bot:3001
+    ports:
+      - "3000:3000"
+    depends_on:
+      - bot
+    restart: unless-stopped
