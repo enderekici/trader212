@@ -1,6 +1,6 @@
 import 'dotenv/config';
 
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq, gte, isNotNull } from 'drizzle-orm';
 import { type AIAgent, type AIContext, type AIDecision, createAIAgent } from './ai/agent.js';
 import { MarketResearcher } from './ai/market-research.js';
 import { CorrelationAnalyzer } from './analysis/correlation.js';
@@ -182,23 +182,23 @@ class TradingBot {
         const db = getDb();
         const allPositions = db.select().from(schema.positions).all();
         const accountType = configManager.get<string>('t212.accountType') as 'INVEST' | 'ISA';
-        let closed = 0;
-        for (const pos of allPositions) {
-          try {
-            await this.orderManager.executeClose({
+        const results = await Promise.allSettled(
+          allPositions.map((pos) =>
+            this.orderManager.executeClose({
               symbol: pos.symbol,
               t212Ticker: pos.t212Ticker,
               shares: pos.shares,
               exitReason: 'Emergency stop',
               accountType,
-            });
-            closed++;
-          } catch (err) {
-            log.error(
-              { symbol: pos.symbol, err },
-              'Failed to close position during emergency stop',
-            );
-          }
+            }),
+          ),
+        );
+        const closed = results.filter((r) => r.status === 'fulfilled' && r.value.success).length;
+        const failed = results.filter(
+          (r) => r.status === 'rejected' || (r.status === 'fulfilled' && !r.value.success),
+        );
+        for (const f of failed) {
+          log.error({ result: f }, 'Failed to close position during emergency stop');
         }
         await this.telegram.sendAlert(
           'EMERGENCY STOP',
@@ -587,8 +587,8 @@ class TradingBot {
     const todayTradeCount = getDb()
       .select()
       .from(schema.trades)
-      .all()
-      .filter((t) => t.entryTime.startsWith(todayStr)).length;
+      .where(gte(schema.trades.entryTime, todayStr))
+      .all().length;
     if (todayTradeCount >= maxDailyTrades) {
       log.warn({ todayTradeCount, maxDailyTrades }, 'Daily trade limit reached');
       audit.logRisk(`Daily trade limit: ${todayTradeCount}/${maxDailyTrades}`);
@@ -1114,8 +1114,8 @@ class TradingBot {
       const todayTrades = db
         .select()
         .from(schema.trades)
-        .all()
-        .filter((t) => t.entryTime.startsWith(today) && t.exitPrice != null);
+        .where(and(gte(schema.trades.entryTime, today), isNotNull(schema.trades.exitPrice)))
+        .all();
 
       const closedTradePnl = todayTrades.reduce((sum: number, t) => sum + (t.pnl ?? 0), 0);
 

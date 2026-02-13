@@ -73,43 +73,48 @@ export class OrderManager {
         'Simulated BUY order',
       );
 
-      const trade = db
-        .insert(trades)
-        .values({
-          symbol: params.symbol,
-          t212Ticker: params.t212Ticker,
-          side: 'BUY',
-          shares: params.shares,
-          entryPrice: params.price,
-          entryTime: now,
-          stopLoss: stopLossPrice,
-          takeProfit: takeProfitPrice,
-          aiReasoning: params.aiReasoning,
-          convictionScore: params.conviction,
-          aiModel: params.aiModel,
-          accountType: params.accountType,
-        })
-        .run();
+      let tradeRowId: number | bigint = 0;
+      db.transaction((tx) => {
+        const trade = tx
+          .insert(trades)
+          .values({
+            symbol: params.symbol,
+            t212Ticker: params.t212Ticker,
+            side: 'BUY',
+            shares: params.shares,
+            entryPrice: params.price,
+            entryTime: now,
+            stopLoss: stopLossPrice,
+            takeProfit: takeProfitPrice,
+            aiReasoning: params.aiReasoning,
+            convictionScore: params.conviction,
+            aiModel: params.aiModel,
+            accountType: params.accountType,
+          })
+          .run();
 
-      db.insert(positions)
-        .values({
-          symbol: params.symbol,
-          t212Ticker: params.t212Ticker,
-          shares: params.shares,
-          entryPrice: params.price,
-          entryTime: now,
-          currentPrice: params.price,
-          pnl: 0,
-          pnlPct: 0,
-          stopLoss: stopLossPrice,
-          takeProfit: takeProfitPrice,
-          convictionScore: params.conviction,
-          accountType: params.accountType,
-          updatedAt: now,
-        })
-        .run();
+        tradeRowId = trade.lastInsertRowid;
 
-      return { success: true, tradeId: Number(trade.lastInsertRowid) };
+        tx.insert(positions)
+          .values({
+            symbol: params.symbol,
+            t212Ticker: params.t212Ticker,
+            shares: params.shares,
+            entryPrice: params.price,
+            entryTime: now,
+            currentPrice: params.price,
+            pnl: 0,
+            pnlPct: 0,
+            stopLoss: stopLossPrice,
+            takeProfit: takeProfitPrice,
+            convictionScore: params.conviction,
+            accountType: params.accountType,
+            updatedAt: now,
+          })
+          .run();
+      });
+
+      return { success: true, tradeId: Number(tradeRowId) };
     }
 
     // Live execution
@@ -142,14 +147,14 @@ export class OrderManager {
       const stopDelay = configManager.get<number>('execution.stopLossDelay');
       await sleep(stopDelay);
 
-      // Place stop-loss order
+      // Place stop-loss order (GTC so it persists across trading sessions)
       let stopOrderId: string | undefined;
       try {
         const stopOrder = await client.placeStopOrder({
           ticker: params.t212Ticker,
           quantity: params.shares,
           stopPrice: actualStopLoss,
-          timeValidity: 'DAY',
+          timeValidity: 'GTC',
         });
         stopOrderId = String(stopOrder.id);
         log.info(
@@ -176,51 +181,55 @@ export class OrderManager {
         }
       }
 
-      // Record trade
-      const trade = db
-        .insert(trades)
-        .values({
-          symbol: params.symbol,
-          t212Ticker: params.t212Ticker,
-          side: 'BUY',
-          shares: params.shares,
-          entryPrice: fillPrice,
-          entryTime: now,
-          stopLoss: actualStopLoss,
-          takeProfit: actualTakeProfit,
-          aiReasoning: params.aiReasoning,
-          convictionScore: params.conviction,
-          aiModel: params.aiModel,
-          accountType: params.accountType,
-        })
-        .run();
+      // Record trade and position atomically
+      let tradeRowId: number | bigint = 0;
+      db.transaction((tx) => {
+        const trade = tx
+          .insert(trades)
+          .values({
+            symbol: params.symbol,
+            t212Ticker: params.t212Ticker,
+            side: 'BUY',
+            shares: params.shares,
+            entryPrice: fillPrice,
+            entryTime: now,
+            stopLoss: actualStopLoss,
+            takeProfit: actualTakeProfit,
+            aiReasoning: params.aiReasoning,
+            convictionScore: params.conviction,
+            aiModel: params.aiModel,
+            accountType: params.accountType,
+          })
+          .run();
 
-      // Upsert position
-      db.insert(positions)
-        .values({
-          symbol: params.symbol,
-          t212Ticker: params.t212Ticker,
-          shares: params.shares,
-          entryPrice: fillPrice,
-          entryTime: now,
-          currentPrice: fillPrice,
-          pnl: 0,
-          pnlPct: 0,
-          stopLoss: actualStopLoss,
-          takeProfit: actualTakeProfit,
-          convictionScore: params.conviction,
-          stopOrderId,
-          accountType: params.accountType,
-          updatedAt: now,
-        })
-        .run();
+        tradeRowId = trade.lastInsertRowid;
+
+        tx.insert(positions)
+          .values({
+            symbol: params.symbol,
+            t212Ticker: params.t212Ticker,
+            shares: params.shares,
+            entryPrice: fillPrice,
+            entryTime: now,
+            currentPrice: fillPrice,
+            pnl: 0,
+            pnlPct: 0,
+            stopLoss: actualStopLoss,
+            takeProfit: actualTakeProfit,
+            convictionScore: params.conviction,
+            stopOrderId,
+            accountType: params.accountType,
+            updatedAt: now,
+          })
+          .run();
+      });
 
       log.info(
         { symbol: params.symbol, fillPrice, shares: params.shares, orderId: order.id },
         'BUY order filled and recorded',
       );
 
-      return { success: true, tradeId: Number(trade.lastInsertRowid), orderId: String(order.id) };
+      return { success: true, tradeId: Number(tradeRowId), orderId: String(order.id) };
     } catch (err) {
       log.error({ symbol: params.symbol, err }, 'Failed to execute buy order');
       return { success: false, error: err instanceof Error ? err.message : String(err) };
@@ -259,26 +268,27 @@ export class OrderManager {
         'Simulated CLOSE order',
       );
 
-      // Record closing trade
-      db.insert(trades)
-        .values({
-          symbol: params.symbol,
-          t212Ticker: params.t212Ticker,
-          side: 'SELL',
-          shares: params.shares,
-          entryPrice: position.entryPrice,
-          exitPrice,
-          pnl,
-          pnlPct,
-          entryTime: position.entryTime,
-          exitTime: now,
-          exitReason: params.exitReason,
-          accountType: params.accountType,
-        })
-        .run();
+      // Record closing trade and remove position atomically
+      db.transaction((tx) => {
+        tx.insert(trades)
+          .values({
+            symbol: params.symbol,
+            t212Ticker: params.t212Ticker,
+            side: 'SELL',
+            shares: params.shares,
+            entryPrice: position.entryPrice,
+            exitPrice,
+            pnl,
+            pnlPct,
+            entryTime: position.entryTime,
+            exitTime: now,
+            exitReason: params.exitReason,
+            accountType: params.accountType,
+          })
+          .run();
 
-      // Remove position
-      db.delete(positions).where(eq(positions.symbol, params.symbol)).run();
+        tx.delete(positions).where(eq(positions.symbol, params.symbol)).run();
+      });
 
       return { success: true };
     }
@@ -325,26 +335,27 @@ export class OrderManager {
       const pnl = (fillPrice - position.entryPrice) * position.shares;
       const pnlPct = (fillPrice - position.entryPrice) / position.entryPrice;
 
-      // Record closing trade
-      db.insert(trades)
-        .values({
-          symbol: params.symbol,
-          t212Ticker: params.t212Ticker,
-          side: 'SELL',
-          shares: params.shares,
-          entryPrice: position.entryPrice,
-          exitPrice: fillPrice,
-          pnl,
-          pnlPct,
-          entryTime: position.entryTime,
-          exitTime: now,
-          exitReason: params.exitReason,
-          accountType: params.accountType,
-        })
-        .run();
+      // Record closing trade and remove position atomically
+      db.transaction((tx) => {
+        tx.insert(trades)
+          .values({
+            symbol: params.symbol,
+            t212Ticker: params.t212Ticker,
+            side: 'SELL',
+            shares: params.shares,
+            entryPrice: position.entryPrice,
+            exitPrice: fillPrice,
+            pnl,
+            pnlPct,
+            entryTime: position.entryTime,
+            exitTime: now,
+            exitReason: params.exitReason,
+            accountType: params.accountType,
+          })
+          .run();
 
-      // Remove position
-      db.delete(positions).where(eq(positions.symbol, params.symbol)).run();
+        tx.delete(positions).where(eq(positions.symbol, params.symbol)).run();
+      });
 
       log.info(
         {

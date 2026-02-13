@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'node:events';
 
 vi.mock('../../src/utils/logger.js', () => ({
@@ -16,10 +16,12 @@ class MockWebSocketServer extends EventEmitter {
 }
 
 let mockWssInstance: MockWebSocketServer;
+let capturedOptions: any;
 
 vi.mock('ws', () => {
   return {
-    WebSocketServer: vi.fn().mockImplementation(function () {
+    WebSocketServer: vi.fn().mockImplementation(function (opts: any) {
+      capturedOptions = opts;
       mockWssInstance = new MockWebSocketServer();
       return mockWssInstance;
     }),
@@ -27,8 +29,16 @@ vi.mock('ws', () => {
 });
 
 describe('api/websocket', () => {
+  const originalEnv = process.env;
+
   beforeEach(() => {
     vi.clearAllMocks();
+    process.env = { ...originalEnv };
+    delete process.env.API_SECRET_KEY;
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
   });
 
   describe('WebSocketManager', () => {
@@ -39,7 +49,9 @@ describe('api/websocket', () => {
 
       new WebSocketManager(mockServer);
 
-      expect(WebSocketServer).toHaveBeenCalledWith({ server: mockServer, path: '/ws' });
+      expect(WebSocketServer).toHaveBeenCalledWith(
+        expect.objectContaining({ server: mockServer, path: '/ws' }),
+      );
     });
 
     it('tracks connected clients', async () => {
@@ -228,6 +240,107 @@ describe('api/websocket', () => {
       expect(msg1.event).toBe('trade_executed');
       expect(msg2.event).toBe('signal_generated');
       expect(msg3.event).toBe('alert');
+    });
+  });
+
+  describe('WebSocket authentication', () => {
+    function createMockReq(url: string) {
+      return {
+        url,
+        headers: { host: 'localhost:3001' },
+        socket: { remoteAddress: '127.0.0.1' },
+      };
+    }
+
+    it('allows connection when no API_SECRET_KEY is configured', async () => {
+      delete process.env.API_SECRET_KEY;
+      const { WebSocketManager } = await import('../../src/api/websocket.js');
+      new WebSocketManager({} as any);
+
+      const verifyClient = capturedOptions.verifyClient;
+      expect(verifyClient).toBeDefined();
+
+      const callback = vi.fn();
+      verifyClient({ req: createMockReq('/ws') }, callback);
+
+      expect(callback).toHaveBeenCalledWith(true);
+    });
+
+    it('allows connection when API_SECRET_KEY is empty string', async () => {
+      process.env.API_SECRET_KEY = '   ';
+      const { WebSocketManager } = await import('../../src/api/websocket.js');
+      new WebSocketManager({} as any);
+
+      const verifyClient = capturedOptions.verifyClient;
+      const callback = vi.fn();
+      verifyClient({ req: createMockReq('/ws') }, callback);
+
+      expect(callback).toHaveBeenCalledWith(true);
+    });
+
+    it('rejects connection when token is missing', async () => {
+      process.env.API_SECRET_KEY = 'my-secret-key';
+      const { WebSocketManager } = await import('../../src/api/websocket.js');
+      new WebSocketManager({} as any);
+
+      const verifyClient = capturedOptions.verifyClient;
+      const callback = vi.fn();
+      verifyClient({ req: createMockReq('/ws') }, callback);
+
+      expect(callback).toHaveBeenCalledWith(false, 4401, 'Unauthorized');
+    });
+
+    it('rejects connection with wrong token', async () => {
+      process.env.API_SECRET_KEY = 'my-secret-key';
+      const { WebSocketManager } = await import('../../src/api/websocket.js');
+      new WebSocketManager({} as any);
+
+      const verifyClient = capturedOptions.verifyClient;
+      const callback = vi.fn();
+      verifyClient({ req: createMockReq('/ws?token=wrong-key') }, callback);
+
+      expect(callback).toHaveBeenCalledWith(false, 4401, 'Unauthorized');
+    });
+
+    it('allows connection with correct token in query parameter', async () => {
+      process.env.API_SECRET_KEY = 'my-secret-key';
+      const { WebSocketManager } = await import('../../src/api/websocket.js');
+      new WebSocketManager({} as any);
+
+      const verifyClient = capturedOptions.verifyClient;
+      const callback = vi.fn();
+      verifyClient({ req: createMockReq('/ws?token=my-secret-key') }, callback);
+
+      expect(callback).toHaveBeenCalledWith(true);
+    });
+
+    it('trims whitespace from both API key and token for comparison', async () => {
+      process.env.API_SECRET_KEY = '  my-secret-key  ';
+      const { WebSocketManager } = await import('../../src/api/websocket.js');
+      new WebSocketManager({} as any);
+
+      const verifyClient = capturedOptions.verifyClient;
+      const callback = vi.fn();
+      verifyClient({ req: createMockReq('/ws?token=my-secret-key') }, callback);
+
+      expect(callback).toHaveBeenCalledWith(true);
+    });
+
+    it('rejects connection when URL parsing fails', async () => {
+      process.env.API_SECRET_KEY = 'my-secret-key';
+      const { WebSocketManager } = await import('../../src/api/websocket.js');
+      new WebSocketManager({} as any);
+
+      const verifyClient = capturedOptions.verifyClient;
+      const callback = vi.fn();
+      // Missing req.url simulates parsing difficulty
+      verifyClient(
+        { req: { url: undefined, headers: {}, socket: { remoteAddress: '127.0.0.1' } } },
+        callback,
+      );
+
+      // With url undefined, URL constructor gets '' which is parseable, but no token param
+      expect(callback).toHaveBeenCalledWith(false, 4401, 'Unauthorized');
     });
   });
 });

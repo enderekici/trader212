@@ -55,7 +55,8 @@ docker build -f Dockerfile.web -t trader212-web .
 # Run standalone
 docker run -d \
   --name trader212-web \
-  -e NEXT_PUBLIC_API_URL=http://localhost:3001 \
+  -e API_URL=http://localhost:3001 \
+  -e API_SECRET_KEY=your-secret-key \
   -p 3000:3000 \
   trader212-web
 ```
@@ -85,7 +86,8 @@ services:
       context: ./web
       dockerfile: ../Dockerfile.web
     environment:
-      - NEXT_PUBLIC_API_URL=http://bot:3001
+      - API_URL=http://bot:3001
+      - API_SECRET_KEY=${API_SECRET_KEY:-}
     ports:
       - "3000:3000"
     depends_on:
@@ -111,7 +113,7 @@ sqlite3 data/trader212.db ".backup data/trader212.db.backup"
 
 ## Environment Variables
 
-All environment variables are passed to the bot container via `--env-file .env`. The web container only needs `NEXT_PUBLIC_API_URL` to know where the bot API lives.
+All environment variables are passed to the bot container via `--env-file .env`. The web container needs `API_URL` (backend URL for the server-side proxy) and `API_SECRET_KEY` (Bearer token for backend auth).
 
 See `.env.example` for the full list. Key variables:
 

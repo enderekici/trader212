@@ -179,21 +179,21 @@ export const LimitOrderRequestSchema = z.object({
   timeValidity: TimeInForceSchema.default('DAY'),
 });
 
-// Stop order request
+// Stop order request (default GTC so stop-loss persists across trading sessions)
 export const StopOrderRequestSchema = z.object({
   quantity: z.number().positive(),
   stopPrice: z.number().positive(),
   ticker: z.string(),
-  timeValidity: TimeInForceSchema.default('DAY'),
+  timeValidity: TimeInForceSchema.default('GTC'),
 });
 
-// Stop-limit order request
+// Stop-limit order request (default GTC so stop-loss persists across trading sessions)
 export const StopLimitOrderRequestSchema = z.object({
   limitPrice: z.number().positive(),
   quantity: z.number().positive(),
   stopPrice: z.number().positive(),
   ticker: z.string(),
-  timeValidity: TimeInForceSchema.default('DAY'),
+  timeValidity: TimeInForceSchema.default('GTC'),
 });
 
 // Pie schemas

@@ -223,19 +223,19 @@ Three adapters in `src/ai/adapters/`: anthropic.ts, ollama.ts, openai-compat.ts.
 - **CORS**: Whitelist via `CORS_ORIGINS` env var (comma-separated, default: `http://localhost:3000`).
 - **Rate Limiting**: `express-rate-limit` — 100 req/min general, 10 req/min on `/api/control/*` and `/api/config/*`.
 - **Input Validation**: Zod schemas on `PUT /api/config/:key`, `POST /api/pairlist/static`, `POST /api/research/run`.
-- **Dashboard Auth**: `NEXT_PUBLIC_API_SECRET_KEY` env var (same value as `API_SECRET_KEY`) sent as Bearer token in `web/lib/api.ts`.
+- **Dashboard Auth**: Next.js server-side API proxy at `web/app/api/[...path]/route.ts` reads `API_SECRET_KEY` from server env and forwards it as Bearer token to the backend. No secrets are exposed to the client bundle.
 
 ## Docker
 - `docker compose up` — starts bot (port 3001) + web dashboard (port 3000)
 - `docker compose build` — builds both images
 - **Files**: `Dockerfile` (bot), `Dockerfile.web` (Next.js dashboard), `docker-compose.yml`, `.dockerignore`
 - **Bot image**: multi-stage build, `node:24-alpine`, `tsup` bundle, `NODE_ENV=production` set in Dockerfile. Builder stage uses `apk add python3 make g++` for `better-sqlite3` native compilation
-- **Web image**: multi-stage build, `node:24-alpine`, Next.js standalone output, build args for `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_API_SECRET_KEY`
+- **Web image**: multi-stage build, `node:24-alpine`, Next.js standalone output. `API_URL` and `API_SECRET_KEY` are runtime env vars (not build args) — the server-side proxy reads them at request time
 - **Healthcheck**: bot uses Node.js `fetch()` against `/api/status` (not curl — `node:24-alpine` has no curl)
 - **Volumes**: `./data:/app/data` for SQLite persistence
 - **Environment**: `.env` file is passed via `env_file:` for secrets/config. `NODE_ENV` is NOT in `.env` — Dockerfiles own it (set to `production`). For local dev, `NODE_ENV` is left unset (defaults to dev mode).
 - **Web depends on bot**: `depends_on: bot: condition: service_healthy` — web waits for bot healthcheck
-- **Build args**: `NEXT_PUBLIC_API_URL` (default: `http://bot:3001`) and `NEXT_PUBLIC_API_SECRET_KEY` are injected at build time for Next.js static rendering
+- **API Proxy**: `web/app/api/[...path]/route.ts` proxies all `/api/*` requests to the backend, injecting Bearer token server-side. No build args needed for API config
 
 ## Audit Log
 All bot actions logged to `audit_log` table via `getAuditLogger()` singleton. Event types: trade, signal, pairlist, config, error, control, research. Categories: execution, analysis, risk, system, user. Severity levels: info, warn, error. Viewable on Activity page in dashboard. Supports daily report generation.

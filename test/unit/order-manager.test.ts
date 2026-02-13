@@ -49,12 +49,26 @@ const mockSelectChain = createChainableQuery();
 const mockInsertChain = createChainableQuery();
 const mockDeleteChain = createChainableQuery();
 
+const mockTxInsertChain = createChainableQuery();
+const mockTxDeleteChain = createChainableQuery();
+
+const mockTransaction = vi.fn().mockImplementation((callback: (tx: unknown) => void) => {
+  const tx = {
+    select: () => mockSelectChain,
+    insert: () => mockTxInsertChain,
+    delete: () => mockTxDeleteChain,
+    update: () => createChainableQuery(),
+  };
+  return callback(tx);
+});
+
 vi.mock('../../src/db/index.js', () => ({
   getDb: () => ({
     select: () => mockSelectChain,
     insert: () => mockInsertChain,
     delete: () => mockDeleteChain,
     update: () => createChainableQuery(),
+    transaction: (...args: unknown[]) => mockTransaction(...args),
   }),
 }));
 
@@ -137,12 +151,13 @@ describe('OrderManager', () => {
   describe('executeBuy - dry run', () => {
     it('records trade and position in DB and returns success', async () => {
       mockSelectChain.get.mockReturnValueOnce(undefined); // no existing position
-      mockInsertChain.run.mockReturnValue({ lastInsertRowid: 42n });
+      mockTxInsertChain.run.mockReturnValue({ lastInsertRowid: 42n });
 
       const result = await orderManager.executeBuy(makeBuyParams());
 
       expect(result.success).toBe(true);
       expect(result.tradeId).toBe(42);
+      expect(mockTransaction).toHaveBeenCalledOnce();
     });
 
     it('rejects duplicate buy when position already exists', async () => {
@@ -157,16 +172,16 @@ describe('OrderManager', () => {
     it('computes correct stop-loss and take-profit prices', async () => {
       mockSelectChain.get.mockReturnValueOnce(undefined);
       const capturedValues: Record<string, unknown>[] = [];
-      mockInsertChain.values = vi.fn().mockImplementation((val: Record<string, unknown>) => {
+      mockTxInsertChain.values = vi.fn().mockImplementation((val: Record<string, unknown>) => {
         capturedValues.push(val);
-        return mockInsertChain;
+        return mockTxInsertChain;
       });
-      mockInsertChain.run.mockReturnValue({ lastInsertRowid: 1n });
+      mockTxInsertChain.run.mockReturnValue({ lastInsertRowid: 1n });
 
       const params = makeBuyParams({ price: 200, stopLossPct: 0.05, takeProfitPct: 0.10 });
       await orderManager.executeBuy(params);
 
-      // The first insert is for trades
+      // The first insert is for trades (inside transaction)
       const tradeInsert = capturedValues[0];
       expect(tradeInsert.stopLoss).toBe(190); // 200 * (1 - 0.05)
       expect(tradeInsert.takeProfit).toBeCloseTo(220, 5); // 200 * (1 + 0.10)
@@ -207,7 +222,7 @@ describe('OrderManager', () => {
 
       orderManager.setT212Client(client);
       mockSelectChain.get.mockReturnValueOnce(undefined);
-      mockInsertChain.run.mockReturnValue({ lastInsertRowid: 5n });
+      mockTxInsertChain.run.mockReturnValue({ lastInsertRowid: 5n });
 
       const result = await orderManager.executeBuy(makeBuyParams());
 
@@ -216,6 +231,7 @@ describe('OrderManager', () => {
       expect(result.orderId).toBe('101');
       expect(client.placeMarketOrder).toHaveBeenCalledOnce();
       expect(client.placeStopOrder).toHaveBeenCalledOnce();
+      expect(mockTransaction).toHaveBeenCalledOnce();
     });
 
     it('returns error when order fill times out', async () => {
@@ -246,7 +262,7 @@ describe('OrderManager', () => {
 
       orderManager.setT212Client(client);
       mockSelectChain.get.mockReturnValueOnce(undefined);
-      mockInsertChain.run.mockReturnValue({ lastInsertRowid: 6n });
+      mockTxInsertChain.run.mockReturnValue({ lastInsertRowid: 6n });
 
       // Should still succeed; stop-loss error is logged but not fatal
       const result = await orderManager.executeBuy(makeBuyParams());
@@ -270,7 +286,7 @@ describe('OrderManager', () => {
 
       orderManager.setT212Client(client);
       mockSelectChain.get.mockReturnValueOnce(undefined);
-      mockInsertChain.run.mockReturnValue({ lastInsertRowid: 7n });
+      mockTxInsertChain.run.mockReturnValue({ lastInsertRowid: 7n });
 
       const result = await orderManager.executeBuy(makeBuyParams());
 
@@ -320,7 +336,7 @@ describe('OrderManager', () => {
 
       orderManager.setT212Client(client);
       mockSelectChain.get.mockReturnValueOnce(undefined);
-      mockInsertChain.run.mockReturnValue({ lastInsertRowid: 7n });
+      mockTxInsertChain.run.mockReturnValue({ lastInsertRowid: 7n });
 
       const result = await orderManager.executeBuy(makeBuyParams());
       expect(result.success).toBe(true);
@@ -393,7 +409,7 @@ describe('OrderManager', () => {
 
       orderManager.setT212Client(client);
       mockSelectChain.get.mockReturnValueOnce(undefined);
-      mockInsertChain.run.mockReturnValue({ lastInsertRowid: 8n });
+      mockTxInsertChain.run.mockReturnValue({ lastInsertRowid: 8n });
 
       const result = await orderManager.executeBuy(makeBuyParams());
       expect(result.success).toBe(true);
@@ -495,11 +511,12 @@ describe('OrderManager', () => {
         currentPrice: 155,
         entryTime: '2024-01-01T00:00:00Z',
       });
-      mockInsertChain.run.mockReturnValue({ lastInsertRowid: 10n });
+      mockTxInsertChain.run.mockReturnValue({ lastInsertRowid: 10n });
 
       const result = await orderManager.executeClose(makeCloseParams());
 
       expect(result.success).toBe(true);
+      expect(mockTransaction).toHaveBeenCalledOnce();
     });
 
     it('uses entryPrice when currentPrice is null', async () => {
@@ -511,11 +528,11 @@ describe('OrderManager', () => {
         entryTime: '2024-01-01T00:00:00Z',
       });
       const capturedValues: Record<string, unknown>[] = [];
-      mockInsertChain.values = vi.fn().mockImplementation((val: Record<string, unknown>) => {
+      mockTxInsertChain.values = vi.fn().mockImplementation((val: Record<string, unknown>) => {
         capturedValues.push(val);
-        return mockInsertChain;
+        return mockTxInsertChain;
       });
-      mockInsertChain.run.mockReturnValue({ lastInsertRowid: 11n });
+      mockTxInsertChain.run.mockReturnValue({ lastInsertRowid: 11n });
 
       await orderManager.executeClose(makeCloseParams());
 
@@ -571,7 +588,7 @@ describe('OrderManager', () => {
         entryTime: '2024-01-01T00:00:00Z',
         stopOrderId: '999',
       });
-      mockInsertChain.run.mockReturnValue({ lastInsertRowid: 12n });
+      mockTxInsertChain.run.mockReturnValue({ lastInsertRowid: 12n });
 
       const result = await orderManager.executeClose(makeCloseParams());
 
@@ -599,7 +616,7 @@ describe('OrderManager', () => {
         entryTime: '2024-01-01T00:00:00Z',
         stopOrderId: '998',
       });
-      mockInsertChain.run.mockReturnValue({ lastInsertRowid: 13n });
+      mockTxInsertChain.run.mockReturnValue({ lastInsertRowid: 13n });
 
       const result = await orderManager.executeClose(makeCloseParams());
       expect(result.success).toBe(true);
@@ -678,7 +695,7 @@ describe('OrderManager', () => {
         entryTime: '2024-01-01T00:00:00Z',
         stopOrderId: null,
       });
-      mockInsertChain.run.mockReturnValue({ lastInsertRowid: 14n });
+      mockTxInsertChain.run.mockReturnValue({ lastInsertRowid: 14n });
 
       const result = await orderManager.executeClose(makeCloseParams());
       expect(result.success).toBe(true);
