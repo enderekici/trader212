@@ -118,7 +118,8 @@ export class OrderManager {
     }
 
     try {
-      const client = this.t212Client!;
+      const client = this.t212Client;
+      if (!client) throw new Error('Trading212 client not initialized');
 
       // Place market order
       const order = await client.placeMarketOrder({
@@ -272,7 +273,8 @@ export class OrderManager {
     }
 
     try {
-      const client = this.t212Client!;
+      const client = this.t212Client;
+      if (!client) throw new Error('Trading212 client not initialized');
 
       // Cancel existing stop order if present
       if (position.stopOrderId) {

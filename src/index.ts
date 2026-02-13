@@ -550,7 +550,7 @@ class TradingBot {
     fundamentalScore?: number,
     sentimentScore?: number,
   ): Promise<void> {
-    const price = data.quote!.price;
+    const price = data.quote?.price ?? 0;
     const audit = getAuditLogger();
 
     // Record AI prediction for model tracking
@@ -1149,7 +1149,7 @@ class TradingBot {
     const fiveDaysAgo = candles.length >= 5 ? candles[candles.length - 5] : latest;
     const thirtyDaysAgo = candles.length >= 22 ? candles[candles.length - 22] : latest;
 
-    const price = data.quote!.price;
+    const price = data.quote?.price ?? 0;
     const priceChange1d = latest ? (price - latest.close) / latest.close : 0;
     const priceChange5d = fiveDaysAgo ? (price - fiveDaysAgo.close) / fiveDaysAgo.close : 0;
     const priceChange1m = thirtyDaysAgo ? (price - thirtyDaysAgo.close) / thirtyDaysAgo.close : 0;

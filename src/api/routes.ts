@@ -1,12 +1,12 @@
 import { and, desc, eq, gte, lte, sql } from 'drizzle-orm';
 import { Router } from 'express';
+import { CorrelationAnalyzer } from '../analysis/correlation.js';
 import { configManager } from '../config/manager.js';
 import { getDb } from '../db/index.js';
 import * as schema from '../db/schema.js';
 import { getAuditLogger } from '../monitoring/audit-log.js';
 import { createLogger } from '../utils/logger.js';
 import { getMarketTimes } from '../utils/market-hours.js';
-import { CorrelationAnalyzer } from '../analysis/correlation.js';
 
 const log = createLogger('api-routes');
 

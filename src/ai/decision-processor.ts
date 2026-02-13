@@ -20,7 +20,7 @@ const aiDecisionSchema = z.object({
 
 function extractJson(raw: string): string {
   // Strip <think>...</think> tags from thinking models (e.g. Qwen3)
-  let text = raw.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+  const text = raw.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
 
   // Try to extract JSON from markdown code blocks
   const codeBlockMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);

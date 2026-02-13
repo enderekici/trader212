@@ -231,7 +231,10 @@ Return ONLY the JSON, no other text.`;
           }
         }
         if (results.length > 0) {
-          log.info({ count: results.length }, 'Extracted research results via individual block parsing');
+          log.info(
+            { count: results.length },
+            'Extracted research results via individual block parsing',
+          );
           return results;
         }
       }
@@ -239,20 +242,23 @@ Return ONLY the JSON, no other text.`;
       // fall through
     }
 
-    log.warn({ rawLength: rawText.length, cleanedLength: text.length, sample: text.slice(0, 500) }, 'Could not parse AI research response');
+    log.warn(
+      { rawLength: rawText.length, cleanedLength: text.length, sample: text.slice(0, 500) },
+      'Could not parse AI research response',
+    );
     return [];
   }
 
-  private mapResults(results: any[]): ResearchResult[] {
-    return results.map((r: any) => ({
+  private mapResults(results: Record<string, unknown>[]): ResearchResult[] {
+    return results.map((r: Record<string, unknown>) => ({
       symbol: String(r.symbol ?? ''),
-      recommendation: r.recommendation ?? 'hold',
+      recommendation: String(r.recommendation ?? 'hold') as ResearchResult['recommendation'],
       conviction: Number(r.conviction ?? 50),
       reasoning: String(r.reasoning ?? ''),
-      catalysts: Array.isArray(r.catalysts) ? r.catalysts : [],
-      risks: Array.isArray(r.risks) ? r.risks : [],
+      catalysts: Array.isArray(r.catalysts) ? (r.catalysts as string[]) : [],
+      risks: Array.isArray(r.risks) ? (r.risks as string[]) : [],
       targetPrice: r.targetPrice ? Number(r.targetPrice) : undefined,
-      timeHorizon: r.timeHorizon ?? 'medium',
+      timeHorizon: String(r.timeHorizon ?? 'medium') as ResearchResult['timeHorizon'],
       sector: String(r.sector ?? 'Unknown'),
     }));
   }

@@ -81,7 +81,8 @@ export class PositionTracker {
           );
         } else {
           // Reconcile quantity differences
-          const dbPos = dbSymbolMap.get(ticker)!;
+          const dbPos = dbSymbolMap.get(ticker);
+          if (!dbPos) continue;
           if (Math.abs(dbPos.shares - t212Pos.quantity) > 0.001) {
             log.warn(
               {
