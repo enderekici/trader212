@@ -30,6 +30,7 @@ const CATEGORY_ORDER = [
   'conditionalOrders',
   'aiSelfImprovement',
   'reports',
+  'webResearch',
   'monitoring',
 ];
 
@@ -58,6 +59,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   conditionalOrders: 'Conditional / OCO Orders',
   aiSelfImprovement: 'AI Self-Improvement',
   reports: 'Scheduled Reports',
+  webResearch: 'Web Research (Steer)',
 };
 
 export default function SettingsPage() {

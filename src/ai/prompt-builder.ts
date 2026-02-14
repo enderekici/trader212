@@ -18,6 +18,73 @@ function fmtLarge(value: number | null | undefined): string {
   return `$${value.toFixed(0)}`;
 }
 
+function buildWebResearchSection(context: AIContext): string {
+  const w = context.webResearch;
+  if (!w) return '';
+
+  const hasAnyData =
+    w.pegRatio !== null ||
+    w.analystTargetPrice !== null ||
+    w.analystConsensus !== null ||
+    w.shortInterestPct !== null ||
+    w.institutionalOwnershipPct !== null ||
+    w.epsEstimateNextQ !== null ||
+    w.revenueEstimateNextQ !== null ||
+    w.perfWeek !== null ||
+    w.perfMonth !== null ||
+    w.perfQuarter !== null ||
+    w.perfYear !== null;
+
+  if (!hasAnyData) return '';
+
+  const lines: string[] = ['ANALYST & WEB RESEARCH DATA:'];
+
+  if (w.pegRatio !== null) lines.push(`- PEG Ratio: ${w.pegRatio.toFixed(2)}`);
+  if (w.analystTargetPrice !== null) {
+    const currentPrice = context.currentPrice;
+    const upside =
+      currentPrice > 0 ? ((w.analystTargetPrice - currentPrice) / currentPrice) * 100 : 0;
+    lines.push(
+      `- Analyst Target Price: $${w.analystTargetPrice.toFixed(2)} (${upside >= 0 ? '+' : ''}${upside.toFixed(1)}%)`,
+    );
+  }
+  if (w.analystConsensus !== null) {
+    const countStr = w.analystCount !== null ? ` (${w.analystCount} analysts)` : '';
+    lines.push(`- Analyst Consensus: ${w.analystConsensus}${countStr}`);
+  }
+  if (w.shortInterestPct !== null)
+    lines.push(`- Short Interest: ${(w.shortInterestPct * 100).toFixed(1)}%`);
+  if (w.institutionalOwnershipPct !== null)
+    lines.push(`- Institutional Ownership: ${(w.institutionalOwnershipPct * 100).toFixed(1)}%`);
+  if (w.epsEstimateNextQ !== null)
+    lines.push(`- EPS Estimate (next Q): $${w.epsEstimateNextQ.toFixed(2)}`);
+  if (w.revenueEstimateNextQ !== null) {
+    const revStr =
+      w.revenueEstimateNextQ >= 1e9
+        ? `$${(w.revenueEstimateNextQ / 1e9).toFixed(1)}B`
+        : w.revenueEstimateNextQ >= 1e6
+          ? `$${(w.revenueEstimateNextQ / 1e6).toFixed(1)}M`
+          : `$${w.revenueEstimateNextQ.toFixed(0)}`;
+    lines.push(`- Revenue Estimate (next Q): ${revStr}`);
+  }
+
+  // Performance line
+  const perfParts: string[] = [];
+  if (w.perfWeek !== null)
+    perfParts.push(`1W ${(w.perfWeek * 100) >= 0 ? '+' : ''}${(w.perfWeek * 100).toFixed(1)}%`);
+  if (w.perfMonth !== null)
+    perfParts.push(`1M ${(w.perfMonth * 100) >= 0 ? '+' : ''}${(w.perfMonth * 100).toFixed(1)}%`);
+  if (w.perfQuarter !== null)
+    perfParts.push(
+      `1Q ${(w.perfQuarter * 100) >= 0 ? '+' : ''}${(w.perfQuarter * 100).toFixed(1)}%`,
+    );
+  if (w.perfYear !== null)
+    perfParts.push(`1Y ${(w.perfYear * 100) >= 0 ? '+' : ''}${(w.perfYear * 100).toFixed(1)}%`);
+  if (perfParts.length > 0) lines.push(`- Performance: ${perfParts.join(' | ')}`);
+
+  return `${lines.join('\n')}\n\n`;
+}
+
 export function buildAnalysisPrompt(context: AIContext): {
   system: string;
   user: string;
@@ -146,7 +213,7 @@ FUNDAMENTAL METRICS (Composite Score: ${f.score.toFixed(0)}/100):
 - Beta: ${fmt(f.beta)}
 - Dividend Yield: ${fmtPct(f.dividendYield)}
 
-NEWS SENTIMENT (Composite Score: ${s.score.toFixed(0)}/100):
+${buildWebResearchSection(context)}NEWS SENTIMENT (Composite Score: ${s.score.toFixed(0)}/100):
 Headlines:
 ${headlines || '  (no recent headlines)'}
 - Insider Net Buying: ${s.insiderNetBuying > 0 ? '+' : ''}${s.insiderNetBuying} transactions

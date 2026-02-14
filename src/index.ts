@@ -25,7 +25,9 @@ import { getStrategyProfileManager } from './config/strategy-profiles.js';
 import { DataAggregator, type StockData } from './data/data-aggregator.js';
 import { FinnhubClient } from './data/finnhub.js';
 import { MarketauxClient } from './data/marketaux.js';
+import { SteerClient } from './data/steer-client.js';
 import { TickerMapper } from './data/ticker-mapper.js';
+import { type WebResearchData, WebResearcher } from './data/web-researcher.js';
 import { YahooFinanceClient } from './data/yahoo-finance.js';
 import { getDb, initDatabase } from './db/index.js';
 import * as schema from './db/schema.js';
@@ -77,6 +79,8 @@ class TradingBot {
   private modelTracker!: ModelTracker;
   private correlationAnalyzer!: CorrelationAnalyzer;
   private orderReplacer!: OrderReplacer;
+  private steerClient!: SteerClient;
+  private webResearcher!: WebResearcher;
 
   private paused = false;
   private startedAt = '';
@@ -175,6 +179,12 @@ class TradingBot {
 
     // 10h. Partial exit manager — needs T212 client for execution
     getPartialExitManager().setT212Client(this.t212Client);
+
+    // 10i. Web researcher (steer integration)
+    const steerUrl = process.env.STEER_URL || 'http://localhost:3010';
+    this.steerClient = new SteerClient({ baseUrl: steerUrl });
+    this.webResearcher = new WebResearcher(this.steerClient);
+    this.marketResearcher.setWebResearcher(this.webResearcher);
 
     // 11. Telegram with command handlers
     this.telegram = new TelegramNotifier();
@@ -631,6 +641,16 @@ class TradingBot {
       correlation: c.correlation,
     }));
 
+    // 3b. Web research (optional, requires steer)
+    let webResearchData: WebResearchData | null = null;
+    if (configManager.get<boolean>('webResearch.enabled')) {
+      try {
+        webResearchData = await this.webResearcher.getStockResearch(symbol);
+      } catch (err) {
+        log.debug({ symbol, err }, 'Web research failed, continuing without');
+      }
+    }
+
     // 4. Build AI context
     const portfolio = await this.getPortfolioState();
     const aiContext = this.buildAIContext(
@@ -643,6 +663,7 @@ class TradingBot {
       sentimentInput,
       portfolio,
       portfolioCorrelations,
+      webResearchData,
     );
 
     // 5. AI decision
@@ -1674,6 +1695,7 @@ class TradingBot {
     _sentimentInput: SentimentInput,
     portfolio: PortfolioState,
     portfolioCorrelations?: Array<{ symbol: string; correlation: number }>,
+    webResearchData?: WebResearchData | null,
   ): AIContext {
     const candles = data.candles;
     const latest = candles[candles.length - 1];
@@ -1820,6 +1842,24 @@ class TradingBot {
         dailyLossLimitPct: configManager.get<number>('risk.dailyLossLimitPct'),
       },
       portfolioCorrelations: portfolioCorrelations ?? [],
+      ...(webResearchData
+        ? {
+            webResearch: {
+              pegRatio: webResearchData.pegRatio,
+              analystTargetPrice: webResearchData.analystTargetPrice,
+              analystConsensus: webResearchData.analystConsensus,
+              analystCount: webResearchData.analystCount,
+              shortInterestPct: webResearchData.shortInterestPct,
+              institutionalOwnershipPct: webResearchData.institutionalOwnershipPct,
+              epsEstimateNextQ: webResearchData.epsEstimateNextQ,
+              revenueEstimateNextQ: webResearchData.revenueEstimateNextQ,
+              perfWeek: webResearchData.perfWeek,
+              perfMonth: webResearchData.perfMonth,
+              perfQuarter: webResearchData.perfQuarter,
+              perfYear: webResearchData.perfYear,
+            },
+          }
+        : {}),
     };
   }
 

@@ -2,6 +2,8 @@ services:
   bot:
     build: .
     env_file: .env
+    environment:
+      - STEER_URL=http://steer:3010
     volumes:
       - ./data:/app/data
     ports:
@@ -27,3 +29,29 @@ services:
       bot:
         condition: service_healthy
     restart: unless-stopped
+
+  steer:
+    build:
+      context: ../steer
+      dockerfile: Dockerfile
+    shm_size: 2gb
+    environment:
+      - STEER_PORT=3010
+      - STEER_HEADLESS=true
+      - STEER_BROWSER=firefox
+      - STEER_MAX_SESSIONS=5
+      - STEER_BLOCK_RESOURCES=image,font,media,stylesheet
+    restart: unless-stopped
+    security_opt:
+      - seccomp=unconfined
+    tmpfs:
+      - /tmp:nosuid,size=256m
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3010/health').then(r=>{if(!r.ok)throw 1})"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

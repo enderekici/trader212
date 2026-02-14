@@ -104,6 +104,20 @@ export interface AIContext {
     symbol: string;
     correlation: number;
   }>;
+  webResearch?: {
+    pegRatio: number | null;
+    analystTargetPrice: number | null;
+    analystConsensus: string | null;
+    analystCount: number | null;
+    shortInterestPct: number | null;
+    institutionalOwnershipPct: number | null;
+    epsEstimateNextQ: number | null;
+    revenueEstimateNextQ: number | null;
+    perfWeek: number | null;
+    perfMonth: number | null;
+    perfQuarter: number | null;
+    perfYear: number | null;
+  };
 }
 
 export interface AIDecision {

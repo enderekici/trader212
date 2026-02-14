@@ -949,6 +949,32 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
     description: 'Include equity curve chart in reports',
   },
 
+  // Web Research (steer integration)
+  {
+    key: 'webResearch.enabled',
+    value: 'false',
+    category: 'webResearch',
+    description: 'Enable web research via steer headless browser',
+  },
+  {
+    key: 'webResearch.cacheTtlHours',
+    value: '4',
+    category: 'webResearch',
+    description: 'Cache TTL for web research data (hours)',
+  },
+  {
+    key: 'webResearch.finvizEnabled',
+    value: 'true',
+    category: 'webResearch',
+    description: 'Scrape Finviz for analyst data',
+  },
+  {
+    key: 'webResearch.stockAnalysisEnabled',
+    value: 'true',
+    category: 'webResearch',
+    description: 'Scrape StockAnalysis for estimates',
+  },
+
   // Monitoring
   {
     key: 'monitoring.dailySummaryTime',

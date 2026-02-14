@@ -1,5 +1,6 @@
 import { desc, eq } from 'drizzle-orm';
 import { configManager } from '../config/manager.js';
+import type { WebResearcher } from '../data/web-researcher.js';
 import { getDb } from '../db/index.js';
 import { aiResearch } from '../db/schema.js';
 import { createLogger } from '../utils/logger.js';
@@ -50,6 +51,7 @@ export type SymbolDataFetcher = (symbols: string[]) => Promise<Map<string, Symbo
 export class MarketResearcher {
   private aiAgent: AIAgent;
   private dataFetcher: SymbolDataFetcher | null = null;
+  private webResearcher: WebResearcher | null = null;
 
   constructor(aiAgent: AIAgent) {
     this.aiAgent = aiAgent;
@@ -58,6 +60,11 @@ export class MarketResearcher {
   /** Set a data fetcher so research prompts include live market data */
   setDataFetcher(fetcher: SymbolDataFetcher): void {
     this.dataFetcher = fetcher;
+  }
+
+  /** Set a web researcher for thematic stock discovery via web search */
+  setWebResearcher(researcher: WebResearcher): void {
+    this.webResearcher = researcher;
   }
 
   async runResearch(options?: {
@@ -77,6 +84,23 @@ export class MarketResearcher {
       : `Identify the top ${topCount} most promising stocks.`;
 
     const query = `Market Research: ${focus}`;
+
+    // Web search for thematic discovery when no specific symbols given
+    let webSearchContext = '';
+    if (!options?.symbols?.length && this.webResearcher) {
+      try {
+        const searchResults = await this.webResearcher.searchNews(
+          `${focus} stocks to buy ${new Date().getFullYear()}`,
+          5,
+        );
+        if (searchResults.length > 0) {
+          webSearchContext = `\nRecent web research findings:\n${searchResults.map((r) => `  - ${r}`).join('\n')}\n`;
+          log.info({ resultCount: searchResults.length }, 'Web search context added to research');
+        }
+      } catch (err) {
+        log.warn({ err }, 'Web search for research context failed');
+      }
+    }
 
     // Fetch live market data for requested symbols
     let liveDataSection = '';
@@ -106,7 +130,7 @@ export class MarketResearcher {
       sectorFilter,
       symbolFilter,
       topCount,
-      liveDataSection,
+      liveDataSection + webSearchContext,
     );
 
     try {
