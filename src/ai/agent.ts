@@ -133,7 +133,7 @@ export interface AIDecision {
 }
 
 export interface AIAgent {
-  analyze(context: AIContext): Promise<AIDecision>;
+  analyze(context: AIContext): Promise<AIDecision | null>;
   rawChat(system: string, user: string): Promise<string>;
 }
 

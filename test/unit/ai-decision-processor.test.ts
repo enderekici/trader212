@@ -44,44 +44,49 @@ describe('processAIDecision', () => {
   describe('valid JSON parsing', () => {
     it('parses valid JSON string correctly', () => {
       const result = processAIDecision(JSON.stringify(validDecision));
+      expect(result).not.toBeNull();
 
-      expect(result.decision).toBe('BUY');
-      expect(result.conviction).toBe(75);
-      expect(result.reasoning).toBe('Strong technical and fundamental signals');
-      expect(result.risks).toEqual(['Market downturn', 'Earnings miss']);
-      expect(result.suggestedStopLossPct).toBe(0.05);
-      expect(result.suggestedPositionSizePct).toBe(0.08);
-      expect(result.suggestedTakeProfitPct).toBe(0.15);
-      expect(result.urgency).toBe('immediate');
-      expect(result.exitConditions).toBe('Stop loss at 5% or take profit at 15%');
+      expect(result!.decision).toBe('BUY');
+      expect(result!.conviction).toBe(75);
+      expect(result!.reasoning).toBe('Strong technical and fundamental signals');
+      expect(result!.risks).toEqual(['Market downturn', 'Earnings miss']);
+      expect(result!.suggestedStopLossPct).toBe(0.05);
+      expect(result!.suggestedPositionSizePct).toBe(0.08);
+      expect(result!.suggestedTakeProfitPct).toBe(0.15);
+      expect(result!.urgency).toBe('immediate');
+      expect(result!.exitConditions).toBe('Stop loss at 5% or take profit at 15%');
     });
 
     it('parses SELL decision', () => {
       const result = processAIDecision(
         JSON.stringify({ ...validDecision, decision: 'SELL' }),
       );
-      expect(result.decision).toBe('SELL');
+      expect(result).not.toBeNull();
+      expect(result!.decision).toBe('SELL');
     });
 
     it('parses HOLD decision', () => {
       const result = processAIDecision(
         JSON.stringify({ ...validDecision, decision: 'HOLD' }),
       );
-      expect(result.decision).toBe('HOLD');
+      expect(result).not.toBeNull();
+      expect(result!.decision).toBe('HOLD');
     });
 
     it('parses wait_for_dip urgency', () => {
       const result = processAIDecision(
         JSON.stringify({ ...validDecision, urgency: 'wait_for_dip' }),
       );
-      expect(result.urgency).toBe('wait_for_dip');
+      expect(result).not.toBeNull();
+      expect(result!.urgency).toBe('wait_for_dip');
     });
 
     it('parses no_rush urgency', () => {
       const result = processAIDecision(
         JSON.stringify({ ...validDecision, urgency: 'no_rush' }),
       );
-      expect(result.urgency).toBe('no_rush');
+      expect(result).not.toBeNull();
+      expect(result!.urgency).toBe('no_rush');
     });
   });
 
@@ -91,8 +96,9 @@ describe('processAIDecision', () => {
 ${JSON.stringify(validDecision)}`;
 
       const result = processAIDecision(raw);
-      expect(result.decision).toBe('BUY');
-      expect(result.conviction).toBe(75);
+      expect(result).not.toBeNull();
+      expect(result!.decision).toBe('BUY');
+      expect(result!.conviction).toBe(75);
     });
 
     it('strips multiple think blocks', () => {
@@ -101,7 +107,8 @@ ${JSON.stringify(validDecision)}`;
 ${JSON.stringify(validDecision)}`;
 
       const result = processAIDecision(raw);
-      expect(result.decision).toBe('BUY');
+      expect(result).not.toBeNull();
+      expect(result!.decision).toBe('BUY');
     });
 
     it('strips think tags with multiline content', () => {
@@ -114,7 +121,8 @@ Let me think step by step:
 ${JSON.stringify(validDecision)}`;
 
       const result = processAIDecision(raw);
-      expect(result.decision).toBe('BUY');
+      expect(result).not.toBeNull();
+      expect(result!.decision).toBe('BUY');
     });
   });
 
@@ -126,7 +134,8 @@ ${JSON.stringify(validDecision)}
 \`\`\``;
 
       const result = processAIDecision(raw);
-      expect(result.decision).toBe('BUY');
+      expect(result).not.toBeNull();
+      expect(result!.decision).toBe('BUY');
     });
 
     it('extracts JSON from ``` code block without language', () => {
@@ -135,7 +144,8 @@ ${JSON.stringify(validDecision)}
 \`\`\``;
 
       const result = processAIDecision(raw);
-      expect(result.decision).toBe('BUY');
+      expect(result).not.toBeNull();
+      expect(result!.decision).toBe('BUY');
     });
 
     it('extracts JSON from code block with think tags', () => {
@@ -145,7 +155,8 @@ ${JSON.stringify(validDecision)}
 \`\`\``;
 
       const result = processAIDecision(raw);
-      expect(result.decision).toBe('BUY');
+      expect(result).not.toBeNull();
+      expect(result!.decision).toBe('BUY');
     });
   });
 
@@ -156,18 +167,16 @@ ${JSON.stringify(validDecision)}
 That concludes my analysis.`;
 
       const result = processAIDecision(raw);
-      expect(result.decision).toBe('BUY');
+      expect(result).not.toBeNull();
+      expect(result!.decision).toBe('BUY');
     });
   });
 
   describe('extractJson - plain text fallback', () => {
-    it('returns trimmed text when no JSON pattern found', () => {
+    it('returns null when no JSON pattern found', () => {
       const raw = 'no json here at all';
       const result = processAIDecision(raw);
-      // Should default to HOLD because JSON.parse will fail
-      expect(result.decision).toBe('HOLD');
-      expect(result.conviction).toBe(0);
-      expect(result.reasoning).toContain('AI response parsing failed');
+      expect(result).toBeNull();
     });
   });
 
@@ -176,14 +185,16 @@ That concludes my analysis.`;
       const result = processAIDecision(
         JSON.stringify({ ...validDecision, conviction: 150 }),
       );
-      expect(result.conviction).toBe(100);
+      expect(result).not.toBeNull();
+      expect(result!.conviction).toBe(100);
     });
 
     it('clamps conviction to 0-100 range (too low)', () => {
       const result = processAIDecision(
         JSON.stringify({ ...validDecision, conviction: -10 }),
       );
-      expect(result.conviction).toBe(0);
+      expect(result).not.toBeNull();
+      expect(result!.conviction).toBe(0);
     });
 
     it('clamps suggestedStopLossPct to configured min/max', () => {
@@ -191,12 +202,14 @@ That concludes my analysis.`;
       const resultTooLow = processAIDecision(
         JSON.stringify({ ...validDecision, suggestedStopLossPct: 0.001 }),
       );
-      expect(resultTooLow.suggestedStopLossPct).toBe(0.02);
+      expect(resultTooLow).not.toBeNull();
+      expect(resultTooLow!.suggestedStopLossPct).toBe(0.02);
 
       const resultTooHigh = processAIDecision(
         JSON.stringify({ ...validDecision, suggestedStopLossPct: 0.5 }),
       );
-      expect(resultTooHigh.suggestedStopLossPct).toBe(0.08);
+      expect(resultTooHigh).not.toBeNull();
+      expect(resultTooHigh!.suggestedStopLossPct).toBe(0.08);
     });
 
     it('clamps suggestedPositionSizePct to 0.01 - maxPositionSize', () => {
@@ -204,110 +217,99 @@ That concludes my analysis.`;
       const resultTooLow = processAIDecision(
         JSON.stringify({ ...validDecision, suggestedPositionSizePct: 0.001 }),
       );
-      expect(resultTooLow.suggestedPositionSizePct).toBe(0.01);
+      expect(resultTooLow).not.toBeNull();
+      expect(resultTooLow!.suggestedPositionSizePct).toBe(0.01);
 
       const resultTooHigh = processAIDecision(
         JSON.stringify({ ...validDecision, suggestedPositionSizePct: 0.5 }),
       );
-      expect(resultTooHigh.suggestedPositionSizePct).toBe(0.15);
+      expect(resultTooHigh).not.toBeNull();
+      expect(resultTooHigh!.suggestedPositionSizePct).toBe(0.15);
     });
 
     it('clamps suggestedTakeProfitPct to 0.02-0.5', () => {
       const resultTooLow = processAIDecision(
         JSON.stringify({ ...validDecision, suggestedTakeProfitPct: 0.001 }),
       );
-      expect(resultTooLow.suggestedTakeProfitPct).toBe(0.02);
+      expect(resultTooLow).not.toBeNull();
+      expect(resultTooLow!.suggestedTakeProfitPct).toBe(0.02);
 
       const resultTooHigh = processAIDecision(
         JSON.stringify({ ...validDecision, suggestedTakeProfitPct: 0.9 }),
       );
-      expect(resultTooHigh.suggestedTakeProfitPct).toBe(0.5);
+      expect(resultTooHigh).not.toBeNull();
+      expect(resultTooHigh!.suggestedTakeProfitPct).toBe(0.5);
     });
 
     it('does not alter values already within range', () => {
       const result = processAIDecision(JSON.stringify(validDecision));
-      expect(result.suggestedStopLossPct).toBe(0.05);
-      expect(result.suggestedPositionSizePct).toBe(0.08);
-      expect(result.suggestedTakeProfitPct).toBe(0.15);
-      expect(result.conviction).toBe(75);
+      expect(result).not.toBeNull();
+      expect(result!.suggestedStopLossPct).toBe(0.05);
+      expect(result!.suggestedPositionSizePct).toBe(0.08);
+      expect(result!.suggestedTakeProfitPct).toBe(0.15);
+      expect(result!.conviction).toBe(75);
     });
   });
 
-  describe('error handling - defaults to HOLD', () => {
-    it('returns default HOLD for completely invalid JSON', () => {
+  describe('error handling - returns null', () => {
+    it('returns null for completely invalid JSON', () => {
       const result = processAIDecision('this is not json at all {}{}{}');
-      expect(result.decision).toBe('HOLD');
-      expect(result.conviction).toBe(0);
-      expect(result.reasoning).toContain('AI response parsing failed');
-      expect(result.risks).toEqual(['AI response could not be parsed']);
-      expect(result.suggestedStopLossPct).toBe(0.05);
-      expect(result.suggestedPositionSizePct).toBe(0.03);
-      expect(result.suggestedTakeProfitPct).toBe(0.1);
-      expect(result.urgency).toBe('no_rush');
-      expect(result.exitConditions).toContain('defaulted to HOLD');
+      expect(result).toBeNull();
     });
 
-    it('returns default HOLD for empty string', () => {
+    it('returns null for empty string', () => {
       const result = processAIDecision('');
-      expect(result.decision).toBe('HOLD');
-      expect(result.conviction).toBe(0);
+      expect(result).toBeNull();
     });
 
-    it('returns default HOLD when decision field is invalid enum value', () => {
+    it('returns null when decision field is invalid enum value', () => {
       const result = processAIDecision(
         JSON.stringify({ ...validDecision, decision: 'MAYBE' }),
       );
-      expect(result.decision).toBe('HOLD');
-      expect(result.reasoning).toContain('AI response parsing failed');
+      expect(result).toBeNull();
     });
 
-    it('returns default HOLD when urgency is invalid', () => {
+    it('returns null when urgency is invalid', () => {
       const result = processAIDecision(
         JSON.stringify({ ...validDecision, urgency: 'right_now' }),
       );
-      expect(result.decision).toBe('HOLD');
+      expect(result).toBeNull();
     });
 
-    it('returns default HOLD when required fields are missing', () => {
+    it('returns null when required fields are missing', () => {
       const result = processAIDecision(
         JSON.stringify({ decision: 'BUY' }),
       );
-      expect(result.decision).toBe('HOLD');
+      expect(result).toBeNull();
     });
 
-    it('returns default HOLD when conviction is not a number', () => {
+    it('returns null when conviction is not a number', () => {
       const result = processAIDecision(
         JSON.stringify({ ...validDecision, conviction: 'high' }),
       );
-      expect(result.decision).toBe('HOLD');
+      expect(result).toBeNull();
     });
 
-    it('returns default HOLD when risks is not an array', () => {
+    it('returns null when risks is not an array', () => {
       const result = processAIDecision(
         JSON.stringify({ ...validDecision, risks: 'some risk' }),
       );
-      expect(result.decision).toBe('HOLD');
+      expect(result).toBeNull();
     });
 
-    it('returns default HOLD when reasoning is not a string', () => {
+    it('returns null when reasoning is not a string', () => {
       const result = processAIDecision(
         JSON.stringify({ ...validDecision, reasoning: 123 }),
       );
-      expect(result.decision).toBe('HOLD');
+      expect(result).toBeNull();
     });
 
-    it('handles non-Error exceptions in catch block', () => {
-      // Trigger a string error via malformed text that produces a non-Error throw
-      // In practice, JSON.parse throwing is an Error, but we test the String(err) path
-      // by verifying the catch logs correctly for Error instances
+    it('returns null for completely broken text', () => {
       const result = processAIDecision('totally broken');
-      expect(result.decision).toBe('HOLD');
-      expect(result.reasoning).toContain('AI response parsing failed');
+      expect(result).toBeNull();
     });
 
-    it('handles non-Error thrown from configManager.get after validation', () => {
-      // After zod validation succeeds, configManager.get is called. If it throws
-      // a non-Error value, the String(err) branch of the catch should be taken.
+    it('returns null when configManager.get throws', () => {
       vi.mocked(configManager.get).mockImplementation((key: string) => {
         if (key === 'risk.minStopLossPct') throw 'config not found';
         return 0.02;
@@ -325,8 +327,7 @@ That concludes my analysis.`;
         exitConditions: 'test',
       }));
 
-      expect(result.decision).toBe('HOLD');
-      expect(result.reasoning).toContain('config not found');
+      expect(result).toBeNull();
     });
   });
 });

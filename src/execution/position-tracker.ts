@@ -106,7 +106,7 @@ export class PositionTracker {
             'Position in T212 but not tracked in DB — unmanaged position',
           );
         } else {
-          // Reconcile quantity differences
+          // Reconcile quantity differences — update DB to match T212 (source of truth)
           const dbPos = dbSymbolMap.get(ticker);
           if (!dbPos) continue;
           if (Math.abs(dbPos.shares - t212Pos.quantity) > 0.001) {
@@ -116,8 +116,15 @@ export class PositionTracker {
                 dbShares: dbPos.shares,
                 t212Shares: t212Pos.quantity,
               },
-              'Position quantity mismatch between DB and T212',
+              'Position quantity mismatch — reconciling DB to match T212',
             );
+            db.update(positions)
+              .set({
+                shares: t212Pos.quantity,
+                updatedAt: new Date().toISOString(),
+              })
+              .where(eq(positions.symbol, dbPos.symbol))
+              .run();
           }
         }
       }

@@ -31,7 +31,7 @@ export class ApiServer {
         credentials: true,
       }),
     );
-    this.app.use(express.json());
+    this.app.use(express.json({ limit: '10kb' }));
 
     // Authentication
     this.app.use(authMiddleware);

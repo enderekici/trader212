@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { configManager } from '../config/manager.js';
 import * as repo from '../db/repositories/conditional-orders.js';
+import { safeJsonParse } from '../utils/helpers.js';
 import { createLogger } from '../utils/logger.js';
 
 const logger = createLogger('conditional-orders');
@@ -202,7 +203,11 @@ export class ConditionalOrderManager {
           );
         }
 
-        const action = JSON.parse(order.action) as OrderAction;
+        const action = safeJsonParse<OrderAction | null>(order.action, null);
+        if (!action) {
+          logger.error({ orderId: order.id }, 'Failed to parse conditional order action');
+          continue;
+        }
         triggered.push({
           orderId: order.id,
           symbol: order.symbol,
@@ -220,7 +225,8 @@ export class ConditionalOrderManager {
   }
 
   checkPriceTrigger(order: repo.ConditionalOrder, currentPrice: number): boolean {
-    const condition = JSON.parse(order.triggerCondition) as PriceCondition;
+    const condition = safeJsonParse<PriceCondition | null>(order.triggerCondition, null);
+    if (!condition) return false;
 
     if (order.triggerType === 'price_above') {
       return currentPrice >= condition.price;
@@ -233,7 +239,8 @@ export class ConditionalOrderManager {
   }
 
   checkTimeTrigger(order: repo.ConditionalOrder): boolean {
-    const condition = JSON.parse(order.triggerCondition) as TimeCondition;
+    const condition = safeJsonParse<TimeCondition | null>(order.triggerCondition, null);
+    if (!condition) return false;
     const now = new Date().toISOString();
     return now >= condition.triggerAt;
   }

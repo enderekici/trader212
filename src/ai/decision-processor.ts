@@ -33,21 +33,7 @@ function extractJson(raw: string): string {
   return text.trim();
 }
 
-function defaultHoldDecision(reason: string): AIDecision {
-  return {
-    decision: 'HOLD',
-    conviction: 0,
-    reasoning: reason,
-    risks: ['AI response could not be parsed'],
-    suggestedStopLossPct: 0.05,
-    suggestedPositionSizePct: 0.03,
-    suggestedTakeProfitPct: 0.1,
-    urgency: 'no_rush',
-    exitConditions: 'N/A - defaulted to HOLD due to parsing failure',
-  };
-}
-
-export function processAIDecision(rawText: string): AIDecision {
+export function processAIDecision(rawText: string): AIDecision | null {
   try {
     const jsonStr = extractJson(rawText);
     const parsed = JSON.parse(jsonStr);
@@ -70,10 +56,10 @@ export function processAIDecision(rawText: string): AIDecision {
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    log.warn(
+    log.error(
       { err: message, rawText: rawText.slice(0, 500) },
-      'Failed to parse AI decision, defaulting to HOLD',
+      'Failed to parse AI decision — returning null (no trade)',
     );
-    return defaultHoldDecision(`AI response parsing failed: ${message}`);
+    return null;
   }
 }

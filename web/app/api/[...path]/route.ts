@@ -55,10 +55,9 @@ async function proxyRequest(req: NextRequest, { params }: { params: Promise<{ pa
         'Content-Type': res.headers.get('Content-Type') || 'application/json',
       },
     });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'Proxy request failed';
+  } catch {
     return NextResponse.json(
-      { error: 'Backend unavailable', details: message },
+      { error: 'Backend unavailable' },
       { status: 502 },
     );
   }

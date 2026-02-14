@@ -681,7 +681,12 @@ class TradingBot {
     };
 
     if (aiEnabled) {
-      decision = await this.aiAgent.analyze(aiContext);
+      const aiDecision = await this.aiAgent.analyze(aiContext);
+      if (!aiDecision) {
+        log.warn({ symbol }, 'AI decision parsing failed — skipping symbol');
+        return;
+      }
+      decision = aiDecision;
     }
 
     // 6. Store signal in DB
@@ -1436,6 +1441,10 @@ class TradingBot {
         if (!aiEnabled) continue;
 
         const decision = await this.aiAgent.analyze(aiContext);
+        if (!decision) {
+          log.warn({ symbol: pos.symbol }, 'AI re-evaluation parsing failed — skipping');
+          continue;
+        }
 
         // If AI suggests SELL for a position we hold, consider adjusting
         if (decision.decision === 'SELL' && decision.conviction > 60) {

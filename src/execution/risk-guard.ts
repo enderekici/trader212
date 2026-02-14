@@ -44,9 +44,13 @@ export class RiskGuard {
         log.warn({ symbol: proposal.symbol, reason }, 'Trade rejected');
         return { allowed: false, reason };
       }
-    } catch {
-      // Don't let pair lock check failures block trading
-      log.debug({ symbol: proposal.symbol }, 'Pair lock check skipped (DB not ready)');
+    } catch (err) {
+      // Fail-closed: if pair lock check fails, block the trade for safety
+      log.warn(
+        { symbol: proposal.symbol, err },
+        'Pair lock check failed — blocking trade for safety',
+      );
+      return { allowed: false, reason: 'Pair lock check failed — trade blocked for safety' };
     }
 
     const maxPositions = configManager.get<number>('risk.maxPositions');
