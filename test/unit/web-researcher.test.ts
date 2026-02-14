@@ -319,5 +319,297 @@ describe('WebResearcher', () => {
       const result = await researcher.getStockResearch('AAPL');
       expect(result!.averageVolume).toBe(850000);
     });
+
+    it('should handle volume with B suffix', async () => {
+      const text = 'Avg Volume 1.5B';
+
+      const scrapeMock = vi.fn()
+        .mockResolvedValueOnce({ content: text, url: '', title: '' } as ExtractResult)
+        .mockResolvedValueOnce({ content: '', url: '', title: '' } as ExtractResult);
+
+      (mockClient as unknown as { scrape: typeof scrapeMock }).scrape = scrapeMock;
+
+      const result = await researcher.getStockResearch('AAPL');
+      expect(result!.averageVolume).toBe(1500000000);
+    });
+
+    it('should handle plain numeric volume without suffix', async () => {
+      const text = 'Avg Volume 12345';
+
+      const scrapeMock = vi.fn()
+        .mockResolvedValueOnce({ content: text, url: '', title: '' } as ExtractResult)
+        .mockResolvedValueOnce({ content: '', url: '', title: '' } as ExtractResult);
+
+      (mockClient as unknown as { scrape: typeof scrapeMock }).scrape = scrapeMock;
+
+      const result = await researcher.getStockResearch('AAPL');
+      expect(result!.averageVolume).toBe(12345);
+    });
+
+    it('should handle commas in numeric values', async () => {
+      const text = 'PEG 1,234.56\nAvg Volume 48,510,000';
+
+      const scrapeMock = vi.fn()
+        .mockResolvedValueOnce({ content: text, url: '', title: '' } as ExtractResult)
+        .mockResolvedValueOnce({ content: '', url: '', title: '' } as ExtractResult);
+
+      (mockClient as unknown as { scrape: typeof scrapeMock }).scrape = scrapeMock;
+
+      const result = await researcher.getStockResearch('AAPL');
+      expect(result!.pegRatio).toBe(1234.56);
+      expect(result!.averageVolume).toBe(48510000);
+    });
+
+    it('should parse newline-separated Finviz metrics', async () => {
+      const text = 'PEG\n  2.50\nTarget Price\n  200.00\nShort Float\n  3.10%\nInst Own\n  80.00%\nPerf Week\n  1.50%';
+
+      const scrapeMock = vi.fn()
+        .mockResolvedValueOnce({ content: text, url: '', title: '' } as ExtractResult)
+        .mockResolvedValueOnce({ content: '', url: '', title: '' } as ExtractResult);
+
+      (mockClient as unknown as { scrape: typeof scrapeMock }).scrape = scrapeMock;
+
+      const result = await researcher.getStockResearch('AAPL');
+      expect(result!.pegRatio).toBe(2.5);
+      expect(result!.analystTargetPrice).toBe(200);
+      expect(result!.shortInterestPct).toBeCloseTo(0.031, 4);
+      expect(result!.institutionalOwnershipPct).toBeCloseTo(0.8, 4);
+      expect(result!.perfWeek).toBeCloseTo(0.015, 4);
+    });
+
+    it('should return null for non-matching content', async () => {
+      const text = 'No financial data here, just random text.';
+
+      const scrapeMock = vi.fn()
+        .mockResolvedValueOnce({ content: text, url: '', title: '' } as ExtractResult)
+        .mockResolvedValueOnce({ content: text, url: '', title: '' } as ExtractResult);
+
+      (mockClient as unknown as { scrape: typeof scrapeMock }).scrape = scrapeMock;
+
+      const result = await researcher.getStockResearch('AAPL');
+      expect(result!.pegRatio).toBeNull();
+      expect(result!.analystTargetPrice).toBeNull();
+      expect(result!.analystConsensus).toBeNull();
+      expect(result!.analystCount).toBeNull();
+    });
+  });
+
+  describe('StockAnalysis parsing edge cases', () => {
+    it('should parse Hold/Neutral consensus', async () => {
+      const saText = '5 analyst ratings. The analyst consensus is Hold.';
+
+      const scrapeMock = vi.fn()
+        .mockResolvedValueOnce({ content: '', url: '', title: '' } as ExtractResult)
+        .mockResolvedValueOnce({ content: saText, url: '', title: '' } as ExtractResult);
+
+      (mockClient as unknown as { scrape: typeof scrapeMock }).scrape = scrapeMock;
+
+      const result = await researcher.getStockResearch('AAPL');
+      expect(result!.analystConsensus).toBe('Hold');
+    });
+
+    it('should parse Sell consensus', async () => {
+      const saText = 'The analyst consensus is Sell.';
+
+      const scrapeMock = vi.fn()
+        .mockResolvedValueOnce({ content: '', url: '', title: '' } as ExtractResult)
+        .mockResolvedValueOnce({ content: saText, url: '', title: '' } as ExtractResult);
+
+      (mockClient as unknown as { scrape: typeof scrapeMock }).scrape = scrapeMock;
+
+      const result = await researcher.getStockResearch('AAPL');
+      expect(result!.analystConsensus).toBe('Sell');
+    });
+
+    it('should parse Strong Sell consensus', async () => {
+      const saText = 'Strong Sell rating from analysts.';
+
+      const scrapeMock = vi.fn()
+        .mockResolvedValueOnce({ content: '', url: '', title: '' } as ExtractResult)
+        .mockResolvedValueOnce({ content: saText, url: '', title: '' } as ExtractResult);
+
+      (mockClient as unknown as { scrape: typeof scrapeMock }).scrape = scrapeMock;
+
+      const result = await researcher.getStockResearch('AAPL');
+      expect(result!.analystConsensus).toBe('Strong Sell');
+    });
+
+    it('should parse Underperform consensus as Sell', async () => {
+      const saText = 'The analyst consensus is Underperform.';
+
+      const scrapeMock = vi.fn()
+        .mockResolvedValueOnce({ content: '', url: '', title: '' } as ExtractResult)
+        .mockResolvedValueOnce({ content: saText, url: '', title: '' } as ExtractResult);
+
+      (mockClient as unknown as { scrape: typeof scrapeMock }).scrape = scrapeMock;
+
+      const result = await researcher.getStockResearch('AAPL');
+      expect(result!.analystConsensus).toBe('Sell');
+    });
+
+    it('should parse Neutral consensus as Hold', async () => {
+      const saText = 'The analyst consensus is Neutral.';
+
+      const scrapeMock = vi.fn()
+        .mockResolvedValueOnce({ content: '', url: '', title: '' } as ExtractResult)
+        .mockResolvedValueOnce({ content: saText, url: '', title: '' } as ExtractResult);
+
+      (mockClient as unknown as { scrape: typeof scrapeMock }).scrape = scrapeMock;
+
+      const result = await researcher.getStockResearch('AAPL');
+      expect(result!.analystConsensus).toBe('Hold');
+    });
+
+    it('should return null for unrecognized consensus', async () => {
+      const saText = 'The analyst consensus is Accumulate.';
+
+      const scrapeMock = vi.fn()
+        .mockResolvedValueOnce({ content: '', url: '', title: '' } as ExtractResult)
+        .mockResolvedValueOnce({ content: saText, url: '', title: '' } as ExtractResult);
+
+      (mockClient as unknown as { scrape: typeof scrapeMock }).scrape = scrapeMock;
+
+      const result = await researcher.getStockResearch('AAPL');
+      expect(result!.analystConsensus).toBeNull();
+    });
+
+    it('should parse analyst count with "wall street" prefix', async () => {
+      const saText = '30 wall street analysts cover this stock.';
+
+      const scrapeMock = vi.fn()
+        .mockResolvedValueOnce({ content: '', url: '', title: '' } as ExtractResult)
+        .mockResolvedValueOnce({ content: saText, url: '', title: '' } as ExtractResult);
+
+      (mockClient as unknown as { scrape: typeof scrapeMock }).scrape = scrapeMock;
+
+      const result = await researcher.getStockResearch('AAPL');
+      expect(result!.analystCount).toBe(30);
+    });
+
+    it('should parse analyst count with "based on" prefix', async () => {
+      const saText = 'based on 22 analyst estimates';
+
+      const scrapeMock = vi.fn()
+        .mockResolvedValueOnce({ content: '', url: '', title: '' } as ExtractResult)
+        .mockResolvedValueOnce({ content: saText, url: '', title: '' } as ExtractResult);
+
+      (mockClient as unknown as { scrape: typeof scrapeMock }).scrape = scrapeMock;
+
+      const result = await researcher.getStockResearch('AAPL');
+      expect(result!.analystCount).toBe(22);
+    });
+
+    it('should parse EPS with alternate pattern', async () => {
+      const saText = 'EPS: $2.15 est for next quarter';
+
+      const scrapeMock = vi.fn()
+        .mockResolvedValueOnce({ content: '', url: '', title: '' } as ExtractResult)
+        .mockResolvedValueOnce({ content: saText, url: '', title: '' } as ExtractResult);
+
+      (mockClient as unknown as { scrape: typeof scrapeMock }).scrape = scrapeMock;
+
+      const result = await researcher.getStockResearch('AAPL');
+      expect(result!.epsEstimateNextQ).toBe(2.15);
+    });
+
+    it('should parse revenue estimate with M suffix', async () => {
+      const saText = 'Revenue estimate: $850.5M';
+
+      const scrapeMock = vi.fn()
+        .mockResolvedValueOnce({ content: '', url: '', title: '' } as ExtractResult)
+        .mockResolvedValueOnce({ content: saText, url: '', title: '' } as ExtractResult);
+
+      (mockClient as unknown as { scrape: typeof scrapeMock }).scrape = scrapeMock;
+
+      const result = await researcher.getStockResearch('AAPL');
+      expect(result!.revenueEstimateNextQ).toBe(850500000);
+    });
+
+    it('should parse revenue estimate with T suffix', async () => {
+      const saText = 'Revenue estimate: $1.2T';
+
+      const scrapeMock = vi.fn()
+        .mockResolvedValueOnce({ content: '', url: '', title: '' } as ExtractResult)
+        .mockResolvedValueOnce({ content: saText, url: '', title: '' } as ExtractResult);
+
+      (mockClient as unknown as { scrape: typeof scrapeMock }).scrape = scrapeMock;
+
+      const result = await researcher.getStockResearch('AAPL');
+      expect(result!.revenueEstimateNextQ).toBe(1200000000000);
+    });
+
+    it('should parse revenue with plain number (no suffix)', async () => {
+      const saText = 'Revenue estimate: $500000';
+
+      const scrapeMock = vi.fn()
+        .mockResolvedValueOnce({ content: '', url: '', title: '' } as ExtractResult)
+        .mockResolvedValueOnce({ content: saText, url: '', title: '' } as ExtractResult);
+
+      (mockClient as unknown as { scrape: typeof scrapeMock }).scrape = scrapeMock;
+
+      const result = await researcher.getStockResearch('AAPL');
+      expect(result!.revenueEstimateNextQ).toBe(500000);
+    });
+
+    it('should parse revenue with "forecast" keyword', async () => {
+      const saText = 'Revenue forecast: $12.5B';
+
+      const scrapeMock = vi.fn()
+        .mockResolvedValueOnce({ content: '', url: '', title: '' } as ExtractResult)
+        .mockResolvedValueOnce({ content: saText, url: '', title: '' } as ExtractResult);
+
+      (mockClient as unknown as { scrape: typeof scrapeMock }).scrape = scrapeMock;
+
+      const result = await researcher.getStockResearch('AAPL');
+      expect(result!.revenueEstimateNextQ).toBe(12500000000);
+    });
+  });
+
+  describe('searchNews() edge cases', () => {
+    it('should handle non-array content from scrape', async () => {
+      const scrapeMock = vi.fn().mockResolvedValue({
+        content: 'just a string, not an array',
+        url: 'https://html.duckduckgo.com',
+        title: 'DDG',
+      } as ExtractResult);
+
+      (mockClient as unknown as { scrape: typeof scrapeMock }).scrape = scrapeMock;
+
+      const results = await researcher.searchNews('test');
+      expect(results).toEqual([]);
+    });
+
+    it('should filter empty titles and snippets', async () => {
+      const scrapeMock = vi.fn().mockResolvedValue({
+        content: [
+          { title: '', snippet: '', url: '' },
+          { title: 'Real result', snippet: 'Has content', url: 'https://example.com' },
+        ],
+        url: 'https://html.duckduckgo.com',
+        title: 'DDG',
+      } as ExtractResult);
+
+      (mockClient as unknown as { scrape: typeof scrapeMock }).scrape = scrapeMock;
+
+      const results = await researcher.searchNews('test');
+      expect(results).toHaveLength(1);
+      expect(results[0]).toContain('Real result');
+    });
+
+    it('should handle items with only snippet, no title', async () => {
+      const scrapeMock = vi.fn().mockResolvedValue({
+        content: [
+          { title: '', snippet: 'Just a snippet', url: '' },
+        ],
+        url: 'https://html.duckduckgo.com',
+        title: 'DDG',
+      } as ExtractResult);
+
+      (mockClient as unknown as { scrape: typeof scrapeMock }).scrape = scrapeMock;
+
+      const results = await researcher.searchNews('test');
+      expect(results).toHaveLength(1);
+      expect(results[0]).toBe('Just a snippet');
+    });
   });
 });
