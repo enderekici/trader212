@@ -21,6 +21,9 @@ export const trades = sqliteTable('trades', {
   intendedPrice: real('intendedPrice'),
   slippage: real('slippage'),
   accountType: text('accountType', { enum: ['INVEST', 'ISA'] }).notNull(),
+  dcaRound: integer('dcaRound'),
+  journalNotes: text('journalNotes'),
+  journalTags: text('journalTags'), // JSON array
   createdAt: text('createdAt').default('CURRENT_TIMESTAMP'),
 });
 
@@ -89,6 +92,9 @@ export const positions = sqliteTable('positions', {
   takeProfitOrderId: text('takeProfitOrderId'),
   aiExitConditions: text('aiExitConditions'),
   accountType: text('accountType', { enum: ['INVEST', 'ISA'] }).notNull(),
+  dcaCount: integer('dcaCount').default(0),
+  totalInvested: real('totalInvested'),
+  partialExitCount: integer('partialExitCount').default(0),
   updatedAt: text('updatedAt'),
 });
 
@@ -191,6 +197,13 @@ export const dailyMetrics = sqliteTable('daily_metrics', {
   portfolioValue: real('portfolioValue'),
   cashBalance: real('cashBalance'),
   accountType: text('accountType'),
+  sortinoRatio: real('sortinoRatio'),
+  calmarRatio: real('calmarRatio'),
+  sqn: real('sqn'),
+  expectancy: real('expectancy'),
+  avgWin: real('avgWin'),
+  avgLoss: real('avgLoss'),
+  currentDrawdown: real('currentDrawdown'),
 });
 
 export const pairlistHistory = sqliteTable('pairlist_history', {
@@ -283,6 +296,159 @@ export const modelPerformance = sqliteTable(
     evaluatedAt: text('evaluatedAt'),
   },
   (table) => [index('idx_model_perf').on(table.aiModel, table.signalTimestamp)],
+);
+
+// ── Pair Locks (protection-based trading restrictions) ───────────────────
+export const pairLocks = sqliteTable(
+  'pair_locks',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    symbol: text('symbol').notNull(), // '*' for global lock
+    lockEnd: text('lockEnd').notNull(), // ISO timestamp when lock expires
+    reason: text('reason'), // e.g. 'cooldown', 'stoploss_guard', 'max_drawdown', 'low_profit'
+    side: text('side', { enum: ['long', 'short', '*'] })
+      .notNull()
+      .default('*'),
+    active: integer('active', { mode: 'boolean' }).notNull().default(true),
+    createdAt: text('createdAt').notNull(),
+  },
+  (table) => [index('idx_pair_locks_symbol').on(table.symbol, table.active, table.lockEnd)],
+);
+
+// ── Orders (1:N with trades, tracks each exchange order) ────────────────
+export const orders = sqliteTable(
+  'orders',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    tradeId: integer('tradeId'), // FK to trades.id (null if trade not yet created)
+    positionId: integer('positionId'), // FK to positions.id
+    symbol: text('symbol').notNull(),
+    side: text('side', { enum: ['BUY', 'SELL'] }).notNull(),
+    orderType: text('orderType', { enum: ['market', 'limit', 'stop'] })
+      .notNull()
+      .default('market'),
+    status: text('status', {
+      enum: ['pending', 'open', 'filled', 'partially_filled', 'cancelled', 'expired', 'failed'],
+    })
+      .notNull()
+      .default('pending'),
+    requestedQuantity: real('requestedQuantity').notNull(),
+    filledQuantity: real('filledQuantity').default(0),
+    requestedPrice: real('requestedPrice'), // null for market orders
+    filledPrice: real('filledPrice'), // avg fill price
+    stopPrice: real('stopPrice'), // trigger price for stop orders
+    t212OrderId: text('t212OrderId'), // exchange order ID
+    cancelReason: text('cancelReason'),
+    orderTag: text('orderTag'), // 'entry', 'exit', 'dca', 'stoploss', 'take_profit', 'partial_exit'
+    replacedByOrderId: integer('replacedByOrderId'), // FK to orders.id (for order replacement chain)
+    accountType: text('accountType', { enum: ['INVEST', 'ISA'] }).notNull(),
+    createdAt: text('createdAt').notNull(),
+    updatedAt: text('updatedAt'),
+    filledAt: text('filledAt'),
+  },
+  (table) => [
+    index('idx_orders_trade').on(table.tradeId),
+    index('idx_orders_position').on(table.positionId),
+    index('idx_orders_status').on(table.status, table.symbol),
+  ],
+);
+
+// ── Trade Journal (notes & tags on trades) ──────────────────────────────
+export const tradeJournal = sqliteTable(
+  'trade_journal',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    tradeId: integer('tradeId'),
+    positionId: integer('positionId'),
+    symbol: text('symbol').notNull(),
+    note: text('note').notNull(),
+    tags: text('tags'), // JSON array
+    createdAt: text('createdAt').notNull(),
+  },
+  (table) => [index('idx_journal_symbol').on(table.symbol, table.createdAt)],
+);
+
+// ── Tax Lots (cost basis tracking) ──────────────────────────────────────
+export const taxLots = sqliteTable(
+  'tax_lots',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    symbol: text('symbol').notNull(),
+    shares: real('shares').notNull(),
+    costBasis: real('costBasis').notNull(),
+    purchaseDate: text('purchaseDate').notNull(),
+    saleDate: text('saleDate'),
+    salePrice: real('salePrice'),
+    pnl: real('pnl'),
+    holdingPeriod: text('holdingPeriod', { enum: ['short', 'long'] }),
+    accountType: text('accountType', { enum: ['INVEST', 'ISA'] }).notNull(),
+    createdAt: text('createdAt').notNull(),
+  },
+  (table) => [index('idx_tax_lots_symbol').on(table.symbol, table.saleDate)],
+);
+
+// ── Webhook Configs ─────────────────────────────────────────────────────
+export const webhookConfigs = sqliteTable('webhook_configs', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull(),
+  url: text('url'),
+  secret: text('secret'),
+  direction: text('direction', { enum: ['inbound', 'outbound'] }).notNull(),
+  eventTypes: text('eventTypes'), // JSON array
+  active: integer('active', { mode: 'boolean' }).notNull().default(true),
+  createdAt: text('createdAt').notNull(),
+});
+
+// ── Webhook Logs ────────────────────────────────────────────────────────
+export const webhookLogs = sqliteTable(
+  'webhook_logs',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    webhookId: integer('webhookId'),
+    direction: text('direction', { enum: ['inbound', 'outbound'] }).notNull(),
+    eventType: text('eventType').notNull(),
+    payload: text('payload'), // JSON
+    statusCode: integer('statusCode'),
+    response: text('response'),
+    createdAt: text('createdAt').notNull(),
+  },
+  (table) => [index('idx_webhook_logs_ts').on(table.createdAt)],
+);
+
+// ── Strategy Profiles ───────────────────────────────────────────────────
+export const strategyProfiles = sqliteTable('strategy_profiles', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull().unique(),
+  description: text('description'),
+  config: text('config').notNull(), // JSON object of config overrides
+  active: integer('active', { mode: 'boolean' }).notNull().default(false),
+  createdAt: text('createdAt').notNull(),
+  updatedAt: text('updatedAt'),
+});
+
+// ── Conditional Orders (OCO, price triggers) ────────────────────────────
+export const conditionalOrders = sqliteTable(
+  'conditional_orders',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    symbol: text('symbol').notNull(),
+    triggerType: text('triggerType', {
+      enum: ['price_above', 'price_below', 'time', 'indicator'],
+    }).notNull(),
+    triggerCondition: text('triggerCondition').notNull(), // JSON
+    action: text('action').notNull(), // JSON: { type, shares, price?, ... }
+    status: text('status', {
+      enum: ['pending', 'triggered', 'executed', 'cancelled', 'expired'],
+    })
+      .notNull()
+      .default('pending'),
+    linkedOrderId: integer('linkedOrderId'), // For OCO: the other order's id
+    ocoGroupId: text('ocoGroupId'), // OCO group identifier
+    expiresAt: text('expiresAt'),
+    createdAt: text('createdAt').notNull(),
+    triggeredAt: text('triggeredAt'),
+  },
+  (table) => [index('idx_cond_orders_status').on(table.status, table.symbol)],
 );
 
 // ── Bot Audit Log (session replay) ──────────────────────────────────────

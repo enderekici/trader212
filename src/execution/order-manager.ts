@@ -3,6 +3,7 @@ import type { Trading212Client } from '../api/trading212/client.js';
 import type { Order } from '../api/trading212/types.js';
 import { configManager } from '../config/manager.js';
 import { getDb } from '../db/index.js';
+import { createOrder, updateOrderStatus } from '../db/repositories/orders.js';
 import { positions, trades } from '../db/schema.js';
 import { sleep } from '../utils/helpers.js';
 import { createLogger } from '../utils/logger.js';
@@ -34,6 +35,7 @@ export interface OrderResult {
   success: boolean;
   tradeId?: number;
   orderId?: string;
+  localOrderId?: number;
   error?: string;
 }
 
@@ -61,6 +63,18 @@ export class OrderManager {
     const now = new Date().toISOString();
 
     if (dryRun) {
+      // Create order record for dry-run tracking
+      const localOrderId = createOrder({
+        symbol: params.symbol,
+        side: 'BUY',
+        orderType: 'market',
+        requestedQuantity: params.shares,
+        requestedPrice: params.price,
+        orderTag: 'entry',
+        accountType: params.accountType,
+      });
+
+      const dryT212Id = `dry_run_BUY_${params.symbol}_${Date.now()}`;
       const dryTpOrderId =
         params.takeProfitPct > 0
           ? `tp-dry-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
@@ -123,13 +137,33 @@ export class OrderManager {
           .run();
       });
 
-      return { success: true, tradeId: Number(tradeRowId) };
+      // Update order as filled immediately in dry-run
+      updateOrderStatus(localOrderId, {
+        status: 'filled',
+        t212OrderId: dryT212Id,
+        filledQuantity: params.shares,
+        filledPrice: params.price,
+        filledAt: now,
+      });
+
+      return { success: true, tradeId: Number(tradeRowId), localOrderId };
     }
 
     // Live execution
     if (!this.t212Client) {
       return { success: false, error: 'T212 client not initialized' };
     }
+
+    // Create pending order record before placing on exchange
+    const localOrderId = createOrder({
+      symbol: params.symbol,
+      side: 'BUY',
+      orderType: 'market',
+      requestedQuantity: params.shares,
+      requestedPrice: params.price,
+      orderTag: 'entry',
+      accountType: params.accountType,
+    });
 
     try {
       const client = this.t212Client;
@@ -143,11 +177,34 @@ export class OrderManager {
       });
       log.info({ symbol: params.symbol, orderId: order.id }, 'Market buy order placed');
 
+      // Update order with exchange ID and status
+      updateOrderStatus(localOrderId, {
+        status: 'open',
+        t212OrderId: String(order.id),
+      });
+
       // Wait for fill with timeout
       const fillPrice = await this.waitForFill(client, order.id);
       if (fillPrice == null) {
-        return { success: false, orderId: String(order.id), error: 'Order fill timeout' };
+        updateOrderStatus(localOrderId, {
+          status: 'failed',
+          cancelReason: 'Order fill timeout',
+        });
+        return {
+          success: false,
+          orderId: String(order.id),
+          localOrderId,
+          error: 'Order fill timeout',
+        };
       }
+
+      // Mark entry order as filled
+      updateOrderStatus(localOrderId, {
+        status: 'filled',
+        filledQuantity: params.shares,
+        filledPrice: fillPrice,
+        filledAt: new Date().toISOString(),
+      });
 
       const actualStopLoss = fillPrice * (1 - params.stopLossPct);
       const actualTakeProfit = fillPrice * (1 + params.takeProfitPct);
@@ -159,6 +216,17 @@ export class OrderManager {
       // Place stop-loss order (GTC so it persists across trading sessions)
       let stopOrderId: string | undefined;
       try {
+        // Track the stop-loss order
+        const slOrderId = createOrder({
+          symbol: params.symbol,
+          side: 'SELL',
+          orderType: 'stop',
+          requestedQuantity: params.shares,
+          stopPrice: actualStopLoss,
+          orderTag: 'stoploss',
+          accountType: params.accountType,
+        });
+
         const stopOrder = await client.placeStopOrder({
           ticker: params.t212Ticker,
           quantity: params.shares,
@@ -166,6 +234,12 @@ export class OrderManager {
           timeValidity: 'GTC',
         });
         stopOrderId = String(stopOrder.id);
+
+        updateOrderStatus(slOrderId, {
+          status: 'open',
+          t212OrderId: stopOrderId,
+        });
+
         log.info(
           { symbol: params.symbol, stopOrderId, stopPrice: actualStopLoss },
           'Stop-loss order placed',
@@ -190,10 +264,20 @@ export class OrderManager {
         }
       }
 
-      // Place take-profit limit order (GTC) — only if takeProfitPct is set
+      // Place take-profit limit order (GTC) -- only if takeProfitPct is set
       let takeProfitOrderId: string | undefined;
       if (params.takeProfitPct > 0) {
         try {
+          const tpLocalId = createOrder({
+            symbol: params.symbol,
+            side: 'SELL',
+            orderType: 'limit',
+            requestedQuantity: params.shares,
+            requestedPrice: actualTakeProfit,
+            orderTag: 'take_profit',
+            accountType: params.accountType,
+          });
+
           const tpOrder = await client.placeLimitOrder({
             ticker: params.t212Ticker,
             quantity: params.shares,
@@ -201,6 +285,12 @@ export class OrderManager {
             timeValidity: 'GTC',
           });
           takeProfitOrderId = String(tpOrder.id);
+
+          updateOrderStatus(tpLocalId, {
+            status: 'open',
+            t212OrderId: takeProfitOrderId,
+          });
+
           log.info(
             { symbol: params.symbol, takeProfitOrderId, takeProfitPrice: actualTakeProfit },
             'Take-profit limit order placed',
@@ -265,10 +355,23 @@ export class OrderManager {
         'BUY order filled and recorded',
       );
 
-      return { success: true, tradeId: Number(tradeRowId), orderId: String(order.id) };
+      return {
+        success: true,
+        tradeId: Number(tradeRowId),
+        orderId: String(order.id),
+        localOrderId,
+      };
     } catch (err) {
+      updateOrderStatus(localOrderId, {
+        status: 'failed',
+        cancelReason: err instanceof Error ? err.message : String(err),
+      });
       log.error({ symbol: params.symbol, err }, 'Failed to execute buy order');
-      return { success: false, error: err instanceof Error ? err.message : String(err) };
+      return {
+        success: false,
+        localOrderId,
+        error: err instanceof Error ? err.message : String(err),
+      };
     }
   }
 
@@ -285,10 +388,26 @@ export class OrderManager {
 
     const now = new Date().toISOString();
 
+    // Determine order tag based on exit reason
+    const orderTag = this.resolveExitOrderTag(params.exitReason);
+
     if (dryRun) {
       const exitPrice = position.currentPrice ?? position.entryPrice;
       const pnl = (exitPrice - position.entryPrice) * position.shares;
       const pnlPct = (exitPrice - position.entryPrice) / position.entryPrice;
+
+      // Create order record for dry-run tracking
+      const localOrderId = createOrder({
+        symbol: params.symbol,
+        side: 'SELL',
+        orderType: 'market',
+        requestedQuantity: params.shares,
+        requestedPrice: exitPrice,
+        orderTag,
+        accountType: params.accountType,
+      });
+
+      const dryT212Id = `dry_run_SELL_${params.symbol}_${Date.now()}`;
 
       log.info(
         {
@@ -328,13 +447,33 @@ export class OrderManager {
         tx.delete(positions).where(eq(positions.symbol, params.symbol)).run();
       });
 
-      return { success: true };
+      // Mark order as filled
+      updateOrderStatus(localOrderId, {
+        status: 'filled',
+        t212OrderId: dryT212Id,
+        filledQuantity: params.shares,
+        filledPrice: exitPrice,
+        filledAt: now,
+      });
+
+      return { success: true, localOrderId };
     }
 
     // Live execution
     if (!this.t212Client) {
       return { success: false, error: 'T212 client not initialized' };
     }
+
+    // Create pending order record
+    const localOrderId = createOrder({
+      symbol: params.symbol,
+      side: 'SELL',
+      orderType: 'market',
+      requestedQuantity: params.shares,
+      requestedPrice: position.currentPrice ?? position.entryPrice,
+      orderTag,
+      accountType: params.accountType,
+    });
 
     try {
       const client = this.t212Client;
@@ -380,11 +519,34 @@ export class OrderManager {
       });
       log.info({ symbol: params.symbol, orderId: order.id }, 'Market sell order placed');
 
+      // Update order with exchange ID
+      updateOrderStatus(localOrderId, {
+        status: 'open',
+        t212OrderId: String(order.id),
+      });
+
       // Wait for fill
       const fillPrice = await this.waitForFill(client, order.id);
       if (fillPrice == null) {
-        return { success: false, orderId: String(order.id), error: 'Sell order fill timeout' };
+        updateOrderStatus(localOrderId, {
+          status: 'failed',
+          cancelReason: 'Sell order fill timeout',
+        });
+        return {
+          success: false,
+          orderId: String(order.id),
+          localOrderId,
+          error: 'Sell order fill timeout',
+        };
       }
+
+      // Mark order as filled
+      updateOrderStatus(localOrderId, {
+        status: 'filled',
+        filledQuantity: params.shares,
+        filledPrice: fillPrice,
+        filledAt: new Date().toISOString(),
+      });
 
       const pnl = (fillPrice - position.entryPrice) * position.shares;
       const pnlPct = (fillPrice - position.entryPrice) / position.entryPrice;
@@ -428,10 +590,18 @@ export class OrderManager {
         'Position closed',
       );
 
-      return { success: true, orderId: String(order.id) };
+      return { success: true, orderId: String(order.id), localOrderId };
     } catch (err) {
+      updateOrderStatus(localOrderId, {
+        status: 'failed',
+        cancelReason: err instanceof Error ? err.message : String(err),
+      });
       log.error({ symbol: params.symbol, err }, 'Failed to execute close order');
-      return { success: false, error: err instanceof Error ? err.message : String(err) };
+      return {
+        success: false,
+        localOrderId,
+        error: err instanceof Error ? err.message : String(err),
+      };
     }
   }
 
@@ -445,6 +615,21 @@ export class OrderManager {
       log.error({ symbol, err }, 'Failed to get current price');
       return null;
     }
+  }
+
+  /** Map exit reason text to an order tag. */
+  private resolveExitOrderTag(exitReason: string): string {
+    const lower = exitReason.toLowerCase();
+    if (lower.includes('take profit') || lower.includes('take-profit') || lower.includes('tp ')) {
+      return 'take_profit';
+    }
+    if (lower.includes('stoploss') || lower.includes('stop-loss') || lower.includes('stop loss')) {
+      return 'stoploss';
+    }
+    if (lower.includes('partial')) {
+      return 'partial_exit';
+    }
+    return 'exit';
   }
 
   private async waitForFill(client: Trading212Client, orderId: number): Promise<number | null> {
@@ -475,13 +660,13 @@ export class OrderManager {
       await sleep(500);
     }
 
-    // Timeout — attempt to cancel the order
+    // Timeout -- attempt to cancel the order
     log.warn({ orderId, timeoutSecs }, 'Order fill timed out — attempting cancel');
     try {
       await client.cancelOrder(orderId);
       log.info({ orderId }, 'Timed-out order cancelled');
     } catch (cancelErr) {
-      // Cancel failed — order may have filled in the meantime
+      // Cancel failed -- order may have filled in the meantime
       log.warn({ orderId, cancelErr }, 'Cancel failed — checking final status');
       try {
         const finalOrder: Order = await client.getOrder(orderId);

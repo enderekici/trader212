@@ -3,6 +3,7 @@ import { configManager } from '../config/manager.js';
 import { getDb } from '../db/index.js';
 import * as schema from '../db/schema.js';
 import { createLogger } from '../utils/logger.js';
+import { getPairLockManager } from './pair-locks.js';
 
 const log = createLogger('risk-guard');
 
@@ -34,6 +35,20 @@ export interface ValidationResult {
 
 export class RiskGuard {
   validateTrade(proposal: TradeProposal, portfolio: PortfolioState): ValidationResult {
+    // Check pair locks before any other validation
+    try {
+      const lockManager = getPairLockManager();
+      const lockResult = lockManager.isPairLocked(proposal.symbol);
+      if (lockResult.locked) {
+        const reason = `Pair locked: ${lockResult.reason}`;
+        log.warn({ symbol: proposal.symbol, reason }, 'Trade rejected');
+        return { allowed: false, reason };
+      }
+    } catch {
+      // Don't let pair lock check failures block trading
+      log.debug({ symbol: proposal.symbol }, 'Pair lock check skipped (DB not ready)');
+    }
+
     const maxPositions = configManager.get<number>('risk.maxPositions');
     const maxPositionSizePct = configManager.get<number>('risk.maxPositionSizePct');
     const maxRiskPerTradePct = configManager.get<number>('risk.maxRiskPerTradePct');

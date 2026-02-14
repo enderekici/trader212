@@ -98,6 +98,34 @@ vi.mock('../../src/monitoring/audit-log.js', () => ({
   getAuditLogger: () => mockAuditLogger,
 }));
 
+const mockPerformanceMetrics = {
+  totalTrades: 0,
+  winRate: 0,
+  avgReturnPct: 0,
+  sharpeRatio: 0,
+  sortinoRatio: null,
+  calmarRatio: null,
+  sqn: null,
+  maxDrawdown: 0,
+  currentDrawdown: 0,
+  profitFactor: 0,
+  expectancy: null,
+  expectancyRatio: null,
+  avgWin: null,
+  avgLoss: null,
+  avgHoldDuration: 'N/A',
+  bestTrade: null,
+  worstTrade: null,
+};
+
+const mockGetMetrics = vi.fn(() => ({ ...mockPerformanceMetrics }));
+
+vi.mock('../../src/monitoring/performance.js', () => ({
+  PerformanceTracker: vi.fn().mockImplementation(function () {
+    return { getMetrics: mockGetMetrics };
+  }),
+}));
+
 const mockCorrelationMatrix = { symbols: ['AAPL'], matrix: [[1]] };
 
 vi.mock('../../src/analysis/correlation.js', () => ({
@@ -523,24 +551,42 @@ describe('api/routes', () => {
 
   describe('GET /api/performance', () => {
     it('returns zero metrics when no closed trades', () => {
+      mockGetMetrics.mockReturnValueOnce({ ...mockPerformanceMetrics });
       mockDb.select.mockReturnValue(chain([]));
 
       const handler = findHandler(routes, 'get', '/api/performance');
       const res = mockRes();
       handler(mockReq(), res);
 
-      expect(res.json).toHaveBeenCalledWith({
-        winRate: 0,
-        avgReturn: 0,
-        sharpeRatio: 0,
-        maxDrawdown: 0,
-        profitFactor: 0,
-        totalTrades: 0,
-        totalPnl: 0,
-      });
+      const result = res.json.mock.calls[0][0];
+      expect(result.totalTrades).toBe(0);
+      expect(result.winRate).toBe(0);
+      expect(result.avgReturn).toBe(0);
+      expect(result.sharpeRatio).toBe(0);
+      expect(result.maxDrawdown).toBe(0);
+      expect(result.profitFactor).toBe(0);
+      expect(result.totalPnl).toBe(0);
+      expect(result.sortinoRatio).toBeNull();
+      expect(result.calmarRatio).toBeNull();
+      expect(result.sqn).toBeNull();
+      expect(result.currentDrawdown).toBe(0);
+      expect(result.expectancy).toBeNull();
+      expect(result.avgWin).toBeNull();
+      expect(result.avgLoss).toBeNull();
     });
 
     it('calculates performance metrics from closed trades', () => {
+      mockGetMetrics.mockReturnValueOnce({
+        ...mockPerformanceMetrics,
+        totalTrades: 3,
+        winRate: 0.6667,
+        avgReturnPct: 8.3333,
+        profitFactor: 6,
+        sharpeRatio: 1.5,
+        sortinoRatio: 2.1,
+        sqn: 1.2,
+        expectancy: 83.33,
+      });
       const closedTrades = [
         { pnl: 100, pnlPct: 10 },
         { pnl: -50, pnlPct: -5 },
@@ -554,12 +600,20 @@ describe('api/routes', () => {
 
       const result = res.json.mock.calls[0][0];
       expect(result.totalTrades).toBe(3);
-      expect(result.winRate).toBeCloseTo(2 / 3);
+      expect(result.winRate).toBeCloseTo(0.6667);
       expect(result.totalPnl).toBeCloseTo(250);
-      expect(result.profitFactor).toBeCloseTo(300 / 50);
+      expect(result.profitFactor).toBe(6);
+      expect(result.sortinoRatio).toBe(2.1);
+      expect(result.sqn).toBe(1.2);
     });
 
     it('handles all winning trades (grossLoss = 0)', () => {
+      mockGetMetrics.mockReturnValueOnce({
+        ...mockPerformanceMetrics,
+        totalTrades: 2,
+        winRate: 1,
+        profitFactor: Infinity,
+      });
       const closedTrades = [
         { pnl: 100, pnlPct: 10 },
         { pnl: 50, pnlPct: 5 },
@@ -575,6 +629,12 @@ describe('api/routes', () => {
     });
 
     it('handles all losing trades (grossProfit = 0)', () => {
+      mockGetMetrics.mockReturnValueOnce({
+        ...mockPerformanceMetrics,
+        totalTrades: 2,
+        winRate: 0,
+        profitFactor: 0,
+      });
       const closedTrades = [
         { pnl: -100, pnlPct: -10 },
         { pnl: -50, pnlPct: -5 },
@@ -590,6 +650,11 @@ describe('api/routes', () => {
     });
 
     it('calculates sharpe ratio correctly', () => {
+      mockGetMetrics.mockReturnValueOnce({
+        ...mockPerformanceMetrics,
+        totalTrades: 2,
+        sharpeRatio: 0,
+      });
       const closedTrades = [
         { pnl: 100, pnlPct: 10 },
         { pnl: 100, pnlPct: 10 },
@@ -606,6 +671,11 @@ describe('api/routes', () => {
     });
 
     it('calculates max drawdown from cumulative PnL', () => {
+      mockGetMetrics.mockReturnValueOnce({
+        ...mockPerformanceMetrics,
+        totalTrades: 3,
+        maxDrawdown: 2.0,
+      });
       const closedTrades = [
         { pnl: 100, pnlPct: 10 },
         { pnl: -200, pnlPct: -20 },
@@ -618,11 +688,14 @@ describe('api/routes', () => {
       handler(mockReq(), res);
 
       const result = res.json.mock.calls[0][0];
-      // peak=100, after -200: cumulative=-100, drawdown=200
-      expect(result.maxDrawdown).toBe(200);
+      expect(result.maxDrawdown).toBe(2.0);
     });
 
     it('handles null pnl and pnlPct values', () => {
+      mockGetMetrics.mockReturnValueOnce({
+        ...mockPerformanceMetrics,
+        totalTrades: 2,
+      });
       const closedTrades = [
         { pnl: null, pnlPct: null },
         { pnl: 100, pnlPct: 10 },
@@ -637,8 +710,41 @@ describe('api/routes', () => {
       expect(result.totalTrades).toBe(2);
     });
 
+    it('includes new metrics in response', () => {
+      mockGetMetrics.mockReturnValueOnce({
+        ...mockPerformanceMetrics,
+        totalTrades: 10,
+        sortinoRatio: 1.5,
+        calmarRatio: 2.3,
+        sqn: 1.8,
+        expectancy: 42.50,
+        expectancyRatio: 0.35,
+        avgWin: 150,
+        avgLoss: 75,
+        currentDrawdown: 0.05,
+      });
+      mockDb.select.mockReturnValue(chain([]));
+
+      const handler = findHandler(routes, 'get', '/api/performance');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      const result = res.json.mock.calls[0][0];
+      expect(result.sortinoRatio).toBe(1.5);
+      expect(result.calmarRatio).toBe(2.3);
+      expect(result.sqn).toBe(1.8);
+      expect(result.expectancy).toBe(42.50);
+      expect(result.expectancyRatio).toBe(0.35);
+      expect(result.avgWin).toBe(150);
+      expect(result.avgLoss).toBe(75);
+      expect(result.currentDrawdown).toBe(0.05);
+      expect(result.avgHoldDuration).toBe('N/A');
+      expect(result.bestTrade).toBeNull();
+      expect(result.worstTrade).toBeNull();
+    });
+
     it('handles errors', () => {
-      mockDb.select.mockImplementation(() => { throw new Error('err'); });
+      mockGetMetrics.mockImplementationOnce(() => { throw new Error('err'); });
 
       const handler = findHandler(routes, 'get', '/api/performance');
       const res = mockRes();

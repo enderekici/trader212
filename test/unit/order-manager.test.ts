@@ -24,6 +24,12 @@ vi.mock('../../src/utils/helpers.js', () => ({
   sleep: vi.fn().mockResolvedValue(undefined),
 }));
 
+// Mock orders repository (used by order-manager for order tracking)
+vi.mock('../../src/db/repositories/orders.js', () => ({
+  createOrder: vi.fn().mockReturnValue(1),
+  updateOrderStatus: vi.fn(),
+}));
+
 // Mock DB
 const mockDbRun = vi.fn().mockReturnValue({ lastInsertRowid: 1n, changes: 1 });
 const mockDbGet = vi.fn();

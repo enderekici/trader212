@@ -523,6 +523,432 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
     description: 'Lookback period for correlation calculation',
   },
 
+  // Protections (pair locks)
+  {
+    key: 'protection.cooldownMinutes',
+    value: '30',
+    category: 'protection',
+    description: 'Lock pair for N minutes after closing a trade on it',
+  },
+  {
+    key: 'protection.stoplossGuard.enabled',
+    value: 'true',
+    category: 'protection',
+    description: 'Lock trading after N stoploss exits in lookback period',
+  },
+  {
+    key: 'protection.stoplossGuard.tradeLimit',
+    value: '3',
+    category: 'protection',
+    description: 'Number of stoploss exits before locking',
+  },
+  {
+    key: 'protection.stoplossGuard.lookbackMinutes',
+    value: '120',
+    category: 'protection',
+    description: 'Lookback period for stoploss guard',
+  },
+  {
+    key: 'protection.stoplossGuard.lockMinutes',
+    value: '60',
+    category: 'protection',
+    description: 'Lock duration after stoploss guard triggers',
+  },
+  {
+    key: 'protection.stoplossGuard.onlyPerPair',
+    value: 'false',
+    category: 'protection',
+    description: 'Only lock the specific pair (false = global lock)',
+  },
+  {
+    key: 'protection.maxDrawdownLock.enabled',
+    value: 'true',
+    category: 'protection',
+    description: 'Lock all trading when drawdown exceeds threshold',
+  },
+  {
+    key: 'protection.maxDrawdownLock.maxDrawdownPct',
+    value: '0.10',
+    category: 'protection',
+    description: 'Drawdown threshold to trigger lock (10%)',
+  },
+  {
+    key: 'protection.maxDrawdownLock.lookbackMinutes',
+    value: '1440',
+    category: 'protection',
+    description: 'Lookback period for drawdown calculation (24h)',
+  },
+  {
+    key: 'protection.maxDrawdownLock.lockMinutes',
+    value: '120',
+    category: 'protection',
+    description: 'Lock duration after drawdown lock triggers',
+  },
+  {
+    key: 'protection.lowProfitPair.enabled',
+    value: 'true',
+    category: 'protection',
+    description: 'Lock pairs with consistently low profit',
+  },
+  {
+    key: 'protection.lowProfitPair.minProfit',
+    value: '-0.05',
+    category: 'protection',
+    description: 'Min cumulative profit threshold per pair',
+  },
+  {
+    key: 'protection.lowProfitPair.tradeLimit',
+    value: '3',
+    category: 'protection',
+    description: 'Min trades before evaluating pair profit',
+  },
+  {
+    key: 'protection.lowProfitPair.lookbackMinutes',
+    value: '10080',
+    category: 'protection',
+    description: 'Lookback period for pair profit (7 days)',
+  },
+  {
+    key: 'protection.lowProfitPair.lockMinutes',
+    value: '1440',
+    category: 'protection',
+    description: 'Lock duration for low profit pairs (24h)',
+  },
+
+  // Execution - Order replacement (repricing unfilled limit orders)
+  {
+    key: 'execution.orderReplacement.enabled',
+    value: 'false',
+    category: 'execution',
+    description: 'Enable automatic order repricing for unfilled limit orders',
+  },
+  {
+    key: 'execution.orderReplacement.checkIntervalSeconds',
+    value: '30',
+    category: 'execution',
+    description: 'How often to check for stale orders',
+  },
+  {
+    key: 'execution.orderReplacement.replaceAfterSeconds',
+    value: '60',
+    category: 'execution',
+    description: 'Replace orders unfilled after N seconds',
+  },
+  {
+    key: 'execution.orderReplacement.priceDeviationPct',
+    value: '0.005',
+    category: 'execution',
+    description: 'Min price change (0.5%) to trigger replacement',
+  },
+  {
+    key: 'execution.orderReplacement.maxReplacements',
+    value: '3',
+    category: 'execution',
+    description: 'Max replacement attempts per original order',
+  },
+
+  // Exit - Time-based ROI table
+  {
+    key: 'exit.roiEnabled',
+    value: 'false',
+    category: 'exit',
+    description: 'Enable time-based ROI auto-exit',
+  },
+  {
+    key: 'exit.roiTable',
+    value: '{"0": 0.06, "60": 0.04, "240": 0.02, "480": 0.01, "1440": 0.0}',
+    category: 'exit',
+    description:
+      'ROI table: {minutes: minProfitRatio}. Trade exits when profit exceeds threshold for its age.',
+  },
+
+  // DCA (Dollar Cost Averaging)
+  {
+    key: 'dca.enabled',
+    value: 'false',
+    category: 'dca',
+    description: 'Enable DCA / position scaling',
+  },
+  { key: 'dca.maxRounds', value: '3', category: 'dca', description: 'Max DCA rounds per position' },
+  {
+    key: 'dca.dropPctPerRound',
+    value: '0.05',
+    category: 'dca',
+    description: 'Price drop % to trigger next DCA round',
+  },
+  {
+    key: 'dca.sizeMultiplier',
+    value: '1.0',
+    category: 'dca',
+    description: 'Multiplier for each subsequent DCA round (1.0 = same size)',
+  },
+  {
+    key: 'dca.minTimeBetweenMinutes',
+    value: '60',
+    category: 'dca',
+    description: 'Min time between DCA rounds',
+  },
+
+  // Partial Exits (Scale-Out)
+  {
+    key: 'partialExit.enabled',
+    value: 'false',
+    category: 'partialExit',
+    description: 'Enable partial exit / scale-out',
+  },
+  {
+    key: 'partialExit.tiers',
+    value: '[{"pctGain": 0.05, "sellPct": 0.5}, {"pctGain": 0.10, "sellPct": 0.25}]',
+    category: 'partialExit',
+    description: 'Scale-out tiers: sell X% of position at Y% gain',
+  },
+  {
+    key: 'partialExit.moveStopToBreakeven',
+    value: 'true',
+    category: 'partialExit',
+    description: 'Move stop to breakeven after first partial exit',
+  },
+
+  // Multi-Timeframe Analysis
+  {
+    key: 'multiTimeframe.enabled',
+    value: 'false',
+    category: 'multiTimeframe',
+    description: 'Enable multi-timeframe analysis',
+  },
+  {
+    key: 'multiTimeframe.timeframes',
+    value: '["1d", "4h", "1h"]',
+    category: 'multiTimeframe',
+    description: 'Timeframes to analyze (primary first)',
+  },
+  {
+    key: 'multiTimeframe.weights',
+    value: '{"1d": 0.5, "4h": 0.3, "1h": 0.2}',
+    category: 'multiTimeframe',
+    description: 'Weight per timeframe for composite score',
+  },
+
+  // Market Regime Detection
+  {
+    key: 'regime.enabled',
+    value: 'false',
+    category: 'regime',
+    description: 'Enable market regime detection',
+  },
+  {
+    key: 'regime.lookbackDays',
+    value: '50',
+    category: 'regime',
+    description: 'Lookback days for regime classification',
+  },
+  {
+    key: 'regime.vixThresholdHigh',
+    value: '25',
+    category: 'regime',
+    description: 'VIX level above which market is high-volatility',
+  },
+  {
+    key: 'regime.trendMaLength',
+    value: '50',
+    category: 'regime',
+    description: 'MA length for trend detection',
+  },
+  {
+    key: 'regime.volatilityWindow',
+    value: '20',
+    category: 'regime',
+    description: 'Window for volatility regime calculation',
+  },
+
+  // Webhooks
+  {
+    key: 'webhook.enabled',
+    value: 'false',
+    category: 'webhook',
+    description: 'Enable webhook system (inbound + outbound)',
+  },
+  {
+    key: 'webhook.secret',
+    value: '""',
+    category: 'webhook',
+    description: 'Shared secret for webhook signature verification',
+  },
+  {
+    key: 'webhook.maxRetries',
+    value: '3',
+    category: 'webhook',
+    description: 'Max retries for outbound webhook delivery',
+  },
+
+  // Performance Attribution
+  {
+    key: 'attribution.enabled',
+    value: 'false',
+    category: 'attribution',
+    description: 'Enable P&L attribution by factor',
+  },
+
+  // Risk Parity Sizing
+  {
+    key: 'riskParity.enabled',
+    value: 'false',
+    category: 'riskParity',
+    description: 'Enable volatility-adjusted position sizing',
+  },
+  {
+    key: 'riskParity.targetVolatility',
+    value: '0.15',
+    category: 'riskParity',
+    description: 'Target annualized portfolio volatility (15%)',
+  },
+  {
+    key: 'riskParity.lookbackDays',
+    value: '20',
+    category: 'riskParity',
+    description: 'Lookback days for volatility estimation',
+  },
+
+  // Tax Awareness
+  {
+    key: 'tax.enabled',
+    value: 'false',
+    category: 'tax',
+    description: 'Enable tax-lot tracking and harvesting suggestions',
+  },
+  {
+    key: 'tax.shortTermRate',
+    value: '0.37',
+    category: 'tax',
+    description: 'Short-term capital gains rate (37%)',
+  },
+  {
+    key: 'tax.longTermRate',
+    value: '0.20',
+    category: 'tax',
+    description: 'Long-term capital gains rate (20%)',
+  },
+  {
+    key: 'tax.harvestThreshold',
+    value: '-500',
+    category: 'tax',
+    description: 'Min unrealized loss ($) to suggest tax-loss harvest',
+  },
+
+  // Monte Carlo Simulation
+  {
+    key: 'monteCarlo.simulations',
+    value: '10000',
+    category: 'monteCarlo',
+    description: 'Number of Monte Carlo simulation runs',
+  },
+  {
+    key: 'monteCarlo.confidenceLevels',
+    value: '[0.05, 0.25, 0.50, 0.75, 0.95]',
+    category: 'monteCarlo',
+    description: 'Percentile levels for simulation output',
+  },
+
+  // Portfolio Optimization
+  {
+    key: 'portfolioOptimization.enabled',
+    value: 'false',
+    category: 'portfolioOptimization',
+    description: 'Enable portfolio optimization suggestions',
+  },
+  {
+    key: 'portfolioOptimization.rebalanceIntervalDays',
+    value: '30',
+    category: 'portfolioOptimization',
+    description: 'Days between rebalance suggestions',
+  },
+
+  // Social Sentiment
+  {
+    key: 'socialSentiment.enabled',
+    value: 'false',
+    category: 'socialSentiment',
+    description: 'Enable social media sentiment analysis',
+  },
+  {
+    key: 'socialSentiment.redditEnabled',
+    value: 'true',
+    category: 'socialSentiment',
+    description: 'Include Reddit sentiment',
+  },
+  {
+    key: 'socialSentiment.twitterEnabled',
+    value: 'true',
+    category: 'socialSentiment',
+    description: 'Include Twitter/X sentiment',
+  },
+  {
+    key: 'socialSentiment.weight',
+    value: '0.1',
+    category: 'socialSentiment',
+    description: 'Weight of social sentiment in composite score (0-1)',
+  },
+
+  // Conditional / OCO Orders
+  {
+    key: 'conditionalOrders.enabled',
+    value: 'false',
+    category: 'conditionalOrders',
+    description: 'Enable conditional and OCO orders',
+  },
+  {
+    key: 'conditionalOrders.maxActive',
+    value: '20',
+    category: 'conditionalOrders',
+    description: 'Max active conditional orders',
+  },
+  {
+    key: 'conditionalOrders.checkIntervalSeconds',
+    value: '30',
+    category: 'conditionalOrders',
+    description: 'How often to check trigger conditions',
+  },
+
+  // AI Self-Improvement
+  {
+    key: 'aiSelfImprovement.enabled',
+    value: 'false',
+    category: 'aiSelfImprovement',
+    description: 'Feed accuracy stats back into AI prompts',
+  },
+  {
+    key: 'aiSelfImprovement.feedbackWindow',
+    value: '30',
+    category: 'aiSelfImprovement',
+    description: 'Days of history to include in feedback',
+  },
+  {
+    key: 'aiSelfImprovement.minSamples',
+    value: '10',
+    category: 'aiSelfImprovement',
+    description: 'Min predictions before generating feedback',
+  },
+
+  // Scheduled Reports
+  {
+    key: 'reports.enabled',
+    value: 'false',
+    category: 'reports',
+    description: 'Enable scheduled PDF/text report generation',
+  },
+  {
+    key: 'reports.schedule',
+    value: '"daily"',
+    category: 'reports',
+    description: 'Report schedule: daily | weekly | both',
+  },
+  {
+    key: 'reports.includeEquityCurve',
+    value: 'true',
+    category: 'reports',
+    description: 'Include equity curve chart in reports',
+  },
+
   // Monitoring
   {
     key: 'monitoring.dailySummaryTime',

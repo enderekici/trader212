@@ -59,6 +59,9 @@ function createTables(sqlite: InstanceType<typeof Database>) {
       intendedPrice REAL,
       slippage REAL,
       accountType TEXT NOT NULL CHECK(accountType IN ('INVEST','ISA')),
+      dcaRound INTEGER,
+      journalNotes TEXT,
+      journalTags TEXT,
       createdAt TEXT DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -96,6 +99,7 @@ function createTables(sqlite: InstanceType<typeof Database>) {
       stopLoss REAL, trailingStop REAL, takeProfit REAL,
       convictionScore REAL, stopOrderId TEXT, takeProfitOrderId TEXT, aiExitConditions TEXT,
       accountType TEXT NOT NULL CHECK(accountType IN ('INVEST','ISA')),
+      dcaCount INTEGER DEFAULT 0, totalInvested REAL, partialExitCount INTEGER DEFAULT 0,
       updatedAt TEXT
     );
 
@@ -152,7 +156,9 @@ function createTables(sqlite: InstanceType<typeof Database>) {
       date TEXT NOT NULL UNIQUE,
       totalPnl REAL, tradesCount INTEGER, winCount INTEGER, lossCount INTEGER,
       winRate REAL, maxDrawdown REAL, sharpeRatio REAL, profitFactor REAL,
-      portfolioValue REAL, cashBalance REAL, accountType TEXT
+      portfolioValue REAL, cashBalance REAL, accountType TEXT,
+      sortinoRatio REAL, calmarRatio REAL, sqn REAL, expectancy REAL,
+      avgWin REAL, avgLoss REAL, currentDrawdown REAL
     );
 
     CREATE TABLE IF NOT EXISTS pairlist_history (
@@ -232,6 +238,117 @@ function createTables(sqlite: InstanceType<typeof Database>) {
       evaluatedAt TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_model_perf ON model_performance(aiModel, signalTimestamp);
+
+    CREATE TABLE IF NOT EXISTS pair_locks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      symbol TEXT NOT NULL,
+      lockEnd TEXT NOT NULL,
+      reason TEXT,
+      side TEXT NOT NULL DEFAULT '*' CHECK(side IN ('long','short','*')),
+      active INTEGER NOT NULL DEFAULT 1,
+      createdAt TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_pair_locks_symbol ON pair_locks(symbol, active, lockEnd);
+
+    CREATE TABLE IF NOT EXISTS orders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tradeId INTEGER,
+      positionId INTEGER,
+      symbol TEXT NOT NULL,
+      side TEXT NOT NULL CHECK(side IN ('BUY','SELL')),
+      orderType TEXT NOT NULL DEFAULT 'market' CHECK(orderType IN ('market','limit','stop')),
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','open','filled','partially_filled','cancelled','expired','failed')),
+      requestedQuantity REAL NOT NULL,
+      filledQuantity REAL DEFAULT 0,
+      requestedPrice REAL,
+      filledPrice REAL,
+      stopPrice REAL,
+      t212OrderId TEXT,
+      cancelReason TEXT,
+      orderTag TEXT,
+      replacedByOrderId INTEGER,
+      accountType TEXT NOT NULL CHECK(accountType IN ('INVEST','ISA')),
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT,
+      filledAt TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_orders_trade ON orders(tradeId);
+    CREATE INDEX IF NOT EXISTS idx_orders_position ON orders(positionId);
+    CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status, symbol);
+
+    CREATE TABLE IF NOT EXISTS trade_journal (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tradeId INTEGER,
+      positionId INTEGER,
+      symbol TEXT NOT NULL,
+      note TEXT NOT NULL,
+      tags TEXT,
+      createdAt TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_journal_symbol ON trade_journal(symbol, createdAt);
+
+    CREATE TABLE IF NOT EXISTS tax_lots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      symbol TEXT NOT NULL,
+      shares REAL NOT NULL,
+      costBasis REAL NOT NULL,
+      purchaseDate TEXT NOT NULL,
+      saleDate TEXT,
+      salePrice REAL,
+      pnl REAL,
+      holdingPeriod TEXT CHECK(holdingPeriod IN ('short','long')),
+      accountType TEXT NOT NULL CHECK(accountType IN ('INVEST','ISA')),
+      createdAt TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_tax_lots_symbol ON tax_lots(symbol, saleDate);
+
+    CREATE TABLE IF NOT EXISTS webhook_configs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      url TEXT,
+      secret TEXT,
+      direction TEXT NOT NULL CHECK(direction IN ('inbound','outbound')),
+      eventTypes TEXT,
+      active INTEGER NOT NULL DEFAULT 1,
+      createdAt TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS webhook_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      webhookId INTEGER,
+      direction TEXT NOT NULL CHECK(direction IN ('inbound','outbound')),
+      eventType TEXT NOT NULL,
+      payload TEXT,
+      statusCode INTEGER,
+      response TEXT,
+      createdAt TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_webhook_logs_ts ON webhook_logs(createdAt);
+
+    CREATE TABLE IF NOT EXISTS strategy_profiles (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      description TEXT,
+      config TEXT NOT NULL,
+      active INTEGER NOT NULL DEFAULT 0,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS conditional_orders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      symbol TEXT NOT NULL,
+      triggerType TEXT NOT NULL CHECK(triggerType IN ('price_above','price_below','time','indicator')),
+      triggerCondition TEXT NOT NULL,
+      action TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','triggered','executed','cancelled','expired')),
+      linkedOrderId INTEGER,
+      ocoGroupId TEXT,
+      expiresAt TEXT,
+      createdAt TEXT NOT NULL,
+      triggeredAt TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_cond_orders_status ON conditional_orders(status, symbol);
 
     CREATE TABLE IF NOT EXISTS audit_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

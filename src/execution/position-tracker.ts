@@ -1,13 +1,16 @@
 import { eq } from 'drizzle-orm';
 import type { Trading212Client } from '../api/trading212/client.js';
+import { configManager } from '../config/manager.js';
 import { getDb } from '../db/index.js';
 import { positions, trades } from '../db/schema.js';
 import { createLogger } from '../utils/logger.js';
+import { parseRoiTable, shouldExitByRoi } from './roi-table.js';
 
 const log = createLogger('position-tracker');
 
 export interface ExitCheckResult {
   positionsToClose: string[];
+  exitReasons: Record<string, string>;
 }
 
 export class PositionTracker {
@@ -173,13 +176,14 @@ export class PositionTracker {
     const db = getDb();
     const allPositions = db.select().from(positions).all();
     const positionsToClose: string[] = [];
+    const exitReasons: Record<string, string> = {};
 
     for (const pos of allPositions) {
       if (pos.currentPrice == null) continue;
 
       const effectiveStop = pos.trailingStop ?? pos.stopLoss;
 
-      // Check stop-loss / trailing stop
+      // Check stop-loss / trailing stop (highest priority)
       if (effectiveStop != null && pos.currentPrice <= effectiveStop) {
         log.warn(
           {
@@ -190,6 +194,7 @@ export class PositionTracker {
           'Stop-loss triggered',
         );
         positionsToClose.push(pos.symbol);
+        exitReasons[pos.symbol] = 'Stop-loss triggered';
         continue;
       }
 
@@ -204,7 +209,34 @@ export class PositionTracker {
           'Take-profit triggered',
         );
         positionsToClose.push(pos.symbol);
+        exitReasons[pos.symbol] = 'Take-profit triggered';
         continue;
+      }
+
+      // Check ROI table exit (after stop-loss/take-profit, before AI conditions)
+      const roiEnabled = configManager.get<boolean>('exit.roiEnabled');
+      if (roiEnabled) {
+        const roiTableJson = configManager.get<string>('exit.roiTable');
+        const roiTable = parseRoiTable(
+          typeof roiTableJson === 'string' ? roiTableJson : JSON.stringify(roiTableJson),
+        );
+        const pnlPct = (pos.currentPrice - pos.entryPrice) / pos.entryPrice;
+        const roiResult = shouldExitByRoi(roiTable, pos.entryTime, pnlPct);
+
+        if (roiResult.shouldExit) {
+          log.info(
+            {
+              symbol: pos.symbol,
+              pnlPct: `${(pnlPct * 100).toFixed(2)}%`,
+              threshold: `${((roiResult.threshold ?? 0) * 100).toFixed(2)}%`,
+              tradeMinutes: Math.round(roiResult.tradeMinutes),
+            },
+            'ROI exit triggered',
+          );
+          positionsToClose.push(pos.symbol);
+          exitReasons[pos.symbol] = 'roi_table';
+          continue;
+        }
       }
 
       // Check AI-defined exit conditions (stored as JSON)
@@ -230,6 +262,7 @@ export class PositionTracker {
                 'Max hold duration reached',
               );
               positionsToClose.push(pos.symbol);
+              exitReasons[pos.symbol] = 'Max hold duration reached';
               continue;
             }
           }
@@ -245,6 +278,7 @@ export class PositionTracker {
               'AI price target reached',
             );
             positionsToClose.push(pos.symbol);
+            exitReasons[pos.symbol] = 'AI price target reached';
           }
         } catch {
           log.warn({ symbol: pos.symbol }, 'Failed to parse AI exit conditions');
@@ -256,6 +290,6 @@ export class PositionTracker {
       log.info({ positionsToClose }, 'Exit conditions triggered');
     }
 
-    return { positionsToClose };
+    return { positionsToClose, exitReasons };
   }
 }

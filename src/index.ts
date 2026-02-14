@@ -3,6 +3,7 @@ import 'dotenv/config';
 import { and, desc, eq, gte, isNotNull } from 'drizzle-orm';
 import { type AIAgent, type AIContext, type AIDecision, createAIAgent } from './ai/agent.js';
 import { MarketResearcher } from './ai/market-research.js';
+import { getAISelfImprovement } from './ai/self-improvement.js';
 import { CorrelationAnalyzer } from './analysis/correlation.js';
 import { scoreFundamentals } from './analysis/fundamental/scorer.js';
 import { type SentimentInput, scoreSentiment } from './analysis/sentiment/scorer.js';
@@ -10,9 +11,11 @@ import { analyzeTechnicals } from './analysis/technical/scorer.js';
 import { registerBotCallbacks } from './api/routes.js';
 import { ApiServer } from './api/server.js';
 import { Trading212Client } from './api/trading212/client.js';
+import { getWebhookManager } from './api/webhooks.js';
 import type { WebSocketManager } from './api/websocket.js';
 import { minutesToWeekdayCron, Scheduler, timeToCron } from './bot/scheduler.js';
 import { configManager } from './config/manager.js';
+import { getStrategyProfileManager } from './config/strategy-profiles.js';
 import { DataAggregator, type StockData } from './data/data-aggregator.js';
 import { FinnhubClient } from './data/finnhub.js';
 import { MarketauxClient } from './data/marketaux.js';
@@ -21,14 +24,23 @@ import { YahooFinanceClient } from './data/yahoo-finance.js';
 import { getDb, initDatabase } from './db/index.js';
 import * as schema from './db/schema.js';
 import { ApprovalManager } from './execution/approval-manager.js';
+import { getConditionalOrderManager } from './execution/conditional-orders.js';
+import { getDCAManager } from './execution/dca-manager.js';
 import { type BuyParams, type CloseParams, OrderManager } from './execution/order-manager.js';
+import { OrderReplacer } from './execution/order-replacer.js';
+import { getPairLockManager } from './execution/pair-locks.js';
+import { getPartialExitManager } from './execution/partial-exit-manager.js';
 import { PositionTracker } from './execution/position-tracker.js';
+import { getProtectionManager } from './execution/protections.js';
 import { type PortfolioState, RiskGuard, type TradeProposal } from './execution/risk-guard.js';
 import { TradePlanner } from './execution/trade-planner.js';
 import { getAuditLogger } from './monitoring/audit-log.js';
 import { ModelTracker } from './monitoring/model-tracker.js';
 import { PerformanceTracker } from './monitoring/performance.js';
+import { getReportGenerator } from './monitoring/report-generator.js';
+import { getTaxTracker } from './monitoring/tax-tracker.js';
 import { TelegramNotifier } from './monitoring/telegram.js';
+import { getTradeJournalManager } from './monitoring/trade-journal.js';
 import type { StockInfo } from './pairlist/filters.js';
 import { createPairlistPipeline } from './pairlist/index.js';
 import type { PairlistPipeline } from './pairlist/pipeline.js';
@@ -57,6 +69,7 @@ class TradingBot {
   private marketResearcher!: MarketResearcher;
   private modelTracker!: ModelTracker;
   private correlationAnalyzer!: CorrelationAnalyzer;
+  private orderReplacer!: OrderReplacer;
 
   private paused = false;
   private startedAt = '';
@@ -119,6 +132,19 @@ class TradingBot {
 
     // 10e. Correlation analyzer
     this.correlationAnalyzer = new CorrelationAnalyzer();
+
+    // 10f. Order replacer (opt-in repricing of unfilled limit orders)
+    this.orderReplacer = new OrderReplacer(this.t212Client);
+
+    // 10g. Strategy profiles — seed built-in presets
+    try {
+      getStrategyProfileManager().seedBuiltinPresets();
+    } catch (err) {
+      log.error({ err }, 'Failed to seed strategy profiles');
+    }
+
+    // 10h. Partial exit manager — needs T212 client for execution
+    getPartialExitManager().setT212Client(this.t212Client);
 
     // 11. Telegram with command handlers
     this.telegram = new TelegramNotifier();
@@ -333,13 +359,43 @@ class TradingBot {
       false,
     );
 
-    // Expire old trade plans (every 5 min)
+    // Expire old trade plans + cleanup expired pair locks (every 5 min)
     this.scheduler.registerJob(
       'expirePlans',
       '*/5 * * * *',
-      () => this.approvalManager.checkExpiredPlans(),
+      () => {
+        this.approvalManager.checkExpiredPlans();
+        try {
+          getPairLockManager().cleanupExpired();
+        } catch (err) {
+          log.error({ err }, 'Pair lock cleanup failed');
+        }
+      },
       false,
     );
+
+    // Conditional orders monitoring
+    const condOrdersEnabled = configManager.get<boolean>('conditionalOrders.enabled');
+    if (condOrdersEnabled) {
+      const checkIntervalSec = configManager.get<number>('conditionalOrders.checkIntervalSeconds');
+      this.scheduler.registerJob(
+        'conditionalOrders',
+        `*/${Math.max(1, Math.ceil(checkIntervalSec / 60))} * * * 1-5`,
+        () => this.checkConditionalOrders(),
+        true,
+      );
+    }
+
+    // AI self-improvement feedback (daily after model evaluation)
+    const aiSelfImprovementEnabled = configManager.get<boolean>('aiSelfImprovement.enabled');
+    if (aiSelfImprovementEnabled) {
+      this.scheduler.registerJob(
+        'aiSelfImprovement',
+        '30 18 * * 1-5', // 6:30 PM ET weekdays
+        () => this.runAISelfImprovement(),
+        false,
+      );
+    }
 
     this.scheduler.start();
 
@@ -636,6 +692,20 @@ class TradingBot {
       sentimentScore,
     });
 
+    // 7b. Webhook dispatch for signal
+    try {
+      await getWebhookManager().sendOutbound('signal_generated', {
+        symbol,
+        decision: decision.decision,
+        conviction: decision.conviction,
+        technicalScore,
+        fundamentalScore,
+        sentimentScore,
+      });
+    } catch {
+      // Non-critical, swallow webhook errors
+    }
+
     // 8. Execute if actionable
     if (decision.decision === 'BUY' || decision.decision === 'SELL') {
       await this.executeTrade(
@@ -866,14 +936,26 @@ class TradingBot {
         };
         await this.orderManager.executeBuy(buyParams);
       } else {
+        const exitReason = plan.aiReasoning ?? 'AI sell signal';
         const closeParams: CloseParams = {
           symbol: plan.symbol,
           t212Ticker: plan.t212Ticker,
           shares: plan.shares,
-          exitReason: plan.aiReasoning ?? 'AI sell signal',
+          exitReason,
           accountType,
         };
         await this.orderManager.executeClose(closeParams);
+
+        // Evaluate protections after sell
+        try {
+          // We don't have exact pnlPct here; pass 0 as protections query DB directly
+          getProtectionManager().evaluateAfterClose(plan.symbol, exitReason, 0);
+        } catch (protErr) {
+          log.error(
+            { symbol: plan.symbol, protErr },
+            'Protection evaluation failed after plan sell',
+          );
+        }
       }
 
       this.tradePlanner.markExecuted(plan.id);
@@ -898,6 +980,47 @@ class TradingBot {
         shares: plan.shares,
         price: plan.entryPrice,
       });
+
+      // Webhook dispatch
+      try {
+        await getWebhookManager().sendOutbound('trade_executed', {
+          symbol: plan.symbol,
+          side: plan.side,
+          shares: plan.shares,
+          price: plan.entryPrice,
+          planId: plan.id,
+        });
+      } catch (whErr) {
+        log.error({ whErr }, 'Webhook dispatch failed');
+      }
+
+      // Trade journal auto-annotation
+      try {
+        getTradeJournalManager().autoAnnotate(
+          plan.symbol,
+          plan.side === 'BUY' ? 'trade_open' : 'trade_close',
+          {
+            price: plan.entryPrice,
+            shares: plan.shares,
+            conviction: plan.aiConviction,
+            reasoning: plan.aiReasoning,
+          },
+        );
+      } catch (jErr) {
+        log.error({ jErr }, 'Trade journal annotation failed');
+      }
+
+      // Tax lot tracking
+      try {
+        const taxTracker = getTaxTracker();
+        if (plan.side === 'BUY') {
+          await taxTracker.recordPurchase(plan.symbol, plan.shares, plan.entryPrice, accountType);
+        } else {
+          await taxTracker.recordSale(plan.symbol, plan.shares, plan.entryPrice);
+        }
+      } catch (taxErr) {
+        log.error({ taxErr }, 'Tax lot tracking failed');
+      }
     } catch (err) {
       log.error({ symbol: plan.symbol, err }, 'Trade execution failed');
       audit.logError(`Trade execution failed: ${plan.symbol}`, {
@@ -932,16 +1055,25 @@ class TradingBot {
           .get();
         if (!pos) continue;
 
-        log.info({ symbol }, 'Auto-closing position due to exit condition');
+        const exitReason = exitResult.exitReasons[symbol] ?? 'Exit condition triggered';
+        log.info({ symbol, exitReason }, 'Auto-closing position due to exit condition');
 
         try {
           await this.orderManager.executeClose({
             symbol: pos.symbol,
             t212Ticker: pos.t212Ticker,
             shares: pos.shares,
-            exitReason: 'Exit condition triggered',
+            exitReason,
             accountType,
           });
+
+          // Evaluate protections after close
+          const pnlPct = pos.pnlPct ?? 0;
+          try {
+            getProtectionManager().evaluateAfterClose(symbol, exitReason, pnlPct);
+          } catch (protErr) {
+            log.error({ symbol, protErr }, 'Protection evaluation failed after position close');
+          }
 
           await this.telegram.sendTradeNotification({
             symbol,
@@ -949,7 +1081,7 @@ class TradingBot {
             shares: pos.shares,
             price: pos.currentPrice ?? pos.entryPrice,
             stopLoss: pos.stopLoss ?? 0,
-            reasoning: 'Exit condition triggered',
+            reasoning: exitReason,
           });
 
           this.wsManager.broadcast('trade_executed', {
@@ -963,8 +1095,17 @@ class TradingBot {
         }
       }
 
+      // Check for stale unfilled orders and reprice if enabled
+      await this.processOrderReplacements();
+
       // Check for correlation drift between held positions
       await this.checkCorrelationDrift();
+
+      // DCA evaluation for losing positions
+      await this.evaluateDCAOpportunities();
+
+      // Partial exit evaluation for profitable positions
+      await this.evaluatePartialExits();
 
       // Broadcast updated positions
       const db = getDb();
@@ -990,6 +1131,19 @@ class TradingBot {
       const summary = this.performanceTracker.generateDailySummary();
       await this.telegram.sendMessage(summary);
       await this.performanceTracker.saveDailyMetrics();
+
+      // Generate scheduled daily report
+      try {
+        const reportGen = getReportGenerator();
+        const report = await reportGen.generateDailyReport();
+        if (report) {
+          const text = reportGen.formatAsText(report);
+          await this.telegram.sendMessage(text);
+          log.info('Daily report generated and sent');
+        }
+      } catch (repErr) {
+        log.error({ repErr }, 'Daily report generation failed');
+      }
 
       // Reset cool-down at end of trading day
       if (this.lossCooldownUntil) {
@@ -1023,6 +1177,19 @@ class TradingBot {
     try {
       const report = this.performanceTracker.generateWeeklySummary();
       await this.telegram.sendMessage(report);
+
+      // Generate scheduled weekly report
+      try {
+        const reportGen = getReportGenerator();
+        const weeklyReport = await reportGen.generateWeeklyReport();
+        if (weeklyReport) {
+          const text = reportGen.formatAsText(weeklyReport);
+          await this.telegram.sendMessage(text);
+          log.info('Weekly report generated and sent');
+        }
+      } catch (repErr) {
+        log.error({ repErr }, 'Weekly report generation failed');
+      }
     } catch (err) {
       log.error({ err }, 'Failed to send weekly report');
     }
@@ -1257,6 +1424,43 @@ class TradingBot {
       } catch (err) {
         log.error({ symbol: pos.symbol, err }, 'Position re-evaluation failed');
       }
+    }
+  }
+
+  private async processOrderReplacements(): Promise<void> {
+    const enabled = configManager.get<boolean>('execution.orderReplacement.enabled');
+    if (!enabled) return;
+
+    const audit = getAuditLogger();
+
+    try {
+      const result = await this.orderReplacer.processOpenOrders();
+      if (result.replaced > 0) {
+        log.info(
+          { replaced: result.replaced, checked: result.checked },
+          'Order replacements processed',
+        );
+        audit.logTrade(
+          '*',
+          `Order replacement: ${result.replaced} orders repriced (${result.checked} checked)`,
+          {
+            replaced: result.replaced,
+            skipped: result.skipped,
+            filledDuringCancel: result.filledDuringCancel,
+          },
+        );
+      }
+      if (result.errors.length > 0) {
+        for (const error of result.errors) {
+          log.error({ error }, 'Order replacement error');
+        }
+        await this.telegram.sendAlert(
+          'Order Replacement Errors',
+          `${result.errors.length} error(s) during order replacement. Check logs.`,
+        );
+      }
+    } catch (err) {
+      log.error({ err }, 'Order replacement processing failed');
     }
   }
 
@@ -1587,6 +1791,147 @@ class TradingBot {
       },
       portfolioCorrelations: portfolioCorrelations ?? [],
     };
+  }
+
+  private async checkConditionalOrders(): Promise<void> {
+    try {
+      const condOrderMgr = getConditionalOrderManager();
+
+      // Build current prices from open positions
+      const db = getDb();
+      const allPositions = db.select().from(schema.positions).all();
+      const currentPrices = new Map<string, number>();
+      for (const p of allPositions) {
+        if (p.currentPrice) currentPrices.set(p.symbol, p.currentPrice);
+      }
+
+      const triggered = condOrderMgr.checkTriggers(currentPrices);
+      if (triggered.length > 0) {
+        const audit = getAuditLogger();
+        for (const action of triggered) {
+          log.info(
+            { orderId: action.orderId, type: action.action.type, symbol: action.symbol },
+            'Conditional order triggered',
+          );
+          audit.logTrade(
+            action.symbol,
+            `Conditional order triggered: ${action.action.type} ${action.action.shares ?? 0} shares`,
+            { orderId: action.orderId },
+          );
+        }
+      }
+
+      // Expire old orders
+      const expired = condOrderMgr.expireOldOrders();
+      if (expired > 0) {
+        log.info({ count: expired }, 'Expired conditional orders');
+      }
+    } catch (err) {
+      log.error({ err }, 'Conditional orders check failed');
+    }
+  }
+
+  private async evaluateDCAOpportunities(): Promise<void> {
+    try {
+      const dcaManager = getDCAManager();
+      const db = getDb();
+      const allPositions = db.select().from(schema.positions).all();
+      const portfolio = await this.getPortfolioState();
+      const accountType = configManager.get<string>('t212.accountType') as 'INVEST' | 'ISA';
+
+      for (const pos of allPositions) {
+        if (!pos.currentPrice) continue;
+
+        const evaluation = dcaManager.evaluatePosition(
+          pos.symbol,
+          pos.currentPrice,
+          {
+            symbol: pos.symbol,
+            shares: pos.shares,
+            entryPrice: pos.entryPrice,
+            entryTime: pos.entryTime,
+            dcaCount: pos.dcaCount ?? 0,
+            totalInvested: pos.totalInvested,
+          },
+          portfolio,
+        );
+
+        if (evaluation.shouldDCA && evaluation.shares && evaluation.shares > 0) {
+          log.info(
+            { symbol: pos.symbol, shares: evaluation.shares, round: (pos.dcaCount ?? 0) + 1 },
+            'DCA opportunity detected',
+          );
+          try {
+            await dcaManager.executeDCA(
+              pos.symbol,
+              pos.t212Ticker,
+              evaluation.shares,
+              pos.currentPrice,
+              accountType,
+              this.t212Client,
+            );
+          } catch (dcaErr) {
+            log.error({ symbol: pos.symbol, dcaErr }, 'DCA execution failed');
+          }
+        }
+      }
+    } catch (err) {
+      log.error({ err }, 'DCA evaluation failed');
+    }
+  }
+
+  private async evaluatePartialExits(): Promise<void> {
+    try {
+      const partialExitMgr = getPartialExitManager();
+      const db = getDb();
+      const allPositions = db.select().from(schema.positions).all();
+      const accountType = configManager.get<string>('t212.accountType') as 'INVEST' | 'ISA';
+
+      for (const pos of allPositions) {
+        const evaluation = partialExitMgr.evaluatePosition(pos);
+
+        if (evaluation.shouldExit && evaluation.sharesToSell && evaluation.sharesToSell > 0) {
+          log.info(
+            { symbol: pos.symbol, sharesToSell: evaluation.sharesToSell },
+            'Partial exit triggered',
+          );
+          try {
+            await partialExitMgr.executePartialExit(
+              pos.symbol,
+              pos.t212Ticker,
+              evaluation.sharesToSell,
+              evaluation.reason ?? 'Partial exit tier reached',
+              accountType,
+            );
+          } catch (peErr) {
+            log.error({ symbol: pos.symbol, peErr }, 'Partial exit execution failed');
+          }
+        }
+      }
+    } catch (err) {
+      log.error({ err }, 'Partial exit evaluation failed');
+    }
+  }
+
+  private async runAISelfImprovement(): Promise<void> {
+    try {
+      const selfImprove = getAISelfImprovement();
+      const aiModel = configManager.get<string>('ai.model');
+      const feedback = await selfImprove.generateFeedback(aiModel);
+      if (feedback) {
+        log.info(
+          { biases: feedback.biases.length, suggestions: feedback.suggestions.length },
+          'AI self-improvement feedback generated',
+        );
+        const audit = getAuditLogger();
+        audit.logResearch('AI self-improvement feedback generated', {
+          biases: feedback.biases.length,
+          suggestions: feedback.suggestions.length,
+        });
+      }
+    } catch (err) {
+      log.error({ err }, 'AI self-improvement failed');
+    }
   }
 
   private getUptime(): string {

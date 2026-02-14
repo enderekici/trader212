@@ -1,11 +1,39 @@
 import { and, desc, eq, gte, lte, sql } from 'drizzle-orm';
 import { Router } from 'express';
 import { z } from 'zod';
+import { getAISelfImprovement } from '../ai/self-improvement.js';
 import { CorrelationAnalyzer } from '../analysis/correlation.js';
+import { createMonteCarloSimulator } from '../analysis/monte-carlo.js';
+import { getPortfolioOptimizer } from '../analysis/portfolio-optimizer.js';
+import { getRegimeDetector } from '../analysis/regime-detector.js';
+import { createBacktestEngine } from '../backtest/engine.js';
+import {
+  formatEquityCurve,
+  generateSummary,
+  generateSymbolBreakdown,
+} from '../backtest/reporter.js';
+import type { BacktestConfig } from '../backtest/types.js';
 import { configManager } from '../config/manager.js';
+import { getStrategyProfileManager } from '../config/strategy-profiles.js';
 import { getDb } from '../db/index.js';
+import { getRecentEntries as getRecentJournalEntries } from '../db/repositories/journal.js';
+import {
+  getOrderById,
+  getOrderCount,
+  getOrdersBySymbol,
+  getRecentOrders,
+} from '../db/repositories/orders.js';
 import * as schema from '../db/schema.js';
+import { getConditionalOrderManager } from '../execution/conditional-orders.js';
+import { getPairLockManager } from '../execution/pair-locks.js';
+import { getRiskParitySizer } from '../execution/risk-parity.js';
+import { getRoiThreshold, parseRoiTable } from '../execution/roi-table.js';
+import { getPerformanceAttributor } from '../monitoring/attribution.js';
 import { getAuditLogger } from '../monitoring/audit-log.js';
+import { PerformanceTracker } from '../monitoring/performance.js';
+import { getReportGenerator } from '../monitoring/report-generator.js';
+import { getTaxTracker } from '../monitoring/tax-tracker.js';
+import { getTradeJournalManager } from '../monitoring/trade-journal.js';
 import { safeJsonParse } from '../utils/helpers.js';
 import { createLogger } from '../utils/logger.js';
 import { getMarketTimes } from '../utils/market-hours.js';
@@ -28,6 +56,21 @@ const researchRunSchema = z
     symbols: z.array(z.string().min(1).max(10)).max(20).optional(),
   })
   .optional();
+
+const backtestSchema = z.object({
+  symbols: z.array(z.string().min(1).max(10)).min(1).max(50),
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  initialCapital: z.number().positive().default(10000),
+  maxPositions: z.number().int().min(1).max(50).default(5),
+  maxPositionSizePct: z.number().min(0.01).max(1).default(0.15),
+  stopLossPct: z.number().min(0.001).max(0.5).default(0.05),
+  takeProfitPct: z.number().min(0.001).max(5).optional(),
+  roiTable: z.record(z.string(), z.number()).optional(),
+  trailingStop: z.boolean().default(false),
+  commission: z.number().min(0).default(0),
+  entryThreshold: z.number().min(0).max(1).default(0.6),
+});
 
 const log = createLogger('api-routes');
 
@@ -95,11 +138,35 @@ export function createRouter(): Router {
 
       const cashAvailable = cashRow?.cashBalance ?? 0;
 
+      // Enrich positions with ROI threshold info if enabled
+      const roiEnabled = configManager.get<boolean>('exit.roiEnabled');
+      let enrichedPositions = positionRows;
+      if (roiEnabled) {
+        const roiTableJson = configManager.get<string>('exit.roiTable');
+        const roiTable = parseRoiTable(
+          typeof roiTableJson === 'string' ? roiTableJson : JSON.stringify(roiTableJson),
+        );
+        const now = Date.now();
+        enrichedPositions = positionRows.map((p) => {
+          const tradeMinutes = (now - new Date(p.entryTime).getTime()) / 60000;
+          const threshold = getRoiThreshold(roiTable, tradeMinutes);
+          const pnlPct =
+            p.currentPrice != null ? (p.currentPrice - p.entryPrice) / p.entryPrice : null;
+          return {
+            ...p,
+            roiThreshold: threshold,
+            roiTradeMinutes: Math.round(tradeMinutes),
+            roiDistancePct: threshold != null && pnlPct != null ? pnlPct - threshold : null,
+          };
+        });
+      }
+
       res.json({
-        positions: positionRows,
+        positions: enrichedPositions,
         cashAvailable,
         totalValue: totalValue + cashAvailable,
         pnl: totalPnl,
+        roiEnabled,
       });
     } catch (err) {
       log.error({ err }, 'Error fetching portfolio');
@@ -244,6 +311,9 @@ export function createRouter(): Router {
   // ── Performance metrics ─────────────────────────────────────────────
   router.get('/api/performance', (_req, res) => {
     try {
+      const tracker = new PerformanceTracker();
+      const metrics = tracker.getMetrics();
+
       const db = getDb();
       const allClosed = db
         .select()
@@ -251,59 +321,27 @@ export function createRouter(): Router {
         .where(sql`${schema.trades.exitPrice} IS NOT NULL`)
         .all();
 
-      const totalTrades = allClosed.length;
-
-      if (totalTrades === 0) {
-        res.json({
-          winRate: 0,
-          avgReturn: 0,
-          sharpeRatio: 0,
-          maxDrawdown: 0,
-          profitFactor: 0,
-          totalTrades: 0,
-          totalPnl: 0,
-        });
-        return;
-      }
-
-      const wins = allClosed.filter((t) => (t.pnl ?? 0) > 0);
-      const losses = allClosed.filter((t) => (t.pnl ?? 0) < 0);
-      const winRate = wins.length / totalTrades;
-
-      const returns = allClosed.map((t) => t.pnlPct ?? 0);
-      const avgReturn = returns.reduce((a, b) => a + b, 0) / totalTrades;
-
       const totalPnl = allClosed.reduce((sum, t) => sum + (t.pnl ?? 0), 0);
-      const grossProfit = wins.reduce((sum, t) => sum + (t.pnl ?? 0), 0);
-      const grossLoss = Math.abs(losses.reduce((sum, t) => sum + (t.pnl ?? 0), 0));
-      const profitFactor =
-        grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? Number.POSITIVE_INFINITY : 0;
-
-      // Sharpe ratio (annualized, assuming ~252 trading days)
-      const meanReturn = avgReturn;
-      const variance = returns.reduce((sum, r) => sum + (r - meanReturn) ** 2, 0) / totalTrades;
-      const stdDev = Math.sqrt(variance);
-      const sharpeRatio = stdDev > 0 ? (meanReturn / stdDev) * Math.sqrt(252) : 0;
-
-      // Max drawdown from cumulative PnL
-      let peak = 0;
-      let maxDrawdown = 0;
-      let cumulative = 0;
-      for (const trade of allClosed) {
-        cumulative += trade.pnl ?? 0;
-        if (cumulative > peak) peak = cumulative;
-        const drawdown = peak - cumulative;
-        if (drawdown > maxDrawdown) maxDrawdown = drawdown;
-      }
 
       res.json({
-        winRate,
-        avgReturn,
-        sharpeRatio,
-        maxDrawdown,
-        profitFactor,
-        totalTrades,
+        winRate: metrics.winRate,
+        avgReturn: metrics.avgReturnPct,
+        sharpeRatio: metrics.sharpeRatio,
+        sortinoRatio: metrics.sortinoRatio,
+        calmarRatio: metrics.calmarRatio,
+        sqn: metrics.sqn,
+        maxDrawdown: metrics.maxDrawdown,
+        currentDrawdown: metrics.currentDrawdown,
+        profitFactor: metrics.profitFactor,
+        expectancy: metrics.expectancy,
+        expectancyRatio: metrics.expectancyRatio,
+        avgWin: metrics.avgWin,
+        avgLoss: metrics.avgLoss,
+        totalTrades: metrics.totalTrades,
         totalPnl,
+        avgHoldDuration: metrics.avgHoldDuration,
+        bestTrade: metrics.bestTrade,
+        worstTrade: metrics.worstTrade,
       });
     } catch (err) {
       log.error({ err }, 'Error computing performance');
@@ -719,6 +757,511 @@ export function createRouter(): Router {
     } catch (err) {
       log.error({ err }, 'Error computing correlation matrix');
       res.status(500).json({ error: 'Failed to compute correlation matrix' });
+    }
+  });
+
+  // ── Orders (list with filters) ──────────────────────────────────────
+  router.get('/api/orders', (req, res) => {
+    try {
+      const { symbol, status, limit } = req.query;
+      const filters = {
+        symbol: symbol ? String(symbol) : undefined,
+        status: status ? String(status) : undefined,
+        limit: limit ? Number(limit) : undefined,
+      };
+
+      const rows = getRecentOrders(filters);
+      const total = getOrderCount({
+        symbol: filters.symbol,
+        status: filters.status,
+      });
+
+      res.json({ orders: rows, total });
+    } catch (err) {
+      log.error({ err }, 'Error fetching orders');
+      res.status(500).json({ error: 'Failed to fetch orders' });
+    }
+  });
+
+  // ── Single order ──────────────────────────────────────────────────
+  router.get('/api/orders/:id', (req, res) => {
+    try {
+      const order = getOrderById(Number(req.params.id));
+      if (!order) {
+        res.status(404).json({ error: 'Order not found' });
+        return;
+      }
+      res.json(order);
+    } catch (err) {
+      log.error({ err }, 'Error fetching order');
+      res.status(500).json({ error: 'Failed to fetch order' });
+    }
+  });
+
+  // ── Orders for a position (by symbol) ──────────────────────────────
+  router.get('/api/positions/:symbol/orders', (req, res) => {
+    try {
+      const { symbol } = req.params;
+      const orders = getOrdersBySymbol(symbol);
+      res.json({ orders });
+    } catch (err) {
+      log.error({ err }, 'Error fetching position orders');
+      res.status(500).json({ error: 'Failed to fetch position orders' });
+    }
+  });
+
+  // ── Protections: Active pair locks ──────────────────────────────────
+  router.get('/api/protections/locks', (_req, res) => {
+    try {
+      const lockManager = getPairLockManager();
+      const locks = lockManager.getActiveLocks();
+      res.json({ locks });
+    } catch (err) {
+      log.error({ err }, 'Error fetching pair locks');
+      res.status(500).json({ error: 'Failed to fetch pair locks' });
+    }
+  });
+
+  // ── Protections: Manually unlock a pair ───────────────────────────
+  router.delete('/api/protections/locks/:symbol', (req, res) => {
+    try {
+      const { symbol } = req.params;
+      const lockManager = getPairLockManager();
+      lockManager.unlockPair(symbol);
+      const audit = getAuditLogger();
+      audit.logControl(`Manually unlocked pair: ${symbol}`, { symbol });
+      res.json({ message: `Pair ${symbol} unlocked` });
+    } catch (err) {
+      log.error({ err }, 'Error unlocking pair');
+      res.status(500).json({ error: 'Failed to unlock pair' });
+    }
+  });
+
+  // ── Backtest ────────────────────────────────────────────────────────
+  router.post('/api/backtest', async (req, res) => {
+    try {
+      const parsed = backtestSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Invalid request body' });
+        return;
+      }
+
+      const backtestConfig: BacktestConfig = parsed.data;
+      const engine = await createBacktestEngine(backtestConfig);
+      const result = await engine.run();
+
+      res.json({
+        summary: generateSummary(result),
+        symbolBreakdown: generateSymbolBreakdown(result),
+        equityCurve: formatEquityCurve(result),
+        metrics: result.metrics,
+        trades: result.trades,
+        config: result.config,
+        dailyReturns: result.dailyReturns,
+      });
+    } catch (err) {
+      log.error({ err }, 'Error running backtest');
+      res.status(500).json({ error: 'Failed to run backtest' });
+    }
+  });
+
+  // ── Market Regime ──────────────────────────────────────────────────
+  router.get('/regime', (_req, res) => {
+    try {
+      const detector = getRegimeDetector();
+      const db = getDb();
+      const spyCandles = db
+        .select()
+        .from(schema.priceCache)
+        .where(eq(schema.priceCache.symbol, 'SPY'))
+        .orderBy(desc(schema.priceCache.timestamp))
+        .limit(200)
+        .all();
+      if (spyCandles.length < 20) {
+        res.json({ regime: null, message: 'Insufficient SPY data' });
+        return;
+      }
+      const candles = spyCandles.reverse().map((c) => ({
+        date: c.timestamp,
+        open: c.open ?? 0,
+        high: c.high ?? 0,
+        low: c.low ?? 0,
+        close: c.close ?? 0,
+        volume: c.volume ?? 0,
+      }));
+      const result = detector.detect(candles);
+      res.json(result);
+    } catch (err) {
+      log.error({ err }, 'Error detecting regime');
+      res.status(500).json({ error: 'Failed to detect market regime' });
+    }
+  });
+
+  // ── Strategy Profiles ────────────────────────────────────────────
+  router.get('/strategy-profiles', (_req, res) => {
+    try {
+      const manager = getStrategyProfileManager();
+      res.json(manager.listProfiles());
+    } catch (err) {
+      log.error({ err }, 'Error listing strategy profiles');
+      res.status(500).json({ error: 'Failed to list strategy profiles' });
+    }
+  });
+
+  router.post('/strategy-profiles/:name/activate', async (req, res) => {
+    try {
+      const manager = getStrategyProfileManager();
+      const name = req.params.name;
+      await manager.applyProfile(name);
+      res.json({ success: true, message: `Profile '${name}' activated` });
+    } catch (err) {
+      log.error({ err }, 'Error activating strategy profile');
+      res.status(500).json({ error: 'Failed to activate profile' });
+    }
+  });
+
+  // ── Monte Carlo Simulation ───────────────────────────────────────
+  router.post('/monte-carlo/simulate', (_req, res) => {
+    try {
+      const simulator = createMonteCarloSimulator();
+      const db = getDb();
+      const closedTrades = db
+        .select({ pnl: schema.trades.pnl, pnlPct: schema.trades.pnlPct })
+        .from(schema.trades)
+        .where(sql`${schema.trades.exitPrice} IS NOT NULL AND ${schema.trades.pnlPct} IS NOT NULL`)
+        .all();
+      if (closedTrades.length < 5) {
+        res.json({ error: 'Need at least 5 closed trades for simulation' });
+        return;
+      }
+      const result = simulator.simulate(closedTrades);
+      res.json(result);
+    } catch (err) {
+      log.error({ err }, 'Error running Monte Carlo simulation');
+      res.status(500).json({ error: 'Failed to run simulation' });
+    }
+  });
+
+  // ── Performance Attribution ──────────────────────────────────────
+  router.get('/attribution', (_req, res) => {
+    try {
+      const attributor = getPerformanceAttributor();
+      const result = attributor.getFactorBreakdown();
+      res.json(result);
+    } catch (err) {
+      log.error({ err }, 'Error generating attribution');
+      res.status(500).json({ error: 'Failed to generate attribution' });
+    }
+  });
+
+  // ── Trade Journal ────────────────────────────────────────────────
+  router.get('/journal', (req, res) => {
+    try {
+      const manager = getTradeJournalManager();
+      const symbol = req.query.symbol as string | undefined;
+      const limit = Number(req.query.limit) || 50;
+      if (symbol) {
+        res.json(manager.getSymbolHistory(symbol, limit));
+      } else {
+        res.json(getRecentJournalEntries(limit));
+      }
+    } catch (err) {
+      log.error({ err }, 'Error fetching journal');
+      res.status(500).json({ error: 'Failed to fetch journal' });
+    }
+  });
+
+  router.post('/journal', (req, res) => {
+    try {
+      const { symbol, note, tags, tradeId, positionId } = req.body;
+      if (!symbol || !note) {
+        res.status(400).json({ error: 'symbol and note are required' });
+        return;
+      }
+      const manager = getTradeJournalManager();
+      const entry = manager.addNote(symbol, note, { tradeId, positionId, tags });
+      res.json(entry);
+    } catch (err) {
+      log.error({ err }, 'Error adding journal entry');
+      res.status(500).json({ error: 'Failed to add journal entry' });
+    }
+  });
+
+  router.get('/journal/search', (req, res) => {
+    try {
+      const query = req.query.q as string;
+      if (!query) {
+        res.status(400).json({ error: 'q query parameter is required' });
+        return;
+      }
+      const manager = getTradeJournalManager();
+      res.json(manager.search(query));
+    } catch (err) {
+      log.error({ err }, 'Error searching journal');
+      res.status(500).json({ error: 'Failed to search journal' });
+    }
+  });
+
+  router.get('/journal/insights', (_req, res) => {
+    try {
+      const manager = getTradeJournalManager();
+      res.json(manager.getInsights());
+    } catch (err) {
+      log.error({ err }, 'Error generating journal insights');
+      res.status(500).json({ error: 'Failed to generate insights' });
+    }
+  });
+
+  // ── Tax Tracking ─────────────────────────────────────────────────
+  router.get('/tax/summary', (req, res) => {
+    try {
+      const tracker = getTaxTracker();
+      const year = Number(req.query.year) || new Date().getFullYear();
+      res.json(tracker.getYearlyTaxSummary(year));
+    } catch (err) {
+      log.error({ err }, 'Error generating tax summary');
+      res.status(500).json({ error: 'Failed to generate tax summary' });
+    }
+  });
+
+  router.get('/tax/harvest-candidates', (_req, res) => {
+    try {
+      const tracker = getTaxTracker();
+      const db = getDb();
+      const positions = db.select().from(schema.positions).all();
+      const priceMap = new Map<string, number>();
+      for (const pos of positions) {
+        if (pos.currentPrice) priceMap.set(pos.symbol, pos.currentPrice);
+      }
+      res.json(tracker.getHarvestCandidates(priceMap));
+    } catch (err) {
+      log.error({ err }, 'Error finding harvest candidates');
+      res.status(500).json({ error: 'Failed to find harvest candidates' });
+    }
+  });
+
+  // ── Portfolio Optimization ───────────────────────────────────────
+  router.get('/portfolio/optimize', (_req, res) => {
+    try {
+      const optimizer = getPortfolioOptimizer();
+      const db = getDb();
+      const positions = db.select().from(schema.positions).all();
+      if (positions.length === 0) {
+        res.json({ error: 'No open positions to optimize' });
+        return;
+      }
+      const posInfos = positions.map((p) => ({
+        symbol: p.symbol,
+        shares: p.shares,
+        currentPrice: p.currentPrice ?? p.entryPrice,
+        weight: 0,
+      }));
+      const totalValue = posInfos.reduce((s, p) => s + p.shares * p.currentPrice, 0);
+      for (const p of posInfos) {
+        p.weight = (p.shares * p.currentPrice) / totalValue;
+      }
+      // Get price history for each symbol
+      const priceHistory = new Map<string, number[]>();
+      for (const pos of positions) {
+        const prices = db
+          .select({ close: schema.priceCache.close })
+          .from(schema.priceCache)
+          .where(eq(schema.priceCache.symbol, pos.symbol))
+          .orderBy(desc(schema.priceCache.timestamp))
+          .limit(60)
+          .all();
+        if (prices.length > 5) {
+          priceHistory.set(
+            pos.symbol,
+            prices.reverse().map((p) => p.close ?? 0),
+          );
+        }
+      }
+      if (priceHistory.size < 2) {
+        res.json({ error: 'Need price data for at least 2 positions' });
+        return;
+      }
+      const result = optimizer.suggestRebalance(posInfos, priceHistory, totalValue);
+      res.json(result);
+    } catch (err) {
+      log.error({ err }, 'Error optimizing portfolio');
+      res.status(500).json({ error: 'Failed to optimize portfolio' });
+    }
+  });
+
+  // ── Reports ──────────────────────────────────────────────────────
+  router.get('/reports/daily', async (req, res) => {
+    try {
+      const generator = getReportGenerator();
+      const date = (req.query.date as string) || undefined;
+      const report = await generator.generateDailyReport(date);
+      if (!report) {
+        res.json({ error: 'No data for this period' });
+        return;
+      }
+      const format = (req.query.format as string) || 'json';
+      if (format === 'text') res.type('text/plain').send(generator.formatAsText(report));
+      else if (format === 'markdown')
+        res.type('text/markdown').send(generator.formatAsMarkdown(report));
+      else res.json(report);
+    } catch (err) {
+      log.error({ err }, 'Error generating daily report');
+      res.status(500).json({ error: 'Failed to generate report' });
+    }
+  });
+
+  router.get('/reports/weekly', async (req, res) => {
+    try {
+      const generator = getReportGenerator();
+      const report = await generator.generateWeeklyReport();
+      if (!report) {
+        res.json({ error: 'No data for this period' });
+        return;
+      }
+      const format = (req.query.format as string) || 'json';
+      if (format === 'text') res.type('text/plain').send(generator.formatAsText(report));
+      else if (format === 'markdown')
+        res.type('text/markdown').send(generator.formatAsMarkdown(report));
+      else res.json(report);
+    } catch (err) {
+      log.error({ err }, 'Error generating weekly report');
+      res.status(500).json({ error: 'Failed to generate report' });
+    }
+  });
+
+  // ── Conditional Orders ───────────────────────────────────────────
+  router.get('/conditional-orders', (_req, res) => {
+    try {
+      const manager = getConditionalOrderManager();
+      res.json(manager.getStatus());
+    } catch (err) {
+      log.error({ err }, 'Error fetching conditional orders');
+      res.status(500).json({ error: 'Failed to fetch conditional orders' });
+    }
+  });
+
+  router.post('/conditional-orders', (req, res) => {
+    try {
+      const manager = getConditionalOrderManager();
+      const order = manager.createOrder(req.body);
+      res.json(order);
+    } catch (err) {
+      log.error({ err }, 'Error creating conditional order');
+      res.status(500).json({ error: 'Failed to create conditional order' });
+    }
+  });
+
+  router.post('/conditional-orders/oco', (req, res) => {
+    try {
+      const manager = getConditionalOrderManager();
+      const { order1, order2 } = req.body;
+      const result = manager.createOcoPair(order1, order2);
+      res.json(result);
+    } catch (err) {
+      log.error({ err }, 'Error creating OCO pair');
+      res.status(500).json({ error: 'Failed to create OCO pair' });
+    }
+  });
+
+  router.delete('/conditional-orders/:id', (req, res) => {
+    try {
+      const manager = getConditionalOrderManager();
+      manager.cancelOrder(Number(req.params.id));
+      res.json({ success: true });
+    } catch (err) {
+      log.error({ err }, 'Error cancelling conditional order');
+      res.status(500).json({ error: 'Failed to cancel conditional order' });
+    }
+  });
+
+  // ── AI Self-Improvement ──────────────────────────────────────────
+  router.get('/ai/feedback', async (_req, res) => {
+    try {
+      const engine = getAISelfImprovement();
+      const feedback = await engine.generateFeedback();
+      res.json(feedback);
+    } catch (err) {
+      log.error({ err }, 'Error generating AI feedback');
+      res.status(500).json({ error: 'Failed to generate AI feedback' });
+    }
+  });
+
+  router.get('/ai/calibration', async (_req, res) => {
+    try {
+      const engine = getAISelfImprovement();
+      const curve = await engine.getCalibrationCurve();
+      res.json(curve);
+    } catch (err) {
+      log.error({ err }, 'Error generating calibration curve');
+      res.status(500).json({ error: 'Failed to generate calibration curve' });
+    }
+  });
+
+  router.get('/ai/model-comparison', async (_req, res) => {
+    try {
+      const engine = getAISelfImprovement();
+      const comparison = await engine.compareModels();
+      res.json(comparison);
+    } catch (err) {
+      log.error({ err }, 'Error comparing models');
+      res.status(500).json({ error: 'Failed to compare models' });
+    }
+  });
+
+  // ── Risk Parity ──────────────────────────────────────────────────
+  router.get('/risk-parity/rebalance', (_req, res) => {
+    try {
+      const sizer = getRiskParitySizer();
+      const db = getDb();
+      const positions = db.select().from(schema.positions).all();
+      if (positions.length === 0) {
+        res.json({ actions: [] });
+        return;
+      }
+      const posInfos = positions.map((p) => ({
+        symbol: p.symbol,
+        shares: p.shares,
+        currentPrice: p.currentPrice ?? p.entryPrice,
+        entryPrice: p.entryPrice,
+      }));
+      const candleMap = new Map<
+        string,
+        Array<{
+          date: string;
+          open: number;
+          high: number;
+          low: number;
+          close: number;
+          volume: number;
+        }>
+      >();
+      for (const pos of positions) {
+        const prices = db
+          .select()
+          .from(schema.priceCache)
+          .where(eq(schema.priceCache.symbol, pos.symbol))
+          .orderBy(desc(schema.priceCache.timestamp))
+          .limit(30)
+          .all();
+        if (prices.length > 5) {
+          candleMap.set(
+            pos.symbol,
+            prices.reverse().map((p) => ({
+              date: p.timestamp,
+              open: p.open ?? 0,
+              high: p.high ?? 0,
+              low: p.low ?? 0,
+              close: p.close ?? 0,
+              volume: p.volume ?? 0,
+            })),
+          );
+        }
+      }
+      const actions = sizer.suggestRebalance(posInfos, candleMap);
+      res.json({ actions });
+    } catch (err) {
+      log.error({ err }, 'Error computing risk parity rebalance');
+      res.status(500).json({ error: 'Failed to compute rebalance' });
     }
   });
 
