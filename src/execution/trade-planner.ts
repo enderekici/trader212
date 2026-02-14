@@ -3,6 +3,7 @@ import { type AIDecision, getActiveModelName } from '../ai/agent.js';
 import { configManager } from '../config/manager.js';
 import { getDb } from '../db/index.js';
 import { tradePlans } from '../db/schema.js';
+import { safeJsonParse } from '../utils/helpers.js';
 import { createLogger } from '../utils/logger.js';
 import type { PortfolioState } from './risk-guard.js';
 
@@ -225,7 +226,7 @@ export class TradePlanner {
       status: row.status as TradePlan['status'],
       side: row.side as 'BUY' | 'SELL',
       accountType: row.accountType as 'INVEST' | 'ISA',
-      risks: row.risks ? JSON.parse(row.risks) : [],
+      risks: safeJsonParse<string[]>(row.risks, []),
     };
   }
 }

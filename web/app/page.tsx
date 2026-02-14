@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useRef } from 'react';
 import useSWR from 'swr';
 import {
   Activity,
@@ -50,10 +51,15 @@ export default function OverviewPage() {
     'position_update',
   ]);
 
-  // Refresh portfolio on WS updates
-  if (lastMessage) {
-    mutatePortfolio();
-  }
+  // Debounce WS-triggered portfolio refresh (max once per 2s)
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => {
+    if (!lastMessage) return;
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      mutatePortfolio();
+    }, 2000);
+  }, [lastMessage, mutatePortfolio]);
 
   const equityData =
     dailyMetrics?.metrics.map((m) => ({

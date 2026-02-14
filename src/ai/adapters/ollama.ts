@@ -8,7 +8,7 @@ import { buildAnalysisPrompt } from '../prompt-builder.js';
 const log = createLogger('ai-ollama');
 
 export class OllamaAdapter implements AIAgent {
-  async analyze(context: AIContext): Promise<AIDecision> {
+  async analyze(context: AIContext): Promise<AIDecision | null> {
     const baseUrl = configManager.get<string>('ai.ollama.baseUrl');
     const model = configManager.get<string>('ai.ollama.model');
     const timeout = configManager.get<number>('ai.timeoutSeconds') * 1000;

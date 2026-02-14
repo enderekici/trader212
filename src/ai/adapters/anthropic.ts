@@ -8,7 +8,7 @@ import { buildAnalysisPrompt } from '../prompt-builder.js';
 const log = createLogger('ai-anthropic');
 
 export class AnthropicAdapter implements AIAgent {
-  async analyze(context: AIContext): Promise<AIDecision> {
+  async analyze(context: AIContext): Promise<AIDecision | null> {
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) throw new Error('ANTHROPIC_API_KEY not set');
 

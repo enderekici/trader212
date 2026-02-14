@@ -39,7 +39,9 @@ import { createLogger } from '../utils/logger.js';
 import { getMarketTimes } from '../utils/market-hours.js';
 
 const configUpdateSchema = z.object({
-  value: z.unknown().refine((v) => v !== undefined, 'Missing "value" in request body'),
+  value: z
+    .union([z.string(), z.number(), z.boolean(), z.array(z.unknown()), z.record(z.unknown())])
+    .refine((v) => v !== undefined, 'Missing "value" in request body'),
 });
 
 const staticSymbolSchema = z.object({
@@ -47,7 +49,8 @@ const staticSymbolSchema = z.object({
     .string()
     .min(1)
     .max(10)
-    .regex(/^[A-Za-z.]+$/, 'Invalid symbol format'),
+    .regex(/^[A-Z]{1,5}(\.[A-Z]{1,2})?$/, 'Invalid symbol format (e.g. AAPL, BRK.B)')
+    .transform((s) => s.toUpperCase()),
 });
 
 const researchRunSchema = z

@@ -8,7 +8,7 @@ import { buildAnalysisPrompt } from '../prompt-builder.js';
 const log = createLogger('ai-openai-compat');
 
 export class OpenAICompatibleAdapter implements AIAgent {
-  async analyze(context: AIContext): Promise<AIDecision> {
+  async analyze(context: AIContext): Promise<AIDecision | null> {
     const baseUrl = configManager.get<string>('ai.openaiCompat.baseUrl');
     const model = configManager.get<string>('ai.openaiCompat.model');
     const apiKey = configManager.get<string>('ai.openaiCompat.apiKey');

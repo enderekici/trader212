@@ -1,31 +1,38 @@
 import { index, integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
-export const trades = sqliteTable('trades', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
-  symbol: text('symbol').notNull(),
-  t212Ticker: text('t212Ticker').notNull(),
-  side: text('side', { enum: ['BUY', 'SELL'] }).notNull(),
-  shares: real('shares').notNull(),
-  entryPrice: real('entryPrice').notNull(),
-  exitPrice: real('exitPrice'),
-  pnl: real('pnl'),
-  pnlPct: real('pnlPct'),
-  entryTime: text('entryTime').notNull(),
-  exitTime: text('exitTime'),
-  stopLoss: real('stopLoss'),
-  takeProfit: real('takeProfit'),
-  exitReason: text('exitReason'),
-  aiReasoning: text('aiReasoning'),
-  convictionScore: real('convictionScore'),
-  aiModel: text('aiModel'),
-  intendedPrice: real('intendedPrice'),
-  slippage: real('slippage'),
-  accountType: text('accountType', { enum: ['INVEST', 'ISA'] }).notNull(),
-  dcaRound: integer('dcaRound'),
-  journalNotes: text('journalNotes'),
-  journalTags: text('journalTags'), // JSON array
-  createdAt: text('createdAt').default('CURRENT_TIMESTAMP'),
-});
+export const trades = sqliteTable(
+  'trades',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    symbol: text('symbol').notNull(),
+    t212Ticker: text('t212Ticker').notNull(),
+    side: text('side', { enum: ['BUY', 'SELL'] }).notNull(),
+    shares: real('shares').notNull(),
+    entryPrice: real('entryPrice').notNull(),
+    exitPrice: real('exitPrice'),
+    pnl: real('pnl'),
+    pnlPct: real('pnlPct'),
+    entryTime: text('entryTime').notNull(),
+    exitTime: text('exitTime'),
+    stopLoss: real('stopLoss'),
+    takeProfit: real('takeProfit'),
+    exitReason: text('exitReason'),
+    aiReasoning: text('aiReasoning'),
+    convictionScore: real('convictionScore'),
+    aiModel: text('aiModel'),
+    intendedPrice: real('intendedPrice'),
+    slippage: real('slippage'),
+    accountType: text('accountType', { enum: ['INVEST', 'ISA'] }).notNull(),
+    dcaRound: integer('dcaRound'),
+    journalNotes: text('journalNotes'),
+    journalTags: text('journalTags'), // JSON array
+    createdAt: text('createdAt').default('CURRENT_TIMESTAMP'),
+  },
+  (table) => [
+    index('idx_trades_symbol').on(table.symbol),
+    index('idx_trades_exit_time').on(table.exitTime),
+  ],
+);
 
 export const signals = sqliteTable('signals', {
   id: integer('id').primaryKey({ autoIncrement: true }),

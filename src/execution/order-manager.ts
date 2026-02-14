@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import type { Trading212Client } from '../api/trading212/client.js';
 import type { Order } from '../api/trading212/types.js';
@@ -50,14 +51,6 @@ export class OrderManager {
     const dryRun = configManager.get<boolean>('execution.dryRun');
     const db = getDb();
 
-    // Duplicate protection: check if position already exists
-    const existing = db.select().from(positions).where(eq(positions.symbol, params.symbol)).get();
-
-    if (existing) {
-      log.warn({ symbol: params.symbol }, 'Position already exists, skipping buy');
-      return { success: false, error: `Position already exists for ${params.symbol}` };
-    }
-
     const stopLossPrice = params.price * (1 - params.stopLossPct);
     const takeProfitPrice = params.price * (1 + params.takeProfitPct);
     const now = new Date().toISOString();
@@ -77,7 +70,7 @@ export class OrderManager {
       const dryT212Id = `dry_run_BUY_${params.symbol}_${Date.now()}`;
       const dryTpOrderId =
         params.takeProfitPct > 0
-          ? `tp-dry-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+          ? `tp-dry-${Date.now()}-${randomBytes(4).toString('hex')}`
           : undefined;
 
       log.info(
@@ -94,7 +87,19 @@ export class OrderManager {
       );
 
       let tradeRowId: number | bigint = 0;
+      let duplicateError = false;
       db.transaction((tx) => {
+        // Duplicate check inside transaction to prevent race conditions
+        const existing = tx
+          .select()
+          .from(positions)
+          .where(eq(positions.symbol, params.symbol))
+          .get();
+        if (existing) {
+          duplicateError = true;
+          return;
+        }
+
         const trade = tx
           .insert(trades)
           .values({
@@ -137,6 +142,11 @@ export class OrderManager {
           .run();
       });
 
+      if (duplicateError) {
+        log.warn({ symbol: params.symbol }, 'Position already exists, skipping buy');
+        return { success: false, error: `Position already exists for ${params.symbol}` };
+      }
+
       // Update order as filled immediately in dry-run
       updateOrderStatus(localOrderId, {
         status: 'filled',
@@ -152,6 +162,13 @@ export class OrderManager {
     // Live execution
     if (!this.t212Client) {
       return { success: false, error: 'T212 client not initialized' };
+    }
+
+    // Duplicate protection: check if position already exists (before placing on exchange)
+    const existing = db.select().from(positions).where(eq(positions.symbol, params.symbol)).get();
+    if (existing) {
+      log.warn({ symbol: params.symbol }, 'Position already exists, skipping buy');
+      return { success: false, error: `Position already exists for ${params.symbol}` };
     }
 
     // Create pending order record before placing on exchange
