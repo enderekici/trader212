@@ -332,6 +332,7 @@ That concludes my analysis.`;
       expect(result).toBeNull();
     });
 
+
     it('returns null when configManager.get throws', () => {
       vi.mocked(configManager.get).mockImplementation((key: string) => {
         if (key === 'risk.minStopLossPct') throw 'config not found';
