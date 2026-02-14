@@ -1,5 +1,5 @@
 import { and, desc, eq, lte } from 'drizzle-orm';
-import type { AIDecision } from '../ai/agent.js';
+import { type AIDecision, getActiveModelName } from '../ai/agent.js';
 import { configManager } from '../config/manager.js';
 import { getDb } from '../db/index.js';
 import { tradePlans } from '../db/schema.js';
@@ -108,7 +108,7 @@ export class TradePlanner {
         maxHoldDays,
         aiConviction: decision.conviction,
         aiReasoning: decision.reasoning,
-        aiModel: configManager.get<string>('ai.model'),
+        aiModel: getActiveModelName(),
         risks: JSON.stringify(decision.risks),
         urgency: decision.urgency,
         exitConditions: decision.exitConditions,

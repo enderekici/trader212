@@ -123,6 +123,19 @@ export interface AIAgent {
   rawChat(system: string, user: string): Promise<string>;
 }
 
+/** Resolve the actual model name based on the active AI provider */
+export function getActiveModelName(): string {
+  const provider = configManager.get<string>('ai.provider');
+  switch (provider) {
+    case 'ollama':
+      return configManager.get<string>('ai.ollama.model');
+    case 'openai-compatible':
+      return configManager.get<string>('ai.openaiCompat.model');
+    default:
+      return configManager.get<string>('ai.model');
+  }
+}
+
 export function createAIAgent(): AIAgent {
   const provider = configManager.get<string>('ai.provider');
   log.info({ provider }, 'Creating AI agent');

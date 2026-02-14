@@ -7,6 +7,8 @@ import type { AIAgent } from './agent.js';
 
 const log = createLogger('market-research');
 
+import { getActiveModelName } from './agent.js';
+
 export interface ResearchResult {
   symbol: string;
   recommendation: 'strong_buy' | 'buy' | 'hold' | 'sell' | 'strong_sell';
@@ -33,11 +35,29 @@ export interface MarketResearchReport {
   aiModel: string | null;
 }
 
+/** Live market snapshot for a single symbol */
+export interface SymbolSnapshot {
+  price: number;
+  change1dPct: number;
+  marketCap: number | null;
+  peRatio: number | null;
+  sector: string | null;
+}
+
+/** Callback to fetch live data for symbols */
+export type SymbolDataFetcher = (symbols: string[]) => Promise<Map<string, SymbolSnapshot>>;
+
 export class MarketResearcher {
   private aiAgent: AIAgent;
+  private dataFetcher: SymbolDataFetcher | null = null;
 
   constructor(aiAgent: AIAgent) {
     this.aiAgent = aiAgent;
+  }
+
+  /** Set a data fetcher so research prompts include live market data */
+  setDataFetcher(fetcher: SymbolDataFetcher): void {
+    this.dataFetcher = fetcher;
   }
 
   async runResearch(options?: {
@@ -58,7 +78,36 @@ export class MarketResearcher {
 
     const query = `Market Research: ${focus}`;
 
-    const prompt = this.buildResearchPrompt(focus, sectorFilter, symbolFilter, topCount);
+    // Fetch live market data for requested symbols
+    let liveDataSection = '';
+    if (options?.symbols?.length && this.dataFetcher) {
+      try {
+        const snapshots = await this.dataFetcher(options.symbols);
+        if (snapshots.size > 0) {
+          const lines: string[] = ['Current market data (live):'];
+          for (const [sym, snap] of snapshots) {
+            const parts = [
+              `${sym}: $${snap.price.toFixed(2)} (${snap.change1dPct >= 0 ? '+' : ''}${snap.change1dPct.toFixed(2)}%)`,
+            ];
+            if (snap.marketCap) parts.push(`MCap: $${(snap.marketCap / 1e9).toFixed(1)}B`);
+            if (snap.peRatio) parts.push(`P/E: ${snap.peRatio.toFixed(1)}`);
+            if (snap.sector) parts.push(`Sector: ${snap.sector}`);
+            lines.push(`  ${parts.join(', ')}`);
+          }
+          liveDataSection = `\n${lines.join('\n')}\n`;
+        }
+      } catch (err) {
+        log.warn({ err }, 'Failed to fetch live data for research symbols');
+      }
+    }
+
+    const prompt = this.buildResearchPrompt(
+      focus,
+      sectorFilter,
+      symbolFilter,
+      topCount,
+      liveDataSection,
+    );
 
     try {
       const systemPrompt =
@@ -79,7 +128,7 @@ export class MarketResearcher {
           query,
           symbols: JSON.stringify(results.map((r) => r.symbol)),
           results: JSON.stringify(results),
-          aiModel: configManager.get<string>('ai.model'),
+          aiModel: getActiveModelName(),
           marketContext: null,
           createdAt: now,
         })
@@ -91,7 +140,7 @@ export class MarketResearcher {
         query,
         results,
         marketContext: null,
-        aiModel: configManager.get<string>('ai.model'),
+        aiModel: getActiveModelName(),
       };
 
       log.info({ resultCount: results.length, query }, 'Market research completed');
@@ -142,12 +191,13 @@ export class MarketResearcher {
     sectorFilter: string,
     symbolFilter: string,
     _topCount: number,
+    liveDataSection = '',
   ): string {
     return `You are a market research analyst. Your task: ${focus}
 
 ${sectorFilter}
 ${symbolFilter}
-
+${liveDataSection}
 For each stock, provide your analysis in this JSON format:
 {
   "results": [

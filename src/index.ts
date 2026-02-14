@@ -1,7 +1,13 @@
 import 'dotenv/config';
 
 import { and, desc, eq, gte, isNotNull } from 'drizzle-orm';
-import { type AIAgent, type AIContext, type AIDecision, createAIAgent } from './ai/agent.js';
+import {
+  type AIAgent,
+  type AIContext,
+  type AIDecision,
+  createAIAgent,
+  getActiveModelName,
+} from './ai/agent.js';
 import { MarketResearcher } from './ai/market-research.js';
 import { getAISelfImprovement } from './ai/self-improvement.js';
 import { CorrelationAnalyzer } from './analysis/correlation.js';
@@ -62,6 +68,7 @@ class TradingBot {
   private performanceTracker!: PerformanceTracker;
   private wsManager!: WebSocketManager;
   private dataAggregator!: DataAggregator;
+  private yahoo!: YahooFinanceClient;
   private tickerMapper!: TickerMapper;
   private t212Client!: Trading212Client;
   private tradePlanner!: TradePlanner;
@@ -98,12 +105,12 @@ class TradingBot {
     await this.tickerMapper.load();
 
     // 5. Data sources
-    const yahoo = new YahooFinanceClient();
+    this.yahoo = new YahooFinanceClient();
     const finnhub = new FinnhubClient();
     const marketaux = new MarketauxClient();
 
     // 6. Data aggregator
-    this.dataAggregator = new DataAggregator(yahoo, finnhub, marketaux);
+    this.dataAggregator = new DataAggregator(this.yahoo, finnhub, marketaux);
 
     // 7. Pairlist pipeline
     this.pairlistPipeline = createPairlistPipeline();
@@ -124,8 +131,31 @@ class TradingBot {
     this.tradePlanner = new TradePlanner();
     this.approvalManager = new ApprovalManager(this.tradePlanner);
 
-    // 10c. Market researcher
+    // 10c. Market researcher (with live data fetcher for symbol-specific research)
     this.marketResearcher = new MarketResearcher(this.aiAgent);
+    this.marketResearcher.setDataFetcher(async (symbols) => {
+      const results = new Map<string, import('./ai/market-research.js').SymbolSnapshot>();
+      for (const sym of symbols) {
+        try {
+          const [quote, fundamentals] = await Promise.all([
+            this.yahoo.getQuote(sym),
+            this.yahoo.getFundamentals(sym),
+          ]);
+          if (quote) {
+            results.set(sym, {
+              price: quote.price,
+              change1dPct: quote.changePercent,
+              marketCap: quote.marketCap ?? fundamentals?.marketCap ?? null,
+              peRatio: fundamentals?.peRatio ?? null,
+              sector: fundamentals?.sector ?? null,
+            });
+          }
+        } catch (err) {
+          log.debug({ err, symbol: sym }, 'Failed to fetch live data for research symbol');
+        }
+      }
+      return results;
+    });
 
     // 10d. Model tracker
     this.modelTracker = new ModelTracker();
@@ -675,7 +705,7 @@ class TradingBot {
         decision: decision.decision,
         executed: false,
         aiReasoning: decision.reasoning,
-        aiModel: configManager.get<string>('ai.model'),
+        aiModel: getActiveModelName(),
         suggestedStopLossPct: decision.suggestedStopLossPct,
         suggestedPositionSizePct: decision.suggestedPositionSizePct,
         suggestedTakeProfitPct: decision.suggestedTakeProfitPct,
@@ -750,7 +780,7 @@ class TradingBot {
 
     // Record AI prediction for model tracking
     this.modelTracker.recordPrediction({
-      aiModel: configManager.get<string>('ai.model'),
+      aiModel: getActiveModelName(),
       symbol,
       decision: decision.decision,
       conviction: decision.conviction,
@@ -1916,7 +1946,7 @@ class TradingBot {
   private async runAISelfImprovement(): Promise<void> {
     try {
       const selfImprove = getAISelfImprovement();
-      const aiModel = configManager.get<string>('ai.model');
+      const aiModel = getActiveModelName();
       const feedback = await selfImprove.generateFeedback(aiModel);
       if (feedback) {
         log.info(
