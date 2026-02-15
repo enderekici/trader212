@@ -10,10 +10,10 @@ Items marked [DONE] are already implemented and tested.
 ## Phase 1: Critical Safety (Week 1-2)
 
 ### Execution Safety
-- [ ] Add UNIQUE constraint on `positions.symbol` in schema.ts + index.ts raw SQL
-- [ ] Scheduler job mutex — skip-if-running to prevent overlapping analysis loops
-- [ ] `process.on('unhandledRejection')` handler with alerting
-- [ ] Fail startup if `NODE_ENV=production` and `API_SECRET_KEY` is empty
+- [DONE] Add UNIQUE constraint on `positions.symbol` in schema.ts + index.ts raw SQL
+- [DONE] Scheduler job mutex — skip-if-running to prevent overlapping analysis loops
+- [DONE] `process.on('unhandledRejection')` handler with alerting
+- [DONE] Fail startup if `NODE_ENV=production` and `API_SECRET_KEY` is empty
 - [ ] Data quality gate — minimum indicator threshold before AI analysis proceeds
 - [ ] Wrap trade execution in saga/compensation pattern (rollback on partial failure)
 
