@@ -21,6 +21,30 @@ describe('setupGlobalErrorHandlers', () => {
     expect(() => setupGlobalErrorHandlers()).not.toThrow();
   });
 
+  it('should handle unhandledRejection without callback', async () => {
+    setupGlobalErrorHandlers(); // No callback
+
+    const testError = new Error('Test rejection without callback');
+    process.emit('unhandledRejection', testError, Promise.resolve());
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    // Should not crash
+  });
+
+  it('should handle uncaughtException without callback', async () => {
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {}) as never);
+
+    setupGlobalErrorHandlers(); // No callback
+
+    const testError = new Error('Test exception without callback');
+    process.emit('uncaughtException', testError);
+
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    exitSpy.mockRestore();
+  });
+
   it('should call callback on unhandledRejection', async () => {
     const mockCallback = vi.fn();
     setupGlobalErrorHandlers(mockCallback);
