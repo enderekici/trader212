@@ -46,6 +46,7 @@
     "express-rate-limit": "^8.2.1",
     "node-cron": "^4.2.1",
     "node-telegram-bot-api": "^0.67.0",
+    "p-limit": "^7.3.0",
     "pino": "^10.3.1",
     "technicalindicators": "^3.1.0",
     "ws": "^8.19.0",

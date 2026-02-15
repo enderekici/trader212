@@ -1,6 +1,7 @@
 import 'dotenv/config';
 
 import { and, desc, eq, gte, isNotNull } from 'drizzle-orm';
+import pLimit from 'p-limit';
 import {
   type AIAgent,
   type AIContext,
@@ -254,7 +255,8 @@ class TradingBot {
       analyzeSymbol: async (symbol) => {
         const t212Ticker = this.tickerMapper.toT212Ticker(symbol);
         if (!t212Ticker) return `Unknown symbol: ${symbol}`;
-        await this.analyzeStock({ symbol, t212Ticker, name: symbol });
+        const portfolio = await this.getPortfolioState();
+        await this.analyzeStock({ symbol, t212Ticker, name: symbol }, portfolio);
         return `Analysis completed for ${symbol}`;
       },
       refreshPairlist: async () => {
@@ -624,16 +626,22 @@ class TradingBot {
 
     log.info({ stockCount: this.activeStocks.length }, 'Starting analysis loop');
 
-    for (const stock of this.activeStocks) {
-      try {
-        await this.analyzeStock(stock);
-      } catch (err) {
-        log.error({ symbol: stock.symbol, err }, 'Analysis failed for stock');
-      }
-    }
+    // Parallel analysis with bounded concurrency (5 stocks at a time)
+    const limit = pLimit(5);
+    const analysisPromises = this.activeStocks.map((stock) =>
+      limit(async () => {
+        try {
+          await this.analyzeStock(stock, portfolio);
+        } catch (err) {
+          log.error({ symbol: stock.symbol, err }, 'Analysis failed for stock');
+        }
+      }),
+    );
+
+    await Promise.all(analysisPromises);
   }
 
-  private async analyzeStock(stock: StockInfo): Promise<void> {
+  private async analyzeStock(stock: StockInfo, portfolio: PortfolioState): Promise<void> {
     const { symbol, t212Ticker } = stock;
 
     // 1. Get full stock data
@@ -672,8 +680,7 @@ class TradingBot {
       }
     }
 
-    // 4. Build AI context
-    const portfolio = await this.getPortfolioState();
+    // 4. Build AI context (portfolio passed from caller)
     const aiContext = this.buildAIContext(
       symbol,
       data,
