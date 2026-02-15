@@ -1,9 +1,9 @@
-# Trader212 Bot — Improvement Roadmap
+# Trader212 Bot — Implementation Plan
 
-**Generated:** 2026-02-15
-**Source:** Consolidated analysis from Claude, Copilot, Gemini, Codex, NVDA reports
+**Updated:** 2026-02-15
+**Sources:** Claude analysis, Freqtrade feature comparison, production roadmap review
 
-Items marked with [DONE] have been implemented in this batch.
+Items marked [DONE] are already implemented and tested.
 
 ---
 
@@ -40,26 +40,44 @@ Items marked with [DONE] have been implemented in this batch.
 
 ---
 
-## Phase 3: Infrastructure (Month 2)
+## Phase 3: Protections & Risk (Week 5-6)
+
+_Inspired by Freqtrade's battle-tested protection system. These prevent catastrophic losses during adverse conditions._
+
+### Protections System
+- [ ] **StoplossGuard** — stop trading a pair (or globally) after N consecutive stoploss hits in a lookback window. Configurable: `lookbackCandles`, `tradeLimit`, `stopDurationCandles`, `onlyPerPair`
+- [ ] **CooldownPeriod** — prevent re-entry on a pair for N candles after exit. Avoids whipsaw re-entries
+- [ ] **LowProfitPairs** — auto-lock pairs where recent trades average below a profit threshold. Per-pair rolling window
+- [ ] **MaxDrawdown protection** — enhanced version: track realized+unrealized drawdown over a rolling window, pause trading when exceeded, wait for recovery period before resuming
+
+### Advanced Stoploss
+- [ ] **Stepped profit-locking stoploss** — e.g. at +20% profit lock +7%, at +25% lock +15%, at +40% lock +25%. Configurable tiers array in trade plan
+- [ ] **Trailing stop with positive offset** — only start trailing after reaching a profit threshold (e.g. trail at -2% only after +3% reached). Prevents premature trailing activation
+- [ ] **Time-based stoploss tightening** — wider stops for new positions (allow setup to develop), progressively tighter as hold duration increases
+
+### Pairlist Filters
+- [ ] **PerformanceFilter** — sort/remove pairs by recent trading performance (rolling window). Self-healing pairlist that drops consistently losing symbols
+- [ ] **SpreadFilter** — remove pairs where bid-ask spread exceeds threshold. Prevents slippage on illiquid stocks
+- [ ] **AgeFilter** — skip newly listed stocks (min days listed). Avoid IPO price discovery volatility
+
+---
+
+## Phase 4: Infrastructure (Week 7-10)
+
+### External API Resilience
+- [ ] **Circuit breaker** for each external API (Yahoo, Finnhub, Marketaux, T212). Open after N failures, half-open after timeout, auto-close on recovery. Failover to cached/stale data with warning
+- [ ] **Dead letter queue** for failed trades — retry 3x with exponential backoff, then queue for manual review
+- [ ] Order idempotency keys to prevent duplicate placement
 
 ### Database
 - [ ] Data retention jobs — prune price_cache (90d), news_cache (30d), audit_log (1y)
 - [ ] SQLite VACUUM/ANALYZE scheduled maintenance
 - [ ] Daily automated SQLite backup to cloud storage (S3/B2)
-- [ ] Plan PostgreSQL migration path for production scale
 
 ### API & Security
 - [ ] WebSocket authentication via subprotocol header (replace query string token)
-- [ ] Per-IP rate limiting behind reverse proxy (X-Forwarded-For aware)
-- [ ] WebSocket message backpressure (drain event handling for slow clients)
-- [ ] API key rotation mechanism (multiple valid keys, gradual rollover)
 - [ ] Sanitize error logs to prevent API key exposure
-
-### Observability
-- [ ] Prometheus metrics export endpoint (`/metrics`)
-- [ ] Grafana dashboard templates for trading bot monitoring
-- [ ] Structured error types (recoverable, terminal, needs_review)
-- [ ] Secondary alerting channel (email/Slack/PagerDuty) beyond Telegram
+- [ ] Per-IP rate limiting behind reverse proxy (X-Forwarded-For aware)
 
 ### AI Cost Management
 - [ ] Per-symbol AI cost tracking in DB
@@ -69,36 +87,41 @@ Items marked with [DONE] have been implemented in this batch.
 
 ---
 
-## Phase 4: Trading Strategy (Month 3)
+## Phase 5: Trading Strategy (Week 11-14)
 
 ### Risk Management
 - [ ] Graduated daily loss response (50% size at 1x, 75% at 1.5x, stop at 2x)
 - [ ] 60-day rolling correlation with 5-day short-term overlay
 - [ ] Dynamic position sizing via Kelly Criterion (using Monte Carlo, already in codebase)
 - [ ] VIX-based portfolio heat reduction (scale down all positions in elevated VIX)
-- [ ] Hierarchical Risk Parity (HRP) for correlation-aware position sizing
 - [ ] Guarantee sector data population in risk guard checks
+
+### Edge Positioning (from Freqtrade)
+- [ ] **Win rate calculator** — per-pair historical win rate by stoploss level from trade history
+- [ ] **Expectancy filter** — only enter trades with positive expectancy based on historical data
+- [ ] **Data-driven position sizing** — `size = (account * allowedRisk) / stopDistance`, sized by actual edge
 
 ### Execution Quality
 - [ ] Smart limit orders — place at mid-price, escalate aggression over time
-- [ ] Order idempotency keys to prevent duplicate placement
 - [ ] Position monitor adaptive frequency (5s in high-vol, 60s in calm markets)
 - [ ] Approval timeout repricing — auto-reprice stale plans instead of rejecting
 
 ### Signal Quality
-- [ ] Regime-aware technical scoring — weight shift by market regime
-- [ ] Forward P/E and analyst estimate revisions in fundamental scoring
-- [ ] NLP-based sentiment from social media (Reddit, Twitter/X)
-- [ ] Multi-timeframe confirmation gate (daily trend must confirm intraday signal)
+- [ ] Regime-aware technical scoring — weight shift by market regime (regime detector already exists)
+- [ ] Multi-timeframe confirmation gate (daily trend must confirm intraday signal, multi-timeframe analyzer already exists)
 
 ---
 
-## Phase 5: Architecture (Month 4-6)
+## Phase 6: Architecture (Month 4-5)
+
+### Orchestration Refactoring
+- [ ] Split `src/index.ts` (2000+ lines) into smaller service modules
+- [ ] Integration tests for startup, scheduler jobs, and control callbacks
+- [ ] Circuit breaker pattern for external API dependencies
 
 ### Broker Abstraction
 - [ ] Define `IBroker` interface: `placeOrder()`, `getPositions()`, `getAccountInfo()`, `cancelOrder()`
 - [ ] Refactor T212 client as first `IBroker` implementation
-- [ ] Add second broker: Alpaca or Interactive Brokers
 - [ ] Broker-specific order type mapping (market, limit, stop-limit)
 
 ### Backtesting Framework
@@ -107,57 +130,19 @@ Items marked with [DONE] have been implemented in this batch.
 - [ ] Paper trading environment for strategy validation
 - [ ] Compare backtest results vs actual fills (slippage analysis)
 
-### Orchestration Refactoring
-- [ ] Split `src/index.ts` (2000+ lines) into smaller service modules
-- [ ] Integration tests for startup, scheduler jobs, and control callbacks
-- [ ] Worker threads for CPU-intensive technical indicator calculations
-- [ ] Circuit breaker pattern for external API dependencies
-
-### Event-Driven Architecture
-- [ ] Message queue (Redis Streams or RabbitMQ) for inter-module communication
-- [ ] Event sourcing for trade execution (immutable event log)
-- [ ] Separate read/write paths for analytics vs trading
-
 ---
 
-## Phase 6: Product & Compliance (Month 6-12)
+## Quick Reference
 
-### Compliance
-- [ ] Immutable audit log (append-only, signed entries)
-- [ ] Compliance mode preset (strict auth, mandatory approvals, audit exports)
-- [ ] Regulatory reporting automation (SEC, FCA)
-- [ ] Audit trail integrity verification (hash chain)
-
-### User Experience
-- [ ] Setup wizard / credential validator (guided onboarding)
-- [ ] Mobile companion app for trade approvals
-- [ ] Custom benchmark comparisons (vs S&P 500, sector ETFs)
-- [ ] Detailed trade analytics (win rate by setup, time of day, sector)
-
-### Multi-Asset Expansion
-- [ ] Cryptocurrency trading (Coinbase, Binance)
-- [ ] Forex capabilities (OANDA, Interactive Brokers)
-- [ ] ETF/options strategies
-
-### Commercial Readiness
-- [ ] Usage-based tier definitions and billing integration
-- [ ] Customer-facing reliability artifacts (SLA, uptime page)
-- [ ] Multi-tenant architecture for hosted offering
-- [ ] Horizontal scaling with container orchestration
-
----
-
-## Quick Reference: Effort Estimates
-
-| Phase | Items | Estimated Effort |
-|-------|-------|------------------|
-| Phase 1 (Safety) | 7 | ~40 hours |
-| Phase 2 (Performance) | 8 | ~60 hours |
-| Phase 3 (Infrastructure) | 15 | ~120 hours |
-| Phase 4 (Trading Strategy) | 14 | ~160 hours |
-| Phase 5 (Architecture) | 12 | ~200 hours |
-| Phase 6 (Product) | 12 | ~400 hours |
-| **Total** | **68** | **~980 hours** |
+| Phase | Focus | Items | Timeline |
+|-------|-------|-------|----------|
+| 1 | Critical Safety | 7 | Week 1-2 |
+| 2 | Performance | 8 | Week 3-4 |
+| 3 | Protections & Risk | 10 | Week 5-6 |
+| 4 | Infrastructure | 11 | Week 7-10 |
+| 5 | Trading Strategy | 11 | Week 11-14 |
+| 6 | Architecture | 8 | Month 4-5 |
+| **Total** | | **55** | |
 
 ---
 
@@ -171,3 +156,5 @@ Items marked with [DONE] have been implemented in this batch.
 - Zero duplicate positions from race conditions
 - Daily automated backup with < 1 hour RTO
 - 95%+ test coverage on execution layer
+- No trading after 4 consecutive stoploss hits (StoplossGuard active)
+- Positive expectancy verified before every entry (Edge Positioning active)
