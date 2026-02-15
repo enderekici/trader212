@@ -209,8 +209,7 @@ describe('OrderManager', () => {
     });
 
     it('returns error when T212 client is not set', async () => {
-      mockSelectChain.get.mockReturnValueOnce(undefined);
-
+      // No need to mock position check — function returns before reaching it
       const result = await orderManager.executeBuy(makeBuyParams());
 
       expect(result.success).toBe(false);

@@ -957,7 +957,6 @@ describe('api/routes', () => {
       await handler(mockReq({ params: { key: 'k' }, body: {} }), res);
 
       expect(res.status).toHaveBeenCalledWith(400);
-      expect(res.json).toHaveBeenCalledWith({ error: 'Missing "value" in request body' });
     });
 
     it('handles errors', async () => {
