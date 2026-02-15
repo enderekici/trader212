@@ -975,6 +975,20 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
     description: 'Scrape StockAnalysis for estimates',
   },
 
+  // Streaming (price streamer)
+  {
+    key: 'streaming.enabled',
+    value: 'false',
+    category: 'streaming',
+    description: 'Enable real-time price streaming for held positions',
+  },
+  {
+    key: 'streaming.intervalSeconds',
+    value: '15',
+    category: 'streaming',
+    description: 'Price polling interval in seconds (5-300)',
+  },
+
   // Monitoring
   {
     key: 'monitoring.dailySummaryTime',

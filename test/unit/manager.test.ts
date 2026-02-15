@@ -43,6 +43,11 @@ vi.mock('../../src/db/index.js', () => ({
   getDb: () => mockDb,
 }));
 
+// Mock schema validator
+vi.mock('../../src/config/schema-validator.js', () => ({
+  validateConfigValue: vi.fn().mockReturnValue({ valid: true }),
+}));
+
 // Mock drizzle-orm eq function
 vi.mock('drizzle-orm', () => ({
   eq: vi.fn((field: unknown, value: unknown) => ({ field, value })),

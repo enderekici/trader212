@@ -35,6 +35,16 @@ vi.mock('node-cron', () => ({
   },
 }));
 
+// Mock health metrics
+const mockRecordJobStart = vi.fn();
+const mockRecordJobEnd = vi.fn();
+vi.mock('../../src/monitoring/health-metrics.js', () => ({
+  getHealthMetrics: () => ({
+    recordJobStart: mockRecordJobStart,
+    recordJobEnd: mockRecordJobEnd,
+  }),
+}));
+
 import { Scheduler, minutesToWeekdayCron, timeToCron } from '../../src/bot/scheduler.js';
 
 describe('Scheduler', () => {

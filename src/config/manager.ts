@@ -4,6 +4,7 @@ import { config } from '../db/schema.js';
 import { safeJsonParse } from '../utils/helpers.js';
 import { createLogger } from '../utils/logger.js';
 import { CONFIG_DEFAULTS } from './defaults.js';
+import { validateConfigValue } from './schema-validator.js';
 
 const log = createLogger('config');
 
@@ -60,6 +61,11 @@ export class ConfigManager {
   }
 
   async set(key: string, value: unknown): Promise<void> {
+    const validation = validateConfigValue(key, value);
+    if (!validation.valid) {
+      throw new Error(`Invalid value for config key "${key}": ${validation.error}`);
+    }
+
     const db = getDb();
     const serialized = JSON.stringify(value);
     const existing = db.select().from(config).where(eq(config.key, key)).get();

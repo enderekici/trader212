@@ -1,4 +1,5 @@
 import cron from 'node-cron';
+import { getHealthMetrics } from '../monitoring/health-metrics.js';
 import { createLogger } from '../utils/logger.js';
 import { getMarketStatus, isUSMarketOpen } from '../utils/market-hours.js';
 
@@ -30,10 +31,14 @@ export class Scheduler {
         log.debug({ job: name, marketStatus: getMarketStatus() }, 'Skipping job — market closed');
         return;
       }
+      const health = getHealthMetrics();
+      health.recordJobStart(name);
+      let success = true;
       try {
         log.debug({ job: name }, 'Running scheduled job');
         await handler();
       } catch (err) {
+        success = false;
         log.error({ job: name, err }, 'Scheduled job failed');
         if (this.onJobFailureCb) {
           try {
@@ -42,6 +47,8 @@ export class Scheduler {
             /* ignore callback errors */
           }
         }
+      } finally {
+        health.recordJobEnd(name, success);
       }
     };
 
