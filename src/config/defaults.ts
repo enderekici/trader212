@@ -89,6 +89,30 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
     description: 'Blacklisted symbols',
   },
   {
+    key: 'pairlist.performance.enabled',
+    value: 'false',
+    category: 'pairlist',
+    description: 'Filter out poorly performing symbols based on trade history',
+  },
+  {
+    key: 'pairlist.performance.minWinRate',
+    value: '0.4',
+    category: 'pairlist',
+    description: 'Minimum win rate (0-1) to keep a symbol in pairlist',
+  },
+  {
+    key: 'pairlist.performance.minTrades',
+    value: '5',
+    category: 'pairlist',
+    description: 'Minimum trade count before filtering by performance',
+  },
+  {
+    key: 'pairlist.performance.lookbackDays',
+    value: '30',
+    category: 'pairlist',
+    description: 'Days to lookback for performance calculation',
+  },
+  {
     key: 'pairlist.maxPairs',
     value: '30',
     category: 'pairlist',
