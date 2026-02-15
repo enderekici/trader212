@@ -1,4 +1,4 @@
-import { and, eq, isNotNull } from 'drizzle-orm';
+import { and, isNotNull } from 'drizzle-orm';
 import { configManager } from '../config/manager.js';
 import { getDb } from '../db/index.js';
 import { trades } from '../db/schema.js';
@@ -139,9 +139,6 @@ export class PerformanceFilter implements PairlistFilter {
 
     const minWinRate = configManager.get<number>('pairlist.performance.minWinRate');
     const minTrades = configManager.get<number>('pairlist.performance.minTrades');
-    const lookbackDays = configManager.get<number>('pairlist.performance.lookbackDays');
-
-    const cutoff = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000).toISOString();
     const db = getDb();
 
     // Get all closed trades within lookback period
@@ -192,7 +189,7 @@ export class PerformanceFilter implements PairlistFilter {
     const removed = stocks.length - filtered.length;
     if (removed > 0) {
       log.info(
-        { removed, minWinRate, minTrades, lookbackDays, remaining: filtered.length },
+        { removed, minWinRate, minTrades, remaining: filtered.length },
         'PerformanceFilter applied',
       );
     }
