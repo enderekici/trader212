@@ -15,6 +15,12 @@ vi.mock('../../src/utils/logger.js', () => ({
   }),
 }));
 
+vi.mock('../../src/execution/pair-locks.js', () => ({
+  getPairLockManager: () => ({
+    isPairLocked: () => ({ locked: false }),
+  }),
+}));
+
 const mockAll = vi.fn().mockReturnValue([]);
 const mockLimit = vi.fn().mockReturnValue({ all: mockAll });
 const mockOrderBy = vi.fn().mockReturnValue({ limit: mockLimit });

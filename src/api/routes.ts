@@ -40,7 +40,13 @@ import { getMarketTimes } from '../utils/market-hours.js';
 
 const configUpdateSchema = z.object({
   value: z
-    .union([z.string(), z.number(), z.boolean(), z.array(z.unknown()), z.record(z.unknown())])
+    .union([
+      z.string(),
+      z.number(),
+      z.boolean(),
+      z.array(z.unknown()),
+      z.record(z.string(), z.unknown()),
+    ])
     .refine((v) => v !== undefined, 'Missing "value" in request body'),
 });
 
@@ -49,7 +55,7 @@ const staticSymbolSchema = z.object({
     .string()
     .min(1)
     .max(10)
-    .regex(/^[A-Z]{1,5}(\.[A-Z]{1,2})?$/, 'Invalid symbol format (e.g. AAPL, BRK.B)')
+    .regex(/^[A-Za-z]{1,5}(\.[A-Za-z]{1,2})?$/, 'Invalid symbol format (e.g. AAPL, BRK.B)')
     .transform((s) => s.toUpperCase()),
 });
 

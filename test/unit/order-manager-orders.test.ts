@@ -190,12 +190,15 @@ describe('OrderManager - Order Record Tracking', () => {
       expect(result.localOrderId).toBe(1);
     });
 
-    it('does not create order when position already exists', async () => {
+    it('creates order record but rejects when position already exists', async () => {
       mockSelectChain.get.mockReturnValueOnce({ symbol: 'AAPL', shares: 10 });
 
-      await orderManager.executeBuy(makeBuyParams());
+      const result = await orderManager.executeBuy(makeBuyParams());
 
-      expect(mockCreateOrder).not.toHaveBeenCalled();
+      // Order record is created before the duplicate check (inside transaction)
+      expect(mockCreateOrder).toHaveBeenCalledOnce();
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Position already exists');
     });
   });
 
