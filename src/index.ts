@@ -52,11 +52,19 @@ import { getTradeJournalManager } from './monitoring/trade-journal.js';
 import type { StockInfo } from './pairlist/filters.js';
 import { createPairlistPipeline } from './pairlist/index.js';
 import type { PairlistPipeline } from './pairlist/pipeline.js';
+import { setupGlobalErrorHandlers } from './utils/error-handlers.js';
 import { formatCurrency, formatPercent } from './utils/helpers.js';
 import { createLogger } from './utils/logger.js';
 import { getMarketStatus, isUSMarketOpen } from './utils/market-hours.js';
 
 const log = createLogger('bot');
+
+// Production safety check - fail fast if missing critical auth in production
+if (process.env.NODE_ENV === 'production' && !process.env.API_SECRET_KEY) {
+  console.error('FATAL: NODE_ENV=production but API_SECRET_KEY is not set');
+  console.error('The API will be completely unauthenticated. Exiting...');
+  process.exit(1);
+}
 
 class TradingBot {
   private scheduler!: Scheduler;
@@ -90,6 +98,19 @@ class TradingBot {
 
   async start(): Promise<void> {
     log.info('Starting Trading Bot...');
+
+    // 0. Setup global error handlers
+    setupGlobalErrorHandlers((error, source) => {
+      log.fatal({ err: error, source }, 'Critical error - attempting to notify Telegram');
+      // Send emergency alert via telegram if available
+      if (this.telegram) {
+        this.telegram
+          .sendAlert(`CRITICAL ERROR (${source})`, `${error.message}\n\nBot may be unstable!`)
+          .catch(() => {
+            /* ignore telegram errors during critical shutdown */
+          });
+      }
+    });
 
     // 1. Database
     initDatabase();

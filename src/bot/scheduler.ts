@@ -14,6 +14,7 @@ interface ScheduledJob {
 
 export class Scheduler {
   private jobs: ScheduledJob[] = [];
+  private runningJobs = new Set<string>();
   private onJobFailureCb?: (jobName: string, error: unknown) => void;
 
   setOnJobFailure(cb: (jobName: string, error: unknown) => void): void {
@@ -27,13 +28,22 @@ export class Scheduler {
     marketHoursOnly = false,
   ): void {
     const wrappedHandler = async () => {
+      // Mutex: skip if job is already running
+      if (this.runningJobs.has(name)) {
+        log.warn({ job: name }, 'Skipping job - previous run still in progress');
+        return;
+      }
+
       if (marketHoursOnly && !isUSMarketOpen()) {
         log.debug({ job: name, marketStatus: getMarketStatus() }, 'Skipping job — market closed');
         return;
       }
+
+      this.runningJobs.add(name);
       const health = getHealthMetrics();
       health.recordJobStart(name);
       let success = true;
+
       try {
         log.debug({ job: name }, 'Running scheduled job');
         await handler();
@@ -48,6 +58,7 @@ export class Scheduler {
           }
         }
       } finally {
+        this.runningJobs.delete(name);
         health.recordJobEnd(name, success);
       }
     };
