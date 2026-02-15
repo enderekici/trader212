@@ -354,6 +354,24 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
     category: 'risk',
     description: 'Max sector exposure as % of portfolio value',
   },
+  {
+    key: 'risk.atrStopLossEnabled',
+    value: 'false',
+    category: 'risk',
+    description: 'Use ATR-based stop-loss (volatility-adjusted)',
+  },
+  {
+    key: 'risk.atrStopLossMultiplier',
+    value: '2.0',
+    category: 'risk',
+    description: 'ATR multiplier for stop-loss distance (e.g., 2.0 = 2x ATR)',
+  },
+  {
+    key: 'risk.defaultStopLossPct',
+    value: '0.05',
+    category: 'risk',
+    description: 'Default stop-loss % when ATR unavailable',
+  },
 
   // Execution
   {
