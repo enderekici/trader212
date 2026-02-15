@@ -25,12 +25,12 @@ Items marked [DONE] are already implemented and tested.
 ## Phase 2: Performance & Execution Hardening (Week 3-4)
 
 ### Analysis Pipeline
-- [ ] Parallelize analysis loop with `p-limit(5)` bounded concurrency
-- [ ] Pre-fetch shared context (portfolio cash, market data, SPY/VIX) once per cycle
+- [DONE] Parallelize analysis loop with `p-limit(5)` bounded concurrency
+- [DONE] Pre-fetch shared context (portfolio cash, market data, SPY/VIX) once per cycle
 - [ ] Batch DB queries in `buildAIContext()` — pre-load all positions, signals, fundamentals
 
 ### Trading Quality
-- [ ] ATR-based dynamic stop-loss (instead of fixed percentage)
+- [DONE] ATR-based dynamic stop-loss (instead of fixed percentage)
 
 ### Monitoring
 - [DONE] Health metrics endpoint — job durations, data source health, system metrics
@@ -44,10 +44,10 @@ Items marked [DONE] are already implemented and tested.
 _Inspired by Freqtrade's battle-tested protection system. These prevent catastrophic losses during adverse conditions._
 
 ### Protections System
-- [ ] **StoplossGuard** — stop trading a pair (or globally) after N consecutive stoploss hits in a lookback window. Configurable: `lookbackCandles`, `tradeLimit`, `stopDurationCandles`, `onlyPerPair`
-- [ ] **CooldownPeriod** — prevent re-entry on a pair for N candles after exit. Avoids whipsaw re-entries
-- [ ] **LowProfitPairs** — auto-lock pairs where recent trades average below a profit threshold. Per-pair rolling window
-- [ ] **MaxDrawdown protection** — enhanced version: track realized+unrealized drawdown over a rolling window, pause trading when exceeded, wait for recovery period before resuming
+- [DONE] **StoplossGuard** — stop trading a pair (or globally) after N consecutive stoploss hits in a lookback window. Configurable: `lookbackCandles`, `tradeLimit`, `stopDurationCandles`, `onlyPerPair`
+- [DONE] **CooldownPeriod** — prevent re-entry on a pair for N candles after exit. Avoids whipsaw re-entries
+- [DONE] **LowProfitPairs** — auto-lock pairs where recent trades average below a profit threshold. Per-pair rolling window
+- [DONE] **MaxDrawdown protection** — enhanced version: track realized+unrealized drawdown over a rolling window, pause trading when exceeded, wait for recovery period before resuming
 
 ### Advanced Stoploss
 - [ ] **Stepped profit-locking stoploss** — e.g. at +20% profit lock +7%, at +25% lock +15%, at +40% lock +25%. Configurable tiers array in trade plan
@@ -55,7 +55,7 @@ _Inspired by Freqtrade's battle-tested protection system. These prevent catastro
 - [ ] **Time-based stoploss tightening** — wider stops for new positions (allow setup to develop), progressively tighter as hold duration increases
 
 ### Pairlist Filters
-- [ ] **PerformanceFilter** — sort/remove pairs by recent trading performance (rolling window). Self-healing pairlist that drops consistently losing symbols
+- [DONE] **PerformanceFilter** — sort/remove pairs by recent trading performance (rolling window). Self-healing pairlist that drops consistently losing symbols
 - [ ] **SpreadFilter** — remove pairs where bid-ask spread exceeds threshold. Prevents slippage on illiquid stocks
 - [ ] **AgeFilter** — skip newly listed stocks (min days listed). Avoid IPO price discovery volatility
 
@@ -64,7 +64,7 @@ _Inspired by Freqtrade's battle-tested protection system. These prevent catastro
 ## Phase 4: Infrastructure (Week 7-10)
 
 ### External API Resilience
-- [ ] **Circuit breaker** for each external API (Yahoo, Finnhub, Marketaux, T212). Open after N failures, half-open after timeout, auto-close on recovery. Failover to cached/stale data with warning
+- [DONE] **Circuit breaker** for each external API (Yahoo, Finnhub, Marketaux, T212). Open after N failures, half-open after timeout, auto-close on recovery. Failover to cached/stale data with warning
 - [ ] **Dead letter queue** for failed trades — retry 3x with exponential backoff, then queue for manual review
 - [ ] Order idempotency keys to prevent duplicate placement
 
