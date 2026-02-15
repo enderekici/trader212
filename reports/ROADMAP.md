@@ -31,7 +31,6 @@ Items marked [DONE] are already implemented and tested.
 
 ### Trading Quality
 - [ ] ATR-based dynamic stop-loss (instead of fixed percentage)
-- [ ] Telegram alert deduplication — rate-limit per event type, max 1 per 5 minutes
 
 ### Monitoring
 - [DONE] Health metrics endpoint — job durations, data source health, system metrics
@@ -70,20 +69,8 @@ _Inspired by Freqtrade's battle-tested protection system. These prevent catastro
 - [ ] Order idempotency keys to prevent duplicate placement
 
 ### Database
-- [ ] Data retention jobs — prune price_cache (90d), news_cache (30d), audit_log (1y)
-- [ ] SQLite VACUUM/ANALYZE scheduled maintenance
-- [ ] Daily automated SQLite backup to cloud storage (S3/B2)
 
 ### API & Security
-- [ ] WebSocket authentication via subprotocol header (replace query string token)
-- [ ] Sanitize error logs to prevent API key exposure
-- [ ] Per-IP rate limiting behind reverse proxy (X-Forwarded-For aware)
-
-### AI Cost Management
-- [ ] Per-symbol AI cost tracking in DB
-- [ ] Monthly budget cap with auto-pause
-- [ ] Tiered model selection: Haiku for screening, Sonnet for analysis, Opus for high-conviction
-- [ ] AI response caching keyed by data hash (1-hour TTL)
 
 ---
 
