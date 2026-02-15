@@ -30,6 +30,7 @@ import { getRiskParitySizer } from '../execution/risk-parity.js';
 import { getRoiThreshold, parseRoiTable } from '../execution/roi-table.js';
 import { getPerformanceAttributor } from '../monitoring/attribution.js';
 import { getAuditLogger } from '../monitoring/audit-log.js';
+import { getHealthMetrics } from '../monitoring/health-metrics.js';
 import { PerformanceTracker } from '../monitoring/performance.js';
 import { getReportGenerator } from '../monitoring/report-generator.js';
 import { getTaxTracker } from '../monitoring/tax-tracker.js';
@@ -123,6 +124,17 @@ export function registerBotCallbacks(cb: BotCallbacks): void {
 
 export function createRouter(): Router {
   const router = Router();
+
+  // ── Health Metrics ──────────────────────────────────────────────────
+  router.get('/api/health', (_req, res) => {
+    try {
+      const snapshot = getHealthMetrics().getSnapshot();
+      res.json(snapshot);
+    } catch (err) {
+      log.error({ err }, 'Error fetching health metrics');
+      res.status(500).json({ error: 'Failed to fetch health metrics' });
+    }
+  });
 
   // ── Portfolio ────────────────────────────────────────────────────────
   router.get('/api/portfolio', (_req, res) => {
@@ -539,6 +551,11 @@ export function createRouter(): Router {
 
       res.json({ key, value, updated: true });
     } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to update config';
+      if (message.startsWith('Invalid value for config key')) {
+        res.status(400).json({ error: message });
+        return;
+      }
       log.error({ err }, 'Error updating config');
       res.status(500).json({ error: 'Failed to update config' });
     }

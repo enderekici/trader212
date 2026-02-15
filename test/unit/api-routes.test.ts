@@ -134,6 +134,22 @@ vi.mock('../../src/analysis/correlation.js', () => ({
   }),
 }));
 
+vi.mock('../../src/monitoring/health-metrics.js', () => ({
+  getHealthMetrics: () => ({
+    getSnapshot: () => ({
+      status: 'healthy',
+      uptime: 100,
+      memoryUsage: { heapUsedMB: 50, heapTotalMB: 100, rssMB: 120 },
+      jobs: [],
+      dataSources: [],
+      activePositions: 0,
+      lastAnalysisCycleAt: null,
+      lastAnalysisCycleDurationMs: null,
+      wsClientCount: 0,
+    }),
+  }),
+}));
+
 // ── Helpers ─────────────────────────────────────────────────────────────
 
 function mockReq(overrides: Record<string, unknown> = {}) {
