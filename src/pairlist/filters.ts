@@ -1,4 +1,7 @@
+import { and, eq, isNotNull } from 'drizzle-orm';
 import { configManager } from '../config/manager.js';
+import { getDb } from '../db/index.js';
+import { trades } from '../db/schema.js';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('pairlist-filters');
@@ -121,6 +124,79 @@ export class MaxPairsFilter implements PairlistFilter {
 
     const removed = stocks.length - filtered.length;
     log.info({ removed, maxPairs, remaining: filtered.length }, 'MaxPairsFilter applied');
+    return filtered;
+  }
+}
+
+export class PerformanceFilter implements PairlistFilter {
+  readonly name = 'performance';
+
+  async filter(stocks: StockInfo[]): Promise<StockInfo[]> {
+    const enabled = configManager.get<boolean>('pairlist.performance.enabled');
+    if (!enabled) {
+      return stocks;
+    }
+
+    const minWinRate = configManager.get<number>('pairlist.performance.minWinRate');
+    const minTrades = configManager.get<number>('pairlist.performance.minTrades');
+    const lookbackDays = configManager.get<number>('pairlist.performance.lookbackDays');
+
+    const cutoff = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000).toISOString();
+    const db = getDb();
+
+    // Get all closed trades within lookback period
+    const allTrades = db
+      .select({
+        symbol: trades.symbol,
+        pnlPct: trades.pnlPct,
+      })
+      .from(trades)
+      .where(and(isNotNull(trades.exitTime), isNotNull(trades.pnlPct)))
+      .all();
+
+    // Group by symbol and calculate performance metrics
+    const performanceBySymbol = new Map<string, { wins: number; total: number; cumPnl: number }>();
+
+    for (const trade of allTrades) {
+      const symbol = trade.symbol;
+      const pnl = trade.pnlPct ?? 0;
+
+      if (!performanceBySymbol.has(symbol)) {
+        performanceBySymbol.set(symbol, { wins: 0, total: 0, cumPnl: 0 });
+      }
+
+      const stats = performanceBySymbol.get(symbol);
+      if (stats) {
+        stats.total += 1;
+        stats.cumPnl += pnl;
+        if (pnl > 0) {
+          stats.wins += 1;
+        }
+      }
+    }
+
+    const filtered = stocks.filter((stock) => {
+      const stats = performanceBySymbol.get(stock.symbol);
+
+      // If no trade history, allow it
+      if (!stats || stats.total < minTrades) {
+        return true;
+      }
+
+      const winRate = stats.wins / stats.total;
+
+      // Filter out if win rate is below threshold
+      return winRate >= minWinRate;
+    });
+
+    const removed = stocks.length - filtered.length;
+    if (removed > 0) {
+      log.info(
+        { removed, minWinRate, minTrades, lookbackDays, remaining: filtered.length },
+        'PerformanceFilter applied',
+      );
+    }
+
     return filtered;
   }
 }
