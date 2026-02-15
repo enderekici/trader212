@@ -40,6 +40,7 @@ describe('schema-validator', () => {
 				'conditionalOrders.enabled',
 				'aiSelfImprovement.enabled',
 				'reports.enabled',
+				'webResearch.enabled',
 				'streaming.enabled',
 				'monitoring.dailySummaryTime',
 			];
