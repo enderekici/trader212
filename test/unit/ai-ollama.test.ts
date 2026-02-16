@@ -82,7 +82,7 @@ function makeContext(): AIContext {
     portfolio: {
       cashAvailable: 20000, portfolioValue: 100000, openPositions: 3,
       maxPositions: 10, todayPnl: 200, todayPnlPct: 0.002,
-      sectorExposure: {}, existingPositions: [],
+      sectorExposure: {}, sectorExposureValue: {}, existingPositions: [],
     },
     marketContext: {
       spyPrice: 450, spyChange1d: 0.003, vixLevel: 14, marketTrend: 'bullish',

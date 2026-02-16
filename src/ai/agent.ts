@@ -79,11 +79,18 @@ export interface AIContext {
     todayPnl: number;
     todayPnlPct: number;
     sectorExposure: Record<string, number>;
+    sectorExposureValue: Record<string, number>;
     existingPositions: Array<{
       symbol: string;
       pnlPct: number;
       entryPrice: number;
       currentPrice: number;
+      shares: number;
+      stopLoss: number | null;
+      trailingStop: number | null;
+      holdDays: number;
+      dcaCount: number;
+      partialExitCount: number;
     }>;
   };
   marketContext: {
@@ -117,6 +124,27 @@ export interface AIContext {
     perfMonth: number | null;
     perfQuarter: number | null;
     perfYear: number | null;
+    relativeVolume: number | null;
+    averageVolume: number | null;
+  };
+  regime?: {
+    regime: string;
+    confidence: number;
+    spyTrend: string;
+    volatilityPctile: number;
+    newEntriesAllowed: boolean;
+    positionSizeMultiplier: number;
+  };
+  multiTimeframe?: {
+    compositeScore: number;
+    alignment: string;
+    timeframeScores: Record<string, number>;
+  };
+  socialSentiment?: {
+    overallScore: number;
+    buzzScore: number;
+    mentionCount: number;
+    trendDirection: string;
   };
 }
 

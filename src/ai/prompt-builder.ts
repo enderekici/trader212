@@ -82,7 +82,66 @@ function buildWebResearchSection(context: AIContext): string {
     perfParts.push(`1Y ${(w.perfYear * 100) >= 0 ? '+' : ''}${(w.perfYear * 100).toFixed(1)}%`);
   if (perfParts.length > 0) lines.push(`- Performance: ${perfParts.join(' | ')}`);
 
+  // Volume data
+  if (w.relativeVolume != null) lines.push(`- Relative Volume: ${w.relativeVolume.toFixed(2)}x`);
+  if (w.averageVolume != null) lines.push(`- Average Volume: ${fmtLarge(w.averageVolume)}`);
+
   return `${lines.join('\n')}\n\n`;
+}
+
+function buildRegimeSection(context: AIContext): string {
+  const rg = context.regime;
+  if (!rg) return '';
+
+  const regimeLabels: Record<string, string> = {
+    trending_up: 'Trending Up (Bull)',
+    trending_down: 'Trending Down (Bear)',
+    range_bound: 'Range-Bound (Sideways)',
+    high_volatility: 'High Volatility (Choppy)',
+    crash: 'Market Crash (Risk-Off)',
+  };
+
+  const lines = [
+    '\nMARKET REGIME:',
+    `- Regime: ${regimeLabels[rg.regime] ?? rg.regime} (${(rg.confidence * 100).toFixed(0)}% confidence)`,
+    `- SPY Trend: ${rg.spyTrend}`,
+    `- Volatility Percentile: ${rg.volatilityPctile.toFixed(0)}th`,
+    `- New Entries Allowed: ${rg.newEntriesAllowed ? 'Yes' : 'NO — regime blocks new positions'}`,
+    `- Position Size Multiplier: ${rg.positionSizeMultiplier.toFixed(1)}x`,
+  ];
+  return `${lines.join('\n')}\n`;
+}
+
+function buildMultiTimeframeSection(context: AIContext): string {
+  const mt = context.multiTimeframe;
+  if (!mt) return '';
+
+  const tfLines = Object.entries(mt.timeframeScores)
+    .map(([tf, score]) => `  ${tf}: ${score}/100`)
+    .join(' | ');
+
+  const lines = [
+    '\nMULTI-TIMEFRAME ANALYSIS:',
+    `- Composite Score: ${mt.compositeScore}/100`,
+    `- Alignment: ${mt.alignment}${mt.alignment === 'mixed' ? ' — CAUTION: conflicting timeframe signals' : ''}`,
+    `- Scores: ${tfLines}`,
+  ];
+  return `${lines.join('\n')}\n`;
+}
+
+function buildSocialSentimentSection(context: AIContext): string {
+  const ss = context.socialSentiment;
+  if (!ss) return '';
+
+  const scoreLabel =
+    ss.overallScore > 0.2 ? 'bullish' : ss.overallScore < -0.2 ? 'bearish' : 'neutral';
+  const lines = [
+    '\nSOCIAL SENTIMENT:',
+    `- Overall: ${ss.overallScore.toFixed(2)} (${scoreLabel})`,
+    `- Buzz Score: ${ss.buzzScore.toFixed(0)}/100 (${ss.mentionCount} mentions)`,
+    `- Trend: ${ss.trendDirection}`,
+  ];
+  return `${lines.join('\n')}\n`;
 }
 
 export function buildAnalysisPrompt(context: AIContext): {
@@ -98,6 +157,9 @@ You must consider:
 - Current portfolio state and risk constraints
 - Historical signal context for trend consistency
 - Market-wide conditions (SPY trend, VIX level)
+- Market regime (if provided) - adjust aggressiveness accordingly
+- Multi-timeframe alignment (if provided) - divergence across timeframes is a warning sign
+- Social sentiment (if provided) - high buzz with rising sentiment may indicate retail-driven momentum
 
 Be conservative with position sizing. Prefer HOLD when signals are mixed or unclear.
 Only recommend BUY with strong conviction when multiple indicators align.
@@ -117,15 +179,29 @@ Respond ONLY with valid JSON matching the exact schema provided. No additional t
     .join('\n');
 
   const positions = p.existingPositions
-    .map(
-      (pos) =>
-        `  - ${pos.symbol}: entry $${fmt(pos.entryPrice)} → $${fmt(pos.currentPrice)} (${pos.pnlPct >= 0 ? '+' : ''}${fmtPct(pos.pnlPct)})`,
-    )
+    .map((pos) => {
+      const pnlStr = `${pos.pnlPct >= 0 ? '+' : ''}${fmtPct(pos.pnlPct)}`;
+      const stopStr = pos.trailingStop
+        ? `trailing $${fmt(pos.trailingStop)}`
+        : pos.stopLoss
+          ? `stop $${fmt(pos.stopLoss)}`
+          : 'no stop';
+      const extras: string[] = [];
+      if (pos.dcaCount > 0) extras.push(`DCA×${pos.dcaCount}`);
+      if (pos.partialExitCount > 0) extras.push(`partial-exit×${pos.partialExitCount}`);
+      const extrasStr = extras.length > 0 ? ` [${extras.join(', ')}]` : '';
+      return `  - ${pos.symbol}: ${pos.shares} shares @ $${fmt(pos.entryPrice)} → $${fmt(pos.currentPrice)} (${pnlStr}) | ${stopStr} | ${pos.holdDays}d held${extrasStr}`;
+    })
     .join('\n');
 
-  const sectorExposure = Object.entries(p.sectorExposure)
-    .map(([sector, count]) => `  - ${sector}: ${count} position(s)`)
-    .join('\n');
+  const sectorExposureLines: string[] = [];
+  for (const [sector, count] of Object.entries(p.sectorExposure)) {
+    const valuePct = p.sectorExposureValue[sector];
+    const valuePctStr =
+      valuePct !== undefined ? ` (${(valuePct * 100).toFixed(1)}% of portfolio)` : '';
+    sectorExposureLines.push(`  - ${sector}: ${count} position(s)${valuePctStr}`);
+  }
+  const sectorExposure = sectorExposureLines.join('\n');
 
   const historicalSignals =
     context.historicalSignals.length > 0
@@ -227,7 +303,7 @@ MARKET CONDITIONS:
 - SPY 1-Day Change: ${fmtPct(m.spyChange1d)}
 - VIX Level: ${fmt(m.vixLevel)}
 - Market Trend: ${m.marketTrend}
-
+${buildRegimeSection(context)}${buildMultiTimeframeSection(context)}${buildSocialSentimentSection(context)}
 PORTFOLIO STATE:
 - Cash Available: $${fmt(p.cashAvailable)}
 - Portfolio Value: $${fmt(p.portfolioValue)}

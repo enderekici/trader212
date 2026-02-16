@@ -83,8 +83,9 @@ function makeContext(): AIContext {
       cashAvailable: 15000, portfolioValue: 80000, openPositions: 5,
       maxPositions: 10, todayPnl: -300, todayPnlPct: -0.00375,
       sectorExposure: { 'Consumer Cyclical': 1 },
+      sectorExposureValue: { 'Consumer Cyclical': 0.15 },
       existingPositions: [
-        { symbol: 'TSLA', pnlPct: -0.05, entryPrice: 263, currentPrice: 250 },
+        { symbol: 'TSLA', pnlPct: -0.05, entryPrice: 263, currentPrice: 250, shares: 5, stopLoss: 240, trailingStop: null, holdDays: 7, dcaCount: 0, partialExitCount: 0 },
       ],
     },
     marketContext: {

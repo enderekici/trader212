@@ -83,6 +83,7 @@ function makeContext(): AIContext {
       cashAvailable: 10000, portfolioValue: 50000, openPositions: 2,
       maxPositions: 10, todayPnl: 100, todayPnlPct: 0.002,
       sectorExposure: { Technology: 2 },
+      sectorExposureValue: { Technology: 0.3 },
       existingPositions: [],
     },
     marketContext: {
