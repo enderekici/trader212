@@ -3,7 +3,7 @@
 [![CI](https://github.com/enderekici/trader212/actions/workflows/ci.yml/badge.svg)](https://github.com/enderekici/trader212/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/enderekici/trader212/branch/main/graph/badge.svg)](https://codecov.io/gh/enderekici/trader212)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Node.js 20+](https://img.shields.io/badge/Node.js-20%2B-green.svg)](https://nodejs.org)
+[![Node.js 24+](https://img.shields.io/badge/Node.js-24%2B-green.svg)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue.svg)](https://www.typescriptlang.org)
 
 An autonomous, AI-powered stock trading bot for the [Trading212](https://www.trading212.com) platform. It dynamically discovers tradeable stocks, runs technical/fundamental/sentiment analysis, consults an AI decision engine, enforces risk management rules, and executes trades -- all without manual intervention.
@@ -40,10 +40,38 @@ An autonomous, AI-powered stock trading bot for the [Trading212](https://www.tra
 - **Telegram Notifications** -- Trade alerts, daily summaries, pre-market reports, weekly reports, and bot commands
 - **DB-Backed Configuration** -- All runtime settings stored in SQLite, editable live from the dashboard
 
+### Advanced Execution Features
+- **Conditional Orders** -- OCO (One-Cancels-Other), Bracket (entry + SL + TP), Trailing Stop, If-Then orders
+- **DCA (Dollar-Cost Averaging)** -- Build positions over time with configurable intervals and amounts
+- **Partial Exits** -- Scale out at multiple targets (e.g., 25% at 5%, 50% at 10%, 100% at 20%)
+- **Exit Condition DSL** -- Custom exit logic with simple expressions (e.g., `rsi > 70 and macd_cross_down`)
+- **Pair Locks** -- Prevent conflicting trades on the same symbol with automatic locking
+- **Trading Protections** -- Cooldown periods, max drawdown limits, losing streak protection
+- **ATR-Based Stop-Loss** -- Dynamic stop-loss based on Average True Range
+- **Risk Parity** -- Position sizing across portfolio to equalize risk contribution
+- **ROI Table** -- Time-based profit targets (e.g., 2% at 1h, 5% at 4h, 10% at 1d)
+
+### Analysis & Optimization
+- **Strategy Profiles** -- Pre-configured sets (conservative, balanced, aggressive, scalper, swing) with one-click activation
+- **Backtesting Engine** -- Full backtesting with historical data loader and performance reporting
+- **Monte Carlo Simulation** -- Run thousands of simulations to stress-test strategies
+- **Performance Attribution** -- Break down returns by alpha, beta, sector contributions, factor exposures
+- **Market Regime Detection** -- Identify bull/bear/sideways markets and adapt strategy parameters
+- **Social Sentiment** -- Aggregate sentiment from Reddit, Twitter, StockTwits
+- **Web Research** -- Deep fundamental research via Perplexity API
+- **AI Self-Improvement** -- AI analyzes past decisions, identifies patterns, generates insights
+
+### Tax & Record Keeping
+- **Tax-Loss Harvesting** -- Automatically identify tax-loss harvesting candidates
+- **Wash Sale Detection** -- Track and warn about wash sale violations
+- **Tax Lot Tracking** -- Support for FIFO, LIFO, HIFO accounting methods
+- **Trade Journal** -- Record notes, tags, mood, lessons for each trade; pattern analysis
+- **Webhook System** -- Send notifications to Discord, Slack, or custom endpoints
+
 ### Infrastructure
 - **API Key Rotation** -- Single comma-separated env var per service (FINNHUB_API_KEY, MARKETAUX_API_TOKEN); round-robin rotation with per-key rate tracking
 - **12 Scheduler Jobs** -- Pairlist refresh, analysis loop, position monitor, T212 sync, daily/weekly reports, news monitoring, position re-eval, AI research, model evaluation, plan expiry
-- **15+ REST Endpoints** -- Full CRUD for trades, signals, positions, config, pairlist, research, audit, correlation, and bot control
+- **60+ REST Endpoints** -- Full CRUD for trades, signals, positions, config, pairlist, research, audit, correlation, bot control, backtesting, strategy profiles, tax management, trade journal, webhooks, and more
 - **10 WebSocket Events** -- Real-time streaming of prices, trades, signals, positions, status, plans, and research
 - **Docker Ready** -- Multi-stage Dockerfiles for bot and web, docker-compose for one-command deployment
 
@@ -146,7 +174,7 @@ cd web && npm install && npm run dev
            +----------+   +-----------+   +------------+
            |  SQLite  |   |  Telegram |   | WebSocket  |
            | Database |   |   Bot     |   | + Express  |
-           | (15 tbl) |   |           |   | + Dashboard|
+           | (23 tbl) |   |           |   | + Dashboard|
            +----------+   +-----------+   +------------+
 ```
 
@@ -154,12 +182,12 @@ cd web && npm install && npm run dev
 
 | Layer | Technology |
 |-------|-----------|
-| Runtime | Node.js 20+, ESM TypeScript |
-| Database | SQLite via better-sqlite3, Drizzle ORM (15 tables) |
+| Runtime | Node.js 24+, ESM TypeScript |
+| Database | SQLite via better-sqlite3, Drizzle ORM (23 tables) |
 | AI | Anthropic SDK, Ollama, OpenAI-compatible |
-| Data | Yahoo Finance, Finnhub, Marketaux |
-| Indicators | technicalindicators |
-| API | Express, WebSocket (ws), 15+ REST endpoints |
+| Data | Yahoo Finance, Finnhub, Marketaux, Social Sentiment, Perplexity Web Research |
+| Indicators | technicalindicators (25+ indicators) |
+| API | Express, WebSocket (ws), 60+ REST endpoints |
 | Web | Next.js 15 (App Router), Tailwind CSS v4, lucide-react, lightweight-charts, SWR |
 | Notifications | node-telegram-bot-api |
 | Build | tsup, tsx (dev) |
