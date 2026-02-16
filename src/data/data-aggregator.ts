@@ -22,6 +22,26 @@ export interface StockData {
   marketContext: MarketContext;
 }
 
+/** Lighter data bundle for research — skips Marketaux to conserve daily budget */
+export interface ResearchStockData {
+  symbol: string;
+  candles: OHLCVCandle[];
+  quote: { price: number; change: number; changePercent: number } | null;
+  fundamentals: FundamentalData | null;
+  finnhubNews: FinnhubNews[];
+  earnings: EarningsEvent[];
+  insiderTransactions: InsiderTx[];
+}
+
+export interface ResearchDataOptions {
+  /** Pre-fetched earnings calendar to share across symbols */
+  sharedEarnings?: EarningsEvent[];
+  /** Skip news fetch */
+  skipNews?: boolean;
+  /** Skip insider transaction fetch */
+  skipInsiders?: boolean;
+}
+
 export class DataAggregator {
   private fundamentalCache = new Map<string, { data: FundamentalData; expiresAt: number }>();
   private fundamentalCacheTTL = 4 * 60 * 60 * 1000; // 4 hours
@@ -148,6 +168,127 @@ export class DataAggregator {
         insiders: result.insiderTransactions.length,
       },
       'Stock data aggregated',
+    );
+
+    return result;
+  }
+
+  async getResearchData(symbol: string, options?: ResearchDataOptions): Promise<ResearchStockData> {
+    const result: ResearchStockData = {
+      symbol,
+      candles: [],
+      quote: null,
+      fundamentals: null,
+      finnhubNews: [],
+      earnings: [],
+      insiderTransactions: [],
+    };
+
+    const today = new Date().toISOString().split('T')[0];
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .split('T')[0];
+    const thirtyDaysAhead = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .split('T')[0];
+
+    // Build fetch list based on options
+    const fetches: Promise<unknown>[] = [
+      this.yahoo.getHistoricalData(symbol),
+      this.finnhub.getQuote(symbol),
+      this.getCachedFundamentals(symbol),
+    ];
+
+    const fetchNews = !options?.skipNews;
+    const fetchInsiders = !options?.skipInsiders;
+    const useSharedEarnings = !!options?.sharedEarnings;
+
+    if (fetchNews) fetches.push(this.finnhub.getCompanyNews(symbol, thirtyDaysAgo, today));
+    if (!useSharedEarnings) fetches.push(this.finnhub.getEarningsCalendar(today, thirtyDaysAhead));
+    if (fetchInsiders) fetches.push(this.finnhub.getInsiderTransactions(symbol));
+
+    const results = await Promise.allSettled(fetches);
+
+    let idx = 0;
+
+    // Candles
+    const candlesResult = results[idx++];
+    if (candlesResult.status === 'fulfilled') {
+      result.candles = candlesResult.value as OHLCVCandle[];
+    } else {
+      log.warn({ symbol, err: candlesResult.reason }, 'Research: failed to get candles');
+    }
+
+    // Quote: prefer Finnhub, fallback to Yahoo
+    const quoteResult = results[idx++];
+    if (quoteResult.status === 'fulfilled' && quoteResult.value) {
+      const fq = quoteResult.value as { c: number; pc: number };
+      const change = fq.c - fq.pc;
+      result.quote = {
+        price: fq.c,
+        change,
+        changePercent: fq.pc !== 0 ? (change / fq.pc) * 100 : 0,
+      };
+    } else {
+      try {
+        const yahooQuote = await this.yahoo.getQuote(symbol);
+        if (yahooQuote) {
+          result.quote = {
+            price: yahooQuote.price,
+            change: yahooQuote.change,
+            changePercent: yahooQuote.changePercent,
+          };
+        }
+      } catch (err) {
+        log.warn({ symbol, err }, 'Research: Yahoo quote fallback also failed');
+      }
+    }
+
+    // Fundamentals
+    const fundResult = results[idx++];
+    if (fundResult.status === 'fulfilled') {
+      result.fundamentals = fundResult.value as FundamentalData | null;
+    }
+
+    // News
+    if (fetchNews) {
+      const newsResult = results[idx++];
+      if (newsResult.status === 'fulfilled') {
+        result.finnhubNews = newsResult.value as FinnhubNews[];
+      }
+    }
+
+    // Earnings
+    if (useSharedEarnings) {
+      result.earnings = (options?.sharedEarnings ?? []).filter((e) => e.symbol === symbol);
+    } else {
+      const earningsResult = results[idx++];
+      if (earningsResult.status === 'fulfilled') {
+        result.earnings = (earningsResult.value as EarningsEvent[]).filter(
+          (e) => e.symbol === symbol,
+        );
+      }
+    }
+
+    // Insiders
+    if (fetchInsiders) {
+      const insiderResult = results[idx++];
+      if (insiderResult.status === 'fulfilled') {
+        result.insiderTransactions = insiderResult.value as InsiderTx[];
+      }
+    }
+
+    log.debug(
+      {
+        symbol,
+        candles: result.candles.length,
+        hasQuote: !!result.quote,
+        hasFundamentals: !!result.fundamentals,
+        news: result.finnhubNews.length,
+        earnings: result.earnings.length,
+        insiders: result.insiderTransactions.length,
+      },
+      'Research data aggregated',
     );
 
     return result;

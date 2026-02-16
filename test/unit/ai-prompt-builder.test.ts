@@ -1,6 +1,18 @@
-import { describe, expect, it } from 'vitest';
-import { buildAnalysisPrompt } from '../../src/ai/prompt-builder.js';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { buildAnalysisPrompt, buildResearchDataPrompt } from '../../src/ai/prompt-builder.js';
 import type { AIContext } from '../../src/ai/agent.js';
+import type { ResearchSymbolData } from '../../src/ai/market-research.js';
+import type { MarketContext } from '../../src/data/yahoo-finance.js';
+import type { RegimeAnalysis } from '../../src/analysis/regime-detector.js';
+
+vi.mock('../../src/config/manager.js', () => ({
+  configManager: {
+    get: vi.fn((key: string) => {
+      if (key === 'ai.research.detailedThreshold') return 3;
+      return undefined;
+    }),
+  },
+}));
 
 function makeFullContext(): AIContext {
   return {
@@ -611,6 +623,350 @@ describe('buildAnalysisPrompt', () => {
       const { user } = buildAnalysisPrompt(ctx);
       expect(user).toContain('RSI: N/A');
       expect(user).toContain('MACD-H: N/A');
+    });
+  });
+});
+
+// ── buildResearchDataPrompt ──────────────────────────────────────────────────
+
+function makeResearchSymbol(overrides?: Partial<ResearchSymbolData>): ResearchSymbolData {
+  return {
+    price: 150.25,
+    change1dPct: 1.5,
+    change5dPct: 3.2,
+    change1mPct: -4.5,
+    technical: {
+      rsi: 55.5,
+      macd: { value: 0.5432, signal: 0.3210, histogram: 0.2222 },
+      sma20: 148.50,
+      sma50: 145.00,
+      sma200: 140.00,
+      ema12: 149.20,
+      ema26: 147.80,
+      bollinger: { upper: 155.00, middle: 150.00, lower: 145.00 },
+      atr: 2.50,
+      adx: 25.30,
+      stochastic: { k: 60.00, d: 55.00 },
+      williamsR: -40.00,
+      mfi: 55.50,
+      cci: 50.00,
+      obv: 1234567,
+      vwap: 150.10,
+      parabolicSar: 148.00,
+      roc: 2.50,
+      forceIndex: 5000,
+      volumeRatio: 1.15,
+      supportResistance: { support: 145.50, resistance: 155.50 },
+      score: 65,
+    },
+    fundamentals: {
+      peRatio: 25.5,
+      forwardPE: 22.3,
+      revenueGrowthYoY: 0.15,
+      profitMargin: 0.255,
+      operatingMargin: 0.30,
+      debtToEquity: 1.5,
+      currentRatio: 1.2,
+      dividendYield: 0.006,
+      beta: 1.1,
+      earningsSurprise: 3.0,
+    },
+    fundamentalScore: 70,
+    sentimentScore: 60,
+    headlines: [
+      { title: 'AAPL beats earnings expectations', score: 0.8, source: 'Reuters' },
+      { title: 'Apple faces China headwinds', score: -0.3, source: 'Bloomberg' },
+    ],
+    insiderNetBuying: 5,
+    daysToEarnings: 30,
+    sector: 'Technology',
+    marketCap: 2.5e12,
+    ...overrides,
+  };
+}
+
+describe('buildResearchDataPrompt', () => {
+  describe('detailed mode (<=3 symbols)', () => {
+    it('uses detailed format for 1 symbol', () => {
+      const data = new Map<string, ResearchSymbolData>();
+      data.set('AAPL', makeResearchSymbol());
+
+      const result = buildResearchDataPrompt(data);
+
+      expect(result).toContain('=== AAPL ===');
+      expect(result).toContain('$150.25');
+      expect(result).toContain('+1.50%');
+      expect(result).toContain('+3.20%');
+      expect(result).toContain('-4.50%');
+    });
+
+    it('includes full technical indicators in detailed mode', () => {
+      const data = new Map<string, ResearchSymbolData>();
+      data.set('AAPL', makeResearchSymbol());
+
+      const result = buildResearchDataPrompt(data);
+
+      expect(result).toContain('TECHNICAL (Score: 65/100)');
+      expect(result).toContain('RSI(14): 55.50');
+      expect(result).toContain('MACD-H: 0.2222');
+      expect(result).toContain('ADX: 25.30');
+      expect(result).toContain('SMA: 20d 148.50');
+      expect(result).toContain('50d 145.00');
+      expect(result).toContain('200d 140.00');
+      expect(result).toContain('Bollinger: U 155.00');
+      expect(result).toContain('ATR: 2.50');
+      expect(result).toContain('Stoch K/D: 60.00/55.00');
+      expect(result).toContain('Williams %R: -40.00');
+      expect(result).toContain('MFI: 55.50');
+      expect(result).toContain('CCI: 50.00');
+      expect(result).toContain('OBV: 1234567');
+      expect(result).toContain('VWAP: 150.10');
+      expect(result).toContain('Vol Ratio: 1.15');
+      expect(result).toContain('SAR: 148.00');
+      expect(result).toContain('ROC: 2.50');
+      expect(result).toContain('Force: 5000');
+      expect(result).toContain('Support: 145.50');
+      expect(result).toContain('Resistance: 155.50');
+    });
+
+    it('includes full fundamental metrics in detailed mode', () => {
+      const data = new Map<string, ResearchSymbolData>();
+      data.set('AAPL', makeResearchSymbol());
+
+      const result = buildResearchDataPrompt(data);
+
+      expect(result).toContain('FUNDAMENTAL (Score: 70/100)');
+      expect(result).toContain('P/E: 25.50');
+      expect(result).toContain('Fwd P/E: 22.30');
+      expect(result).toContain('Growth: 15.00%');
+      expect(result).toContain('Margin: 25.50%');
+      expect(result).toContain('D/E: 1.50');
+      expect(result).toContain('Beta: 1.10');
+      expect(result).toContain('Div Yield: 0.60%');
+      expect(result).toContain('Earnings Surprise: 3.00');
+    });
+
+    it('includes sentiment with headlines in detailed mode', () => {
+      const data = new Map<string, ResearchSymbolData>();
+      data.set('AAPL', makeResearchSymbol());
+
+      const result = buildResearchDataPrompt(data);
+
+      expect(result).toContain('SENTIMENT (Score: 60/100)');
+      expect(result).toContain('[+0.80] "AAPL beats earnings expectations" (Reuters)');
+      expect(result).toContain('[-0.30] "Apple faces China headwinds" (Bloomberg)');
+      expect(result).toContain('Insider Net Buying: +5');
+      expect(result).toContain('Days to Earnings: 30');
+    });
+
+    it('uses detailed format for exactly 3 symbols', () => {
+      const data = new Map<string, ResearchSymbolData>();
+      data.set('AAPL', makeResearchSymbol());
+      data.set('MSFT', makeResearchSymbol({ price: 400 }));
+      data.set('NVDA', makeResearchSymbol({ price: 800 }));
+
+      const result = buildResearchDataPrompt(data);
+
+      // Detailed format uses === markers
+      expect(result).toContain('=== AAPL ===');
+      expect(result).toContain('=== MSFT ===');
+      expect(result).toContain('=== NVDA ===');
+      expect(result).not.toContain('--- AAPL ---');
+    });
+  });
+
+  describe('condensed mode (>3 symbols)', () => {
+    it('uses condensed format for 4+ symbols', () => {
+      const data = new Map<string, ResearchSymbolData>();
+      data.set('AAPL', makeResearchSymbol());
+      data.set('MSFT', makeResearchSymbol({ price: 400 }));
+      data.set('NVDA', makeResearchSymbol({ price: 800 }));
+      data.set('GOOGL', makeResearchSymbol({ price: 170 }));
+
+      const result = buildResearchDataPrompt(data);
+
+      // Condensed format uses --- markers
+      expect(result).toContain('--- AAPL ---');
+      expect(result).toContain('--- MSFT ---');
+      expect(result).toContain('--- NVDA ---');
+      expect(result).toContain('--- GOOGL ---');
+      expect(result).not.toContain('=== AAPL ===');
+    });
+
+    it('includes key technical indicators in condensed mode', () => {
+      const data = new Map<string, ResearchSymbolData>();
+      for (const sym of ['AAPL', 'MSFT', 'NVDA', 'GOOGL']) {
+        data.set(sym, makeResearchSymbol());
+      }
+
+      const result = buildResearchDataPrompt(data);
+
+      // Condensed has compact tech line: Tech(65): RSI ... | MACD-H ... | ADX ... | SMA50 ... | ATR ... | VolR ...
+      expect(result).toContain('Tech(65)');
+      expect(result).toContain('RSI 55.50');
+      expect(result).toContain('MACD-H 0.2222');
+      expect(result).toContain('ADX 25.30');
+      expect(result).toContain('SMA50 145.00');
+      expect(result).toContain('ATR 2.50');
+      expect(result).toContain('VolR 1.15');
+    });
+
+    it('includes key fundamentals in condensed mode', () => {
+      const data = new Map<string, ResearchSymbolData>();
+      for (const sym of ['AAPL', 'MSFT', 'NVDA', 'GOOGL']) {
+        data.set(sym, makeResearchSymbol());
+      }
+
+      const result = buildResearchDataPrompt(data);
+
+      // Condensed has compact fund line
+      expect(result).toContain('Fund(70)');
+      expect(result).toContain('P/E 25.50');
+      expect(result).toContain('FwdPE 22.30');
+      expect(result).toContain('Growth 15.00%');
+      expect(result).toContain('Margin 25.50%');
+      expect(result).toContain('D/E 1.50');
+    });
+
+    it('truncates headline titles in condensed mode', () => {
+      const data = new Map<string, ResearchSymbolData>();
+      const longHeadline = 'A'.repeat(100);
+      for (const sym of ['A', 'B', 'C', 'D']) {
+        data.set(
+          sym,
+          makeResearchSymbol({
+            headlines: [{ title: longHeadline, score: 0.5, source: 'Test' }],
+          }),
+        );
+      }
+
+      const result = buildResearchDataPrompt(data);
+      // Headlines truncated to 60 chars in condensed mode
+      expect(result).toContain(`"${'A'.repeat(60)}"`);
+      expect(result).not.toContain(`"${'A'.repeat(61)}"`);
+    });
+  });
+
+  describe('market context section', () => {
+    it('includes SPY/VIX data when marketCtx provided', () => {
+      const data = new Map<string, ResearchSymbolData>();
+      data.set('AAPL', makeResearchSymbol());
+
+      const marketCtx: MarketContext = {
+        spyPrice: 450.50,
+        spyChange1d: 0.5,
+        vixLevel: 15.25,
+        marketTrend: 'bullish',
+      };
+
+      const result = buildResearchDataPrompt(data, marketCtx);
+
+      expect(result).toContain('MARKET CONDITIONS:');
+      expect(result).toContain('SPY: $450.50');
+      expect(result).toContain('VIX: 15.25');
+      expect(result).toContain('Trend: bullish');
+    });
+
+    it('includes regime data when provided', () => {
+      const data = new Map<string, ResearchSymbolData>();
+      data.set('AAPL', makeResearchSymbol());
+
+      const regime: RegimeAnalysis = {
+        regime: 'trending_up',
+        confidence: 0.85,
+        details: {
+          spyTrend: 'bullish',
+          volatilityPctile: 30,
+          adjustments: {
+            newEntriesAllowed: true,
+            positionSizeMultiplier: 1.0,
+            stopLossMultiplier: 1.0,
+          },
+        },
+      };
+
+      const result = buildResearchDataPrompt(data, null, regime);
+
+      expect(result).toContain('MARKET CONDITIONS:');
+      expect(result).toContain('Regime: Trending Up (Bull) (85% conf)');
+    });
+
+    it('omits market section when no context or regime', () => {
+      const data = new Map<string, ResearchSymbolData>();
+      data.set('AAPL', makeResearchSymbol());
+
+      const result = buildResearchDataPrompt(data);
+
+      expect(result).not.toContain('MARKET CONDITIONS:');
+    });
+  });
+
+  describe('edge cases', () => {
+    it('handles null technical analysis', () => {
+      const data = new Map<string, ResearchSymbolData>();
+      data.set('AAPL', makeResearchSymbol({ technical: null }));
+
+      const result = buildResearchDataPrompt(data);
+
+      expect(result).toContain('=== AAPL ===');
+      expect(result).not.toContain('TECHNICAL');
+    });
+
+    it('handles null fundamentals', () => {
+      const data = new Map<string, ResearchSymbolData>();
+      data.set('AAPL', makeResearchSymbol({ fundamentals: null, fundamentalScore: 0 }));
+
+      const result = buildResearchDataPrompt(data);
+
+      expect(result).toContain('=== AAPL ===');
+      expect(result).not.toContain('FUNDAMENTAL');
+    });
+
+    it('handles empty headlines', () => {
+      const data = new Map<string, ResearchSymbolData>();
+      data.set('AAPL', makeResearchSymbol({ headlines: [] }));
+
+      const result = buildResearchDataPrompt(data);
+
+      expect(result).toContain('(no recent headlines)');
+    });
+
+    it('handles null daysToEarnings', () => {
+      const data = new Map<string, ResearchSymbolData>();
+      data.set('AAPL', makeResearchSymbol({ daysToEarnings: null }));
+
+      const result = buildResearchDataPrompt(data);
+
+      expect(result).toContain('Days to Earnings: N/A');
+    });
+
+    it('handles negative insider buying', () => {
+      const data = new Map<string, ResearchSymbolData>();
+      data.set('AAPL', makeResearchSymbol({ insiderNetBuying: -3 }));
+
+      const result = buildResearchDataPrompt(data);
+
+      expect(result).toContain('Insider Net Buying: -3');
+    });
+
+    it('handles null change5dPct and change1mPct', () => {
+      const data = new Map<string, ResearchSymbolData>();
+      data.set('AAPL', makeResearchSymbol({ change5dPct: null, change1mPct: null }));
+
+      const result = buildResearchDataPrompt(data);
+
+      expect(result).toContain('5d: N/A');
+      expect(result).toContain('1m: N/A');
+    });
+
+    it('includes the IMPORTANT instruction about actual data', () => {
+      const data = new Map<string, ResearchSymbolData>();
+      data.set('AAPL', makeResearchSymbol());
+
+      const result = buildResearchDataPrompt(data);
+
+      expect(result).toContain('IMPORTANT: Use the ACTUAL market data');
+      expect(result).toContain('Do NOT hallucinate');
     });
   });
 });

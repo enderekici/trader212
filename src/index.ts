@@ -160,29 +160,111 @@ class TradingBot {
     this.tradePlanner = new TradePlanner();
     this.approvalManager = new ApprovalManager(this.tradePlanner);
 
-    // 10c. Market researcher (with live data fetcher for symbol-specific research)
+    // 10c. Market researcher (with enriched data fetcher for symbol-specific research)
     this.marketResearcher = new MarketResearcher(this.aiAgent);
     this.marketResearcher.setDataFetcher(async (symbols) => {
-      const results = new Map<string, import('./ai/market-research.js').SymbolSnapshot>();
-      for (const sym of symbols) {
-        try {
-          const [quote, fundamentals] = await Promise.all([
-            this.yahoo.getQuote(sym),
-            this.yahoo.getFundamentals(sym),
-          ]);
-          if (quote) {
-            results.set(sym, {
-              price: quote.price,
-              change1dPct: quote.changePercent,
-              marketCap: quote.marketCap ?? fundamentals?.marketCap ?? null,
-              peRatio: fundamentals?.peRatio ?? null,
-              sector: fundamentals?.sector ?? null,
-            });
-          }
-        } catch (err) {
-          log.debug({ err, symbol: sym }, 'Failed to fetch live data for research symbol');
-        }
+      const results = new Map<string, import('./ai/market-research.js').ResearchSymbolData>();
+      const concurrency = configManager.get<number>('ai.research.maxConcurrentFetches') ?? 3;
+      const fetchLimit = pLimit(concurrency);
+
+      // Fetch shared earnings calendar once
+      const today = new Date().toISOString().split('T')[0];
+      const thirtyDaysAhead = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .split('T')[0];
+      let sharedEarnings: import('./data/finnhub.js').EarningsEvent[] = [];
+      try {
+        const finnhub = new FinnhubClient();
+        sharedEarnings = await finnhub.getEarningsCalendar(today, thirtyDaysAhead);
+      } catch (err) {
+        log.debug({ err }, 'Failed to fetch shared earnings for research');
       }
+
+      await Promise.all(
+        symbols.map((sym) =>
+          fetchLimit(async () => {
+            try {
+              const data = await this.dataAggregator.getResearchData(sym, { sharedEarnings });
+              if (!data.quote) return;
+
+              const candles = data.candles;
+              const techAnalysis = candles.length > 0 ? analyzeTechnicals(candles) : null;
+              const fundScore = data.fundamentals ? scoreFundamentals(data.fundamentals) : 0;
+
+              const sentInput: SentimentInput = {
+                finnhubNews: data.finnhubNews,
+                marketauxNews: [],
+                insiderTransactions: data.insiderTransactions,
+                earnings: data.earnings,
+              };
+              const sentScore = scoreSentiment(sentInput);
+
+              // Price changes from candles
+              const fiveDaysAgo = candles.length >= 5 ? candles[candles.length - 5] : null;
+              const thirtyDaysAgoCandle =
+                candles.length >= 22 ? candles[candles.length - 22] : null;
+              const price = data.quote.price;
+              const change5dPct = fiveDaysAgo
+                ? ((price - fiveDaysAgo.close) / fiveDaysAgo.close) * 100
+                : null;
+              const change1mPct = thirtyDaysAgoCandle
+                ? ((price - thirtyDaysAgoCandle.close) / thirtyDaysAgoCandle.close) * 100
+                : null;
+
+              // Insider net buying
+              const insiderNetBuying = data.insiderTransactions.reduce(
+                (sum: number, tx) => sum + (tx.change ?? 0),
+                0,
+              );
+
+              // Days to earnings
+              const now = Date.now();
+              const nextEarningsTs = data.earnings
+                .map((e) => new Date(e.date).getTime())
+                .filter((t) => t > now)
+                .sort((a, b) => a - b)[0];
+              const daysToEarnings = nextEarningsTs
+                ? Math.ceil((nextEarningsTs - now) / (1000 * 60 * 60 * 24))
+                : null;
+
+              results.set(sym, {
+                price,
+                change1dPct: data.quote.changePercent,
+                change5dPct,
+                change1mPct,
+                technical: techAnalysis,
+                fundamentals: data.fundamentals
+                  ? {
+                      peRatio: data.fundamentals.peRatio,
+                      forwardPE: data.fundamentals.forwardPE,
+                      revenueGrowthYoY: data.fundamentals.revenueGrowthYoY,
+                      profitMargin: data.fundamentals.profitMargin,
+                      operatingMargin: data.fundamentals.operatingMargin,
+                      debtToEquity: data.fundamentals.debtToEquity,
+                      currentRatio: data.fundamentals.currentRatio,
+                      dividendYield: data.fundamentals.dividendYield,
+                      beta: data.fundamentals.beta,
+                      earningsSurprise: data.fundamentals.earningsSurprise,
+                    }
+                  : null,
+                fundamentalScore: fundScore,
+                sentimentScore: sentScore,
+                headlines: data.finnhubNews.slice(0, 5).map((n) => ({
+                  title: n.headline,
+                  score: 0,
+                  source: n.source,
+                })),
+                insiderNetBuying,
+                daysToEarnings,
+                sector: data.fundamentals?.sector ?? null,
+                marketCap: data.fundamentals?.marketCap ?? null,
+              });
+            } catch (err) {
+              log.debug({ err, symbol: sym }, 'Failed to fetch enriched data for research symbol');
+            }
+          }),
+        ),
+      );
       return results;
     });
 
@@ -1674,6 +1756,27 @@ class TradingBot {
   private async runScheduledResearch(): Promise<void> {
     try {
       const audit = getAuditLogger();
+
+      // Pre-fetch shared context (SPY/VIX + regime) once before research
+      try {
+        const marketCtx = await this.dataAggregator.getMarketContext();
+        this.marketResearcher.setMarketContext(marketCtx);
+      } catch (err) {
+        log.debug({ err }, 'Failed to fetch market context for research');
+      }
+
+      try {
+        const spyCandles = await this.yahoo.getHistoricalData('SPY', 90);
+        if (spyCandles.length > 0) {
+          const marketCtx = this.marketResearcher.getMarketContext();
+          const regime = getRegimeDetector().detect(spyCandles, marketCtx?.vixLevel ?? undefined);
+          this.marketResearcher.setRegime(regime);
+        }
+      } catch (err) {
+        log.debug({ err }, 'Failed to fetch regime for research');
+        this.marketResearcher.setRegime(null);
+      }
+
       const report = await this.marketResearcher.runResearch();
       audit.logResearch(`Market research completed: ${report.results.length} stocks analyzed`);
       this.wsManager.broadcast('research_completed', {

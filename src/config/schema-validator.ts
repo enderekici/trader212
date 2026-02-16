@@ -91,6 +91,8 @@ const aiSchemas = new Map<string, z.ZodType>([
   ['ai.research.enabled', z.boolean()],
   ['ai.research.intervalMinutes', z.number().int().min(1).max(1440)],
   ['ai.research.topStocksCount', z.number().int().min(1).max(500)],
+  ['ai.research.detailedThreshold', z.number().int().min(1).max(100)],
+  ['ai.research.maxConcurrentFetches', z.number().int().min(1).max(20)],
 ]);
 
 // ── Risk ─────────────────────────────────────────────────────────────────────

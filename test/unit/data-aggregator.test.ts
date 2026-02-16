@@ -313,6 +313,131 @@ describe('DataAggregator', () => {
     });
   });
 
+  describe('getResearchData', () => {
+    it('returns data without Marketaux or market context', async () => {
+      const candles: OHLCVCandle[] = [
+        { date: '2024-01-25', open: 148, high: 152, low: 147, close: 150, volume: 50000000 },
+      ];
+      const finnhubQuote: FinnhubQuote = { c: 150, h: 152, l: 147, o: 148, pc: 145, t: 0 };
+      const fundamentals: FundamentalData = {
+        peRatio: 25, forwardPE: 22, revenueGrowthYoY: 0.1,
+        profitMargin: 0.25, operatingMargin: 0.3, debtToEquity: 1.2,
+        currentRatio: 1.5, marketCap: 2500000000000, sector: 'Tech',
+        industry: 'Electronics', earningsSurprise: 3.0, dividendYield: 0.005, beta: 1.1,
+      };
+      const finnhubNews: FinnhubNews[] = [
+        { id: 1, category: 'company', datetime: 1700000000, headline: 'News', image: '', related: 'AAPL', source: 'Reuters', summary: 'Sum', url: 'http://example.com' },
+      ];
+      const insiders: InsiderTx[] = [
+        { symbol: 'AAPL', name: 'Tim Cook', share: 1000, change: -500, filingDate: '2024-01-15', transactionDate: '2024-01-14', transactionCode: 'S', transactionPrice: 185 },
+      ];
+      const earnings: EarningsEvent[] = [
+        { symbol: 'AAPL', date: '2024-02-01', epsEstimate: 2.1, epsActual: null, revenueEstimate: null, revenueActual: null, hour: 'amc', quarter: 1, year: 2024 },
+      ];
+
+      mockYahoo.getHistoricalData.mockResolvedValueOnce(candles);
+      mockFinnhub.getQuote.mockResolvedValueOnce(finnhubQuote);
+      mockYahoo.getFundamentals.mockResolvedValueOnce(fundamentals);
+      mockFinnhub.getCompanyNews.mockResolvedValueOnce(finnhubNews);
+      mockFinnhub.getEarningsCalendar.mockResolvedValueOnce(earnings);
+      mockFinnhub.getInsiderTransactions.mockResolvedValueOnce(insiders);
+
+      const result = await aggregator.getResearchData('AAPL');
+
+      expect(result.symbol).toBe('AAPL');
+      expect(result.candles).toEqual(candles);
+      expect(result.quote).toEqual({
+        price: 150, change: 5, changePercent: (5 / 145) * 100,
+      });
+      expect(result.fundamentals).toEqual(fundamentals);
+      expect(result.finnhubNews).toEqual(finnhubNews);
+      expect(result.earnings).toHaveLength(1);
+      expect(result.insiderTransactions).toEqual(insiders);
+      // Should not have called Marketaux or MarketContext
+      expect(mockMarketaux.getNews).not.toHaveBeenCalled();
+      expect(mockYahoo.getMarketContext).not.toHaveBeenCalled();
+    });
+
+    it('uses shared earnings instead of fetching', async () => {
+      mockYahoo.getHistoricalData.mockResolvedValueOnce([]);
+      mockFinnhub.getQuote.mockResolvedValueOnce({ c: 150, h: 152, l: 147, o: 148, pc: 145, t: 0 });
+      mockYahoo.getFundamentals.mockResolvedValueOnce(null);
+
+      const sharedEarnings: EarningsEvent[] = [
+        { symbol: 'AAPL', date: '2024-02-01', epsEstimate: 2.1, epsActual: null, revenueEstimate: null, revenueActual: null, hour: 'amc', quarter: 1, year: 2024 },
+        { symbol: 'MSFT', date: '2024-02-05', epsEstimate: 3.0, epsActual: null, revenueEstimate: null, revenueActual: null, hour: 'bmo', quarter: 1, year: 2024 },
+      ];
+
+      const result = await aggregator.getResearchData('AAPL', { sharedEarnings });
+
+      expect(result.earnings).toHaveLength(1);
+      expect(result.earnings[0].symbol).toBe('AAPL');
+      // Earnings calendar should NOT have been called
+      expect(mockFinnhub.getEarningsCalendar).not.toHaveBeenCalled();
+    });
+
+    it('skips news when skipNews is true', async () => {
+      mockYahoo.getHistoricalData.mockResolvedValueOnce([]);
+      mockFinnhub.getQuote.mockResolvedValueOnce({ c: 150, h: 152, l: 147, o: 148, pc: 145, t: 0 });
+      mockYahoo.getFundamentals.mockResolvedValueOnce(null);
+      mockFinnhub.getEarningsCalendar.mockResolvedValueOnce([]);
+      mockFinnhub.getInsiderTransactions.mockResolvedValueOnce([]);
+
+      const result = await aggregator.getResearchData('AAPL', { skipNews: true });
+
+      expect(result.finnhubNews).toEqual([]);
+      expect(mockFinnhub.getCompanyNews).not.toHaveBeenCalled();
+    });
+
+    it('skips insiders when skipInsiders is true', async () => {
+      mockYahoo.getHistoricalData.mockResolvedValueOnce([]);
+      mockFinnhub.getQuote.mockResolvedValueOnce({ c: 150, h: 152, l: 147, o: 148, pc: 145, t: 0 });
+      mockYahoo.getFundamentals.mockResolvedValueOnce(null);
+      mockFinnhub.getCompanyNews.mockResolvedValueOnce([]);
+      mockFinnhub.getEarningsCalendar.mockResolvedValueOnce([]);
+
+      const result = await aggregator.getResearchData('AAPL', { skipInsiders: true });
+
+      expect(result.insiderTransactions).toEqual([]);
+      expect(mockFinnhub.getInsiderTransactions).not.toHaveBeenCalled();
+    });
+
+    it('falls back to Yahoo quote when Finnhub fails', async () => {
+      mockYahoo.getHistoricalData.mockResolvedValueOnce([]);
+      mockFinnhub.getQuote.mockResolvedValueOnce(null);
+      mockYahoo.getFundamentals.mockResolvedValueOnce(null);
+      mockFinnhub.getCompanyNews.mockResolvedValueOnce([]);
+      mockFinnhub.getEarningsCalendar.mockResolvedValueOnce([]);
+      mockFinnhub.getInsiderTransactions.mockResolvedValueOnce([]);
+      mockYahoo.getQuote.mockResolvedValueOnce({
+        price: 148, change: 2, changePercent: 1.37,
+        volume: 50000000, avgVolume: 60000000, marketCap: null,
+      });
+
+      const result = await aggregator.getResearchData('AAPL');
+      expect(result.quote).toEqual({ price: 148, change: 2, changePercent: 1.37 });
+    });
+
+    it('handles all sources failing gracefully', async () => {
+      mockYahoo.getHistoricalData.mockRejectedValueOnce(new Error('fail'));
+      mockFinnhub.getQuote.mockRejectedValueOnce(new Error('fail'));
+      mockYahoo.getFundamentals.mockRejectedValueOnce(new Error('fail'));
+      mockFinnhub.getCompanyNews.mockRejectedValueOnce(new Error('fail'));
+      mockFinnhub.getEarningsCalendar.mockRejectedValueOnce(new Error('fail'));
+      mockFinnhub.getInsiderTransactions.mockRejectedValueOnce(new Error('fail'));
+      mockYahoo.getQuote.mockRejectedValueOnce(new Error('fail'));
+
+      const result = await aggregator.getResearchData('AAPL');
+      expect(result.symbol).toBe('AAPL');
+      expect(result.candles).toEqual([]);
+      expect(result.quote).toBeNull();
+      expect(result.fundamentals).toBeNull();
+      expect(result.finnhubNews).toEqual([]);
+      expect(result.earnings).toEqual([]);
+      expect(result.insiderTransactions).toEqual([]);
+    });
+  });
+
   describe('fundamental caching', () => {
     it('caches fundamentals and returns cached value on second call', async () => {
       const fundamentals: FundamentalData = {

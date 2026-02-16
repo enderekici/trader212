@@ -1,4 +1,8 @@
+import type { RegimeAnalysis } from '../analysis/regime-detector.js';
+import { configManager } from '../config/manager.js';
+import type { MarketContext } from '../data/yahoo-finance.js';
 import type { AIContext } from './agent.js';
+import type { ResearchSymbolData } from './market-research.js';
 
 function fmt(value: number | null | undefined, decimals = 2): string {
   if (value === null || value === undefined) return 'N/A';
@@ -334,4 +338,165 @@ Respond with JSON:
 }`;
 
   return { system, user };
+}
+
+// ── Research Data Prompt ─────────────────────────────────────────────────────
+
+function buildMarketSection(
+  marketCtx: MarketContext | null,
+  regime: RegimeAnalysis | null,
+): string {
+  if (!marketCtx && !regime) return '';
+
+  const lines: string[] = ['MARKET CONDITIONS:'];
+  if (marketCtx) {
+    lines.push(
+      `- SPY: $${fmt(marketCtx.spyPrice)} (${fmtPct(marketCtx.spyChange1d ? marketCtx.spyChange1d / 100 : null)})`,
+    );
+    lines.push(`- VIX: ${fmt(marketCtx.vixLevel)}`);
+    lines.push(`- Trend: ${marketCtx.marketTrend}`);
+  }
+  if (regime) {
+    const regimeLabels: Record<string, string> = {
+      trending_up: 'Trending Up (Bull)',
+      trending_down: 'Trending Down (Bear)',
+      range_bound: 'Range-Bound',
+      high_volatility: 'High Volatility',
+      crash: 'Crash (Risk-Off)',
+    };
+    lines.push(
+      `- Regime: ${regimeLabels[regime.regime] ?? regime.regime} (${(regime.confidence * 100).toFixed(0)}% conf)`,
+    );
+  }
+  return `${lines.join('\n')}\n\n`;
+}
+
+function buildDetailedSymbol(sym: string, d: ResearchSymbolData): string {
+  const lines: string[] = [`=== ${sym} ===`];
+
+  // Price
+  lines.push(
+    `Price: $${fmt(d.price)} | 1d: ${d.change1dPct >= 0 ? '+' : ''}${d.change1dPct.toFixed(2)}% | 5d: ${d.change5dPct !== null ? `${d.change5dPct >= 0 ? '+' : ''}${d.change5dPct.toFixed(2)}%` : 'N/A'} | 1m: ${d.change1mPct !== null ? `${d.change1mPct >= 0 ? '+' : ''}${d.change1mPct.toFixed(2)}%` : 'N/A'}`,
+  );
+  if (d.sector) lines.push(`Sector: ${d.sector} | MCap: ${fmtLarge(d.marketCap)}`);
+
+  // Technical
+  if (d.technical) {
+    const t = d.technical;
+    lines.push(`\nTECHNICAL (Score: ${t.score}/100):`);
+    lines.push(
+      `- RSI(14): ${fmt(t.rsi)} | MACD-H: ${fmt(t.macd?.histogram, 4)} | ADX: ${fmt(t.adx)}`,
+    );
+    lines.push(`- SMA: 20d ${fmt(t.sma20)} | 50d ${fmt(t.sma50)} | 200d ${fmt(t.sma200)}`);
+    lines.push(`- EMA: 12d ${fmt(t.ema12)} | 26d ${fmt(t.ema26)}`);
+    lines.push(
+      `- Bollinger: U ${fmt(t.bollinger?.upper)} | M ${fmt(t.bollinger?.middle)} | L ${fmt(t.bollinger?.lower)}`,
+    );
+    lines.push(`- ATR: ${fmt(t.atr)} | Stoch K/D: ${fmt(t.stochastic?.k)}/${fmt(t.stochastic?.d)}`);
+    lines.push(`- Williams %R: ${fmt(t.williamsR)} | MFI: ${fmt(t.mfi)} | CCI: ${fmt(t.cci)}`);
+    lines.push(`- OBV: ${fmt(t.obv, 0)} | VWAP: ${fmt(t.vwap)} | Vol Ratio: ${fmt(t.volumeRatio)}`);
+    lines.push(
+      `- SAR: ${fmt(t.parabolicSar)} | ROC: ${fmt(t.roc)} | Force: ${fmt(t.forceIndex, 0)}`,
+    );
+    lines.push(
+      `- Support: ${fmt(t.supportResistance?.support)} | Resistance: ${fmt(t.supportResistance?.resistance)}`,
+    );
+  }
+
+  // Fundamental
+  if (d.fundamentals) {
+    const f = d.fundamentals;
+    lines.push(`\nFUNDAMENTAL (Score: ${d.fundamentalScore}/100):`);
+    lines.push(
+      `- P/E: ${fmt(f.peRatio)} | Fwd P/E: ${fmt(f.forwardPE)} | Growth: ${fmtPct(f.revenueGrowthYoY)}`,
+    );
+    lines.push(`- Margin: ${fmtPct(f.profitMargin)} (op: ${fmtPct(f.operatingMargin)})`);
+    lines.push(
+      `- D/E: ${fmt(f.debtToEquity)} | Current: ${fmt(f.currentRatio)} | Beta: ${fmt(f.beta)}`,
+    );
+    lines.push(
+      `- Div Yield: ${fmtPct(f.dividendYield)} | Earnings Surprise: ${fmt(f.earningsSurprise)}`,
+    );
+  }
+
+  // Sentiment
+  lines.push(`\nSENTIMENT (Score: ${d.sentimentScore}/100):`);
+  if (d.headlines.length > 0) {
+    for (const h of d.headlines.slice(0, 5)) {
+      lines.push(`- [${h.score > 0 ? '+' : ''}${h.score.toFixed(2)}] "${h.title}" (${h.source})`);
+    }
+  } else {
+    lines.push('- (no recent headlines)');
+  }
+  lines.push(`- Insider Net Buying: ${d.insiderNetBuying > 0 ? '+' : ''}${d.insiderNetBuying}`);
+  lines.push(`- Days to Earnings: ${d.daysToEarnings !== null ? d.daysToEarnings : 'N/A'}`);
+
+  return lines.join('\n');
+}
+
+function buildCondensedSymbol(sym: string, d: ResearchSymbolData): string {
+  const lines: string[] = [`--- ${sym} ---`];
+
+  // Price line
+  lines.push(
+    `$${fmt(d.price)} | 1d: ${d.change1dPct >= 0 ? '+' : ''}${d.change1dPct.toFixed(2)}% | 5d: ${d.change5dPct !== null ? `${d.change5dPct >= 0 ? '+' : ''}${d.change5dPct.toFixed(2)}%` : 'N/A'} | 1m: ${d.change1mPct !== null ? `${d.change1mPct >= 0 ? '+' : ''}${d.change1mPct.toFixed(2)}%` : 'N/A'}`,
+  );
+  if (d.sector) lines.push(`${d.sector} | MCap: ${fmtLarge(d.marketCap)}`);
+
+  // Key technicals (6 indicators)
+  if (d.technical) {
+    const t = d.technical;
+    lines.push(
+      `Tech(${t.score}): RSI ${fmt(t.rsi)} | MACD-H ${fmt(t.macd?.histogram, 4)} | ADX ${fmt(t.adx)} | SMA50 ${fmt(t.sma50)} | ATR ${fmt(t.atr)} | VolR ${fmt(t.volumeRatio)}`,
+    );
+  }
+
+  // Key fundamentals (5 metrics)
+  if (d.fundamentals) {
+    const f = d.fundamentals;
+    lines.push(
+      `Fund(${d.fundamentalScore}): P/E ${fmt(f.peRatio)} | FwdPE ${fmt(f.forwardPE)} | Growth ${fmtPct(f.revenueGrowthYoY)} | Margin ${fmtPct(f.profitMargin)} | D/E ${fmt(f.debtToEquity)}`,
+    );
+  }
+
+  // Top 3 headlines + earnings
+  const sentParts = [`Sent(${d.sentimentScore})`];
+  if (d.headlines.length > 0) {
+    sentParts.push(
+      d.headlines
+        .slice(0, 3)
+        .map((h) => `"${h.title.slice(0, 60)}"`)
+        .join(' | '),
+    );
+  }
+  if (d.daysToEarnings !== null) sentParts.push(`Earnings: ${d.daysToEarnings}d`);
+  if (d.insiderNetBuying !== 0)
+    sentParts.push(`Insider: ${d.insiderNetBuying > 0 ? '+' : ''}${d.insiderNetBuying}`);
+  lines.push(sentParts.join(' | '));
+
+  return lines.join('\n');
+}
+
+export function buildResearchDataPrompt(
+  symbolData: Map<string, ResearchSymbolData>,
+  marketCtx?: MarketContext | null,
+  regime?: RegimeAnalysis | null,
+): string {
+  const threshold = configManager.get<number>('ai.research.detailedThreshold') ?? 3;
+  const useDetailed = symbolData.size <= threshold;
+
+  const sections: string[] = [];
+
+  // Market context section
+  const marketSection = buildMarketSection(marketCtx ?? null, regime ?? null);
+  if (marketSection) sections.push(marketSection);
+
+  // Per-symbol sections
+  for (const [sym, data] of symbolData) {
+    sections.push(useDetailed ? buildDetailedSymbol(sym, data) : buildCondensedSymbol(sym, data));
+  }
+
+  const dataBlock = sections.join('\n\n');
+
+  return `\n${dataBlock}\n\nIMPORTANT: Use the ACTUAL market data provided above in your analysis. Reference real prices, technical indicators, and fundamentals. Do NOT hallucinate or make up numbers.\n`;
 }

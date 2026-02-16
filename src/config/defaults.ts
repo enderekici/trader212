@@ -320,7 +320,7 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
     category: 'ai',
     description: 'Previous signals sent to AI',
   },
-  { key: 'ai.temperature', value: '0.1', category: 'ai', description: 'AI temperature' },
+  { key: 'ai.temperature', value: '0', category: 'ai', description: 'AI temperature' },
 
   // Risk
   { key: 'risk.maxPositions', value: '5', category: 'risk', description: 'Max open positions' },
@@ -521,6 +521,20 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
     value: '50',
     category: 'ai',
     description: 'Number of top stocks to analyze in research',
+  },
+
+  // AI research data enrichment
+  {
+    key: 'ai.research.detailedThreshold',
+    value: '3',
+    category: 'ai',
+    description: 'Symbol count cutoff for detailed vs condensed research prompt',
+  },
+  {
+    key: 'ai.research.maxConcurrentFetches',
+    value: '3',
+    category: 'ai',
+    description: 'Max concurrent data fetches during research (pLimit)',
   },
 
   // Risk - loss cool-down recovery

@@ -1,10 +1,14 @@
 import { desc, eq } from 'drizzle-orm';
+import type { RegimeAnalysis } from '../analysis/regime-detector.js';
+import type { TechnicalAnalysis } from '../analysis/technical/scorer.js';
 import { configManager } from '../config/manager.js';
 import type { WebResearcher } from '../data/web-researcher.js';
+import type { MarketContext } from '../data/yahoo-finance.js';
 import { getDb } from '../db/index.js';
 import { aiResearch } from '../db/schema.js';
 import { createLogger } from '../utils/logger.js';
 import type { AIAgent } from './agent.js';
+import { buildResearchDataPrompt } from './prompt-builder.js';
 
 const log = createLogger('market-research');
 
@@ -36,7 +40,35 @@ export interface MarketResearchReport {
   aiModel: string | null;
 }
 
-/** Live market snapshot for a single symbol */
+/** Rich data for a single symbol in research */
+export interface ResearchSymbolData {
+  price: number;
+  change1dPct: number;
+  change5dPct: number | null;
+  change1mPct: number | null;
+  technical: TechnicalAnalysis | null;
+  fundamentals: {
+    peRatio: number | null;
+    forwardPE: number | null;
+    revenueGrowthYoY: number | null;
+    profitMargin: number | null;
+    operatingMargin: number | null;
+    debtToEquity: number | null;
+    currentRatio: number | null;
+    dividendYield: number | null;
+    beta: number | null;
+    earningsSurprise: number | null;
+  } | null;
+  fundamentalScore: number;
+  sentimentScore: number;
+  headlines: Array<{ title: string; score: number; source: string }>;
+  insiderNetBuying: number;
+  daysToEarnings: number | null;
+  sector: string | null;
+  marketCap: number | null;
+}
+
+/** @deprecated Use ResearchSymbolData instead */
 export interface SymbolSnapshot {
   price: number;
   change1dPct: number;
@@ -45,13 +77,15 @@ export interface SymbolSnapshot {
   sector: string | null;
 }
 
-/** Callback to fetch live data for symbols */
-export type SymbolDataFetcher = (symbols: string[]) => Promise<Map<string, SymbolSnapshot>>;
+/** Callback to fetch rich data for symbols */
+export type SymbolDataFetcher = (symbols: string[]) => Promise<Map<string, ResearchSymbolData>>;
 
 export class MarketResearcher {
   private aiAgent: AIAgent;
   private dataFetcher: SymbolDataFetcher | null = null;
   private webResearcher: WebResearcher | null = null;
+  private marketContext: MarketContext | null = null;
+  private regimeAnalysis: RegimeAnalysis | null = null;
 
   constructor(aiAgent: AIAgent) {
     this.aiAgent = aiAgent;
@@ -65,6 +99,21 @@ export class MarketResearcher {
   /** Set a web researcher for thematic stock discovery via web search */
   setWebResearcher(researcher: WebResearcher): void {
     this.webResearcher = researcher;
+  }
+
+  /** Inject shared market context (SPY/VIX) fetched once before research */
+  setMarketContext(ctx: MarketContext): void {
+    this.marketContext = ctx;
+  }
+
+  /** Inject shared regime analysis fetched once before research */
+  setRegime(regime: RegimeAnalysis | null): void {
+    this.regimeAnalysis = regime;
+  }
+
+  /** Get the current market context (used by index.ts for regime detection) */
+  getMarketContext(): MarketContext | null {
+    return this.marketContext;
   }
 
   async runResearch(options?: {
@@ -102,26 +151,21 @@ export class MarketResearcher {
       }
     }
 
-    // Fetch live market data for requested symbols
-    let liveDataSection = '';
+    // Fetch enriched data for requested symbols
+    let enrichedDataPrompt = '';
     if (options?.symbols?.length && this.dataFetcher) {
       try {
-        const snapshots = await this.dataFetcher(options.symbols);
-        if (snapshots.size > 0) {
-          const lines: string[] = ['Current market data (live):'];
-          for (const [sym, snap] of snapshots) {
-            const parts = [
-              `${sym}: $${snap.price.toFixed(2)} (${snap.change1dPct >= 0 ? '+' : ''}${snap.change1dPct.toFixed(2)}%)`,
-            ];
-            if (snap.marketCap) parts.push(`MCap: $${(snap.marketCap / 1e9).toFixed(1)}B`);
-            if (snap.peRatio) parts.push(`P/E: ${snap.peRatio.toFixed(1)}`);
-            if (snap.sector) parts.push(`Sector: ${snap.sector}`);
-            lines.push(`  ${parts.join(', ')}`);
-          }
-          liveDataSection = `\n${lines.join('\n')}\n`;
+        const symbolData = await this.dataFetcher(options.symbols);
+        if (symbolData.size > 0) {
+          enrichedDataPrompt = buildResearchDataPrompt(
+            symbolData,
+            this.marketContext,
+            this.regimeAnalysis,
+          );
+          log.info({ symbolCount: symbolData.size }, 'Enriched research data built for symbols');
         }
       } catch (err) {
-        log.warn({ err }, 'Failed to fetch live data for research symbols');
+        log.warn({ err }, 'Failed to fetch enriched data for research symbols');
       }
     }
 
@@ -130,7 +174,7 @@ export class MarketResearcher {
       sectorFilter,
       symbolFilter,
       topCount,
-      liveDataSection + webSearchContext,
+      enrichedDataPrompt + webSearchContext,
     );
 
     try {
@@ -142,9 +186,19 @@ export class MarketResearcher {
       // Parse AI response
       const results = this.parseResearchResponse(rawResponse, options?.symbols);
 
-      // Store in DB
+      // Store in DB with market context if available
       const db = getDb();
       const now = new Date().toISOString();
+      const mc = this.marketContext;
+      const storedContext = mc
+        ? JSON.stringify({
+            spyTrend: mc.marketTrend,
+            vixLevel: mc.vixLevel ?? 0,
+            sectorRotation: '',
+            keyThemes: [],
+          })
+        : null;
+
       const row = db
         .insert(aiResearch)
         .values({
@@ -153,7 +207,7 @@ export class MarketResearcher {
           symbols: JSON.stringify(results.map((r) => r.symbol)),
           results: JSON.stringify(results),
           aiModel: getActiveModelName(),
-          marketContext: null,
+          marketContext: storedContext,
           createdAt: now,
         })
         .run();
@@ -163,7 +217,7 @@ export class MarketResearcher {
         timestamp: now,
         query,
         results,
-        marketContext: null,
+        marketContext: storedContext ? JSON.parse(storedContext) : null,
         aiModel: getActiveModelName(),
       };
 
@@ -217,11 +271,15 @@ export class MarketResearcher {
     _topCount: number,
     liveDataSection = '',
   ): string {
+    const dataInstruction = liveDataSection
+      ? `\nIMPORTANT: Use the ACTUAL market data provided above in your analysis. Reference real prices, P/E ratios, and market caps. Do NOT hallucinate or make up numbers.\n`
+      : '';
+
     return `You are a market research analyst. Your task: ${focus}
 
 ${sectorFilter}
 ${symbolFilter}
-${liveDataSection}
+${liveDataSection}${dataInstruction}
 For each stock, provide your analysis in this JSON format:
 {
   "results": [
@@ -229,7 +287,7 @@ For each stock, provide your analysis in this JSON format:
       "symbol": "TICKER",
       "recommendation": "strong_buy|buy|hold|sell|strong_sell",
       "conviction": 0-100,
-      "reasoning": "2-3 sentence analysis",
+      "reasoning": "2-3 sentence analysis referencing the actual data provided",
       "catalysts": ["catalyst1", "catalyst2"],
       "risks": ["risk1", "risk2"],
       "targetPrice": 123.45,
