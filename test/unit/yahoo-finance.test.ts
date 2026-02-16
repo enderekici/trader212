@@ -1,8 +1,9 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 // Use vi.hoisted to create mock functions before vi.mock hoisting
-const { mockYfQuote, mockAxiosGet } = vi.hoisted(() => ({
+const { mockYfQuote, mockYfQuoteSummary, mockAxiosGet } = vi.hoisted(() => ({
   mockYfQuote: vi.fn(),
+  mockYfQuoteSummary: vi.fn(),
   mockAxiosGet: vi.fn(),
 }));
 
@@ -14,6 +15,7 @@ vi.mock('yahoo-finance2', () => {
   return {
     default: class {
       quote = mockYfQuote;
+      quoteSummary = mockYfQuoteSummary;
     },
   };
 });
@@ -236,37 +238,29 @@ describe('YahooFinanceClient', () => {
 
   describe('getFundamentals', () => {
     it('returns fundamental data from quoteSummary', async () => {
-      mockAxiosGet.mockResolvedValueOnce({
-        data: {
-          quoteSummary: {
-            result: [
-              {
-                financialData: {
-                  currentPrice: { raw: 150 },
-                  revenueGrowth: { raw: 0.15 },
-                  profitMargins: { raw: 0.25 },
-                  operatingMargins: { raw: 0.3 },
-                  debtToEquity: { raw: 1.5 },
-                  currentRatio: { raw: 1.2 },
-                  marketCap: { raw: 2500000000000 },
-                },
-                defaultKeyStatistics: {
-                  trailingEps: { raw: 6.5 },
-                  forwardPE: { raw: 25 },
-                  enterpriseValue: { raw: 2600000000000 },
-                  dividendYield: { raw: 0.005 },
-                  beta: { raw: 1.2 },
-                },
-                summaryProfile: {
-                  sector: 'Technology',
-                  industry: 'Consumer Electronics',
-                },
-                earningsHistory: {
-                  history: [{ surprisePercent: { raw: 5.2 } }],
-                },
-              },
-            ],
-          },
+      mockYfQuoteSummary.mockResolvedValueOnce({
+        financialData: {
+          currentPrice: { raw: 150 },
+          revenueGrowth: { raw: 0.15 },
+          profitMargins: { raw: 0.25 },
+          operatingMargins: { raw: 0.3 },
+          debtToEquity: { raw: 1.5 },
+          currentRatio: { raw: 1.2 },
+          marketCap: { raw: 2500000000000 },
+        },
+        defaultKeyStatistics: {
+          trailingEps: { raw: 6.5 },
+          forwardPE: { raw: 25 },
+          enterpriseValue: { raw: 2600000000000 },
+          dividendYield: { raw: 0.005 },
+          beta: { raw: 1.2 },
+        },
+        summaryProfile: {
+          sector: 'Technology',
+          industry: 'Consumer Electronics',
+        },
+        earningsHistory: {
+          history: [{ surprisePercent: { raw: 5.2 } }],
         },
       });
 
@@ -288,18 +282,10 @@ describe('YahooFinanceClient', () => {
     });
 
     it('returns null peRatio when trailingEps is missing', async () => {
-      mockAxiosGet.mockResolvedValueOnce({
-        data: {
-          quoteSummary: {
-            result: [
-              {
-                financialData: { currentPrice: { raw: 150 } },
-                defaultKeyStatistics: {},
-                summaryProfile: {},
-              },
-            ],
-          },
-        },
+      mockYfQuoteSummary.mockResolvedValueOnce({
+        financialData: { currentPrice: { raw: 150 } },
+        defaultKeyStatistics: {},
+        summaryProfile: {},
       });
 
       const f = await client.getFundamentals('AAPL');
@@ -307,18 +293,10 @@ describe('YahooFinanceClient', () => {
     });
 
     it('returns null peRatio when currentPrice is missing', async () => {
-      mockAxiosGet.mockResolvedValueOnce({
-        data: {
-          quoteSummary: {
-            result: [
-              {
-                financialData: {},
-                defaultKeyStatistics: { trailingEps: { raw: 5 } },
-                summaryProfile: {},
-              },
-            ],
-          },
-        },
+      mockYfQuoteSummary.mockResolvedValueOnce({
+        financialData: {},
+        defaultKeyStatistics: { trailingEps: { raw: 5 } },
+        summaryProfile: {},
       });
 
       const f = await client.getFundamentals('AAPL');
@@ -326,18 +304,10 @@ describe('YahooFinanceClient', () => {
     });
 
     it('handles rawVal with direct number values (not {raw} objects)', async () => {
-      mockAxiosGet.mockResolvedValueOnce({
-        data: {
-          quoteSummary: {
-            result: [
-              {
-                financialData: { currentPrice: 150, revenueGrowth: 0.1 },
-                defaultKeyStatistics: { trailingEps: 6, forwardPE: 20 },
-                summaryProfile: {},
-              },
-            ],
-          },
-        },
+      mockYfQuoteSummary.mockResolvedValueOnce({
+        financialData: { currentPrice: 150, revenueGrowth: 0.1 },
+        defaultKeyStatistics: { trailingEps: 6, forwardPE: 20 },
+        summaryProfile: {},
       });
 
       const f = await client.getFundamentals('AAPL');
@@ -347,34 +317,24 @@ describe('YahooFinanceClient', () => {
     });
 
     it('returns null when quoteSummary result is empty', async () => {
-      mockAxiosGet.mockResolvedValueOnce({
-        data: { quoteSummary: { result: [] } },
-      });
+      mockYfQuoteSummary.mockResolvedValueOnce(null);
 
       const f = await client.getFundamentals('INVALID');
       expect(f).toBeNull();
     });
 
     it('returns null on error', async () => {
-      mockAxiosGet.mockRejectedValueOnce(new Error('API Error'));
+      mockYfQuoteSummary.mockRejectedValueOnce(new Error('API Error'));
       const f = await client.getFundamentals('AAPL');
       expect(f).toBeNull();
     });
 
     it('handles null earningsHistory', async () => {
-      mockAxiosGet.mockResolvedValueOnce({
-        data: {
-          quoteSummary: {
-            result: [
-              {
-                financialData: {},
-                defaultKeyStatistics: {},
-                summaryProfile: {},
-                earningsHistory: null,
-              },
-            ],
-          },
-        },
+      mockYfQuoteSummary.mockResolvedValueOnce({
+        financialData: {},
+        defaultKeyStatistics: {},
+        summaryProfile: {},
+        earningsHistory: null,
       });
 
       const f = await client.getFundamentals('AAPL');
@@ -382,7 +342,7 @@ describe('YahooFinanceClient', () => {
     });
 
     it('handles empty earningsHistory.history array', async () => {
-      mockAxiosGet.mockResolvedValueOnce({
+      mockYfQuoteSummary.mockResolvedValueOnce({
         data: {
           quoteSummary: {
             result: [
@@ -402,18 +362,10 @@ describe('YahooFinanceClient', () => {
     });
 
     it('falls back to financialData marketCap when enterpriseValue is null', async () => {
-      mockAxiosGet.mockResolvedValueOnce({
-        data: {
-          quoteSummary: {
-            result: [
-              {
-                financialData: { marketCap: { raw: 1000000000 } },
-                defaultKeyStatistics: {},
-                summaryProfile: {},
-              },
-            ],
-          },
-        },
+      mockYfQuoteSummary.mockResolvedValueOnce({
+        financialData: { marketCap: { raw: 1000000000 } },
+        defaultKeyStatistics: {},
+        summaryProfile: {},
       });
 
       const f = await client.getFundamentals('AAPL');
@@ -421,7 +373,7 @@ describe('YahooFinanceClient', () => {
     });
 
     it('handles missing profile sector/industry', async () => {
-      mockAxiosGet.mockResolvedValueOnce({
+      mockYfQuoteSummary.mockResolvedValueOnce({
         data: {
           quoteSummary: {
             result: [
@@ -441,7 +393,7 @@ describe('YahooFinanceClient', () => {
     });
 
     it('returns null for non-number, non-raw-object values via rawVal', async () => {
-      mockAxiosGet.mockResolvedValueOnce({
+      mockYfQuoteSummary.mockResolvedValueOnce({
         data: {
           quoteSummary: {
             result: [
@@ -461,13 +413,13 @@ describe('YahooFinanceClient', () => {
     });
 
     it('returns null when quoteSummary itself is missing', async () => {
-      mockAxiosGet.mockResolvedValueOnce({ data: {} });
+      mockYfQuoteSummary.mockResolvedValueOnce(null);
       const f = await client.getFundamentals('AAPL');
       expect(f).toBeNull();
     });
 
     it('handles rawVal with undefined obj', async () => {
-      mockAxiosGet.mockResolvedValueOnce({
+      mockYfQuoteSummary.mockResolvedValueOnce({
         data: {
           quoteSummary: {
             result: [
@@ -485,7 +437,7 @@ describe('YahooFinanceClient', () => {
     });
 
     it('handles rawVal with null value for a key', async () => {
-      mockAxiosGet.mockResolvedValueOnce({
+      mockYfQuoteSummary.mockResolvedValueOnce({
         data: {
           quoteSummary: {
             result: [

@@ -6,7 +6,6 @@ import { createLogger } from '../utils/logger.js';
 const log = createLogger('yahoo-finance');
 
 const YAHOO_CHART_URL = 'https://query1.finance.yahoo.com/v8/finance/chart';
-const YAHOO_QUOTESUMMARY_URL = 'https://query2.finance.yahoo.com/v10/finance/quoteSummary';
 
 export interface OHLCVCandle {
   date: string;
