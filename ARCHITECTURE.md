@@ -75,9 +75,9 @@ Technical deep-dive into the Trader212 autonomous trading bot.
                   +---------------+---------------+
                   v               v               v
            +----------+   +-----------+   +------------+
-           |  SQLite  |   |  Telegram |   | WebSocket  |
-           | Database |   |   Bot     |   | + Express  |
-           | (15 tbl) |   |           |   | + Dashboard|
+           |  SQLite  |   |  Telegram |   | + Express  |
+           | Database |   |   Bot     |   | WebSocket  |
+           | (23 tbl) |   |           |   | + Dashboard|
            +----------+   +-----------+   +------------+
 ```
 
@@ -343,7 +343,7 @@ The bot includes a full NYSE holiday and early close calendar for 2024-2028 (`sr
 
 ## Database Schema
 
-All data is persisted in a SQLite database via Drizzle ORM. 15 tables total.
+All data is persisted in a SQLite database via Drizzle ORM. 23 tables total.
 
 ### `trades`
 
@@ -734,7 +734,7 @@ src/
 |   +-- manager.ts            # ConfigManager (DB-backed, live-updatable)
 +-- db/
 |   +-- index.ts              # Database connection
-|   +-- schema.ts             # Drizzle schema (15 tables)
+|   +-- schema.ts             # Drizzle schema (23 tables)
 |   +-- repositories/
 |       +-- config.ts         # Config data access
 |       +-- positions.ts      # Positions data access

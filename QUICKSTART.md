@@ -6,7 +6,7 @@ Get Trader212 running in under 5 minutes.
 
 | Requirement | Notes |
 |------------|-------|
-| **Node.js 20+** | Required. Check with `node -v` |
+| **Node.js 24+** | Required. Check with `node -v` |
 | Trading212 account | Demo or live. Get API key from Settings → API |
 | Finnhub API key | Free at [finnhub.io](https://finnhub.io) — 60 calls/min |
 | Anthropic API key | Or use Ollama for free local AI |
@@ -145,7 +145,7 @@ The bot will automatically:
 
 ### Bot won't start
 
-- Ensure Node.js 20+ is installed: `node -v`
+- Ensure Node.js 24+ is installed: `node -v`
 - Delete `node_modules` and reinstall: `rm -rf node_modules && npm install`
 - Check `.env` file exists and has at least `TRADING212_API_KEY`
 
