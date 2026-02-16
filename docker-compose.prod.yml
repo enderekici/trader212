@@ -19,6 +19,7 @@ services:
     environment:
       - API_URL=http://bot:3001
       - API_SECRET_KEY=${API_SECRET_KEY:-}
+      - HOSTNAME=0.0.0.0
     ports:
       - "3000:3000"
     depends_on:
