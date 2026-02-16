@@ -90,9 +90,10 @@ function makeFullContext(): AIContext {
       todayPnl: 150.25,
       todayPnlPct: 0.003,
       sectorExposure: { Technology: 2, Healthcare: 1 },
+      sectorExposureValue: { Technology: 0.45, Healthcare: 0.20 },
       existingPositions: [
-        { symbol: 'MSFT', pnlPct: 0.05, entryPrice: 380.00, currentPrice: 399.00 },
-        { symbol: 'GOOG', pnlPct: -0.02, entryPrice: 140.00, currentPrice: 137.20 },
+        { symbol: 'MSFT', pnlPct: 0.05, entryPrice: 380.00, currentPrice: 399.00, shares: 10, stopLoss: 370.00, trailingStop: null, holdDays: 5, dcaCount: 0, partialExitCount: 0 },
+        { symbol: 'GOOG', pnlPct: -0.02, entryPrice: 140.00, currentPrice: 137.20, shares: 25, stopLoss: null, trailingStop: 135.00, holdDays: 12, dcaCount: 1, partialExitCount: 0 },
       ],
     },
     marketContext: {
@@ -249,12 +250,17 @@ describe('buildAnalysisPrompt', () => {
       expect(user).toContain('Cash Available: $10000.50');
       expect(user).toContain('Portfolio Value: $50000.75');
       expect(user).toContain('Open Positions: 2 / 10');
-      expect(user).toContain('MSFT: entry $380.00');
+      expect(user).toContain('MSFT: 10 shares @ $380.00');
       expect(user).toContain('+5.00%');
-      expect(user).toContain('GOOG: entry $140.00');
+      expect(user).toContain('stop $370.00');
+      expect(user).toContain('5d held');
+      expect(user).toContain('GOOG: 25 shares @ $140.00');
       expect(user).toContain('-2.00%');
-      expect(user).toContain('Technology: 2 position(s)');
-      expect(user).toContain('Healthcare: 1 position(s)');
+      expect(user).toContain('trailing $135.00');
+      expect(user).toContain('12d held');
+      expect(user).toContain('DCA×1');
+      expect(user).toContain('Technology: 2 position(s) (45.0% of portfolio)');
+      expect(user).toContain('Healthcare: 1 position(s) (20.0% of portfolio)');
     });
 
     it('shows "(none)" when no existing positions', () => {
@@ -268,6 +274,7 @@ describe('buildAnalysisPrompt', () => {
     it('shows "(none)" when no sector exposure', () => {
       const ctx = makeFullContext();
       ctx.portfolio.sectorExposure = {};
+      ctx.portfolio.sectorExposureValue = {};
       const { user } = buildAnalysisPrompt(ctx);
       expect(user).toContain('Sector Exposure:\n  (none)');
     });

@@ -13,6 +13,8 @@ import { MarketResearcher } from './ai/market-research.js';
 import { getAISelfImprovement } from './ai/self-improvement.js';
 import { CorrelationAnalyzer } from './analysis/correlation.js';
 import { scoreFundamentals } from './analysis/fundamental/scorer.js';
+import { createMultiTimeframeAnalyzer } from './analysis/multi-timeframe.js';
+import { getRegimeDetector } from './analysis/regime-detector.js';
 import { type SentimentInput, scoreSentiment } from './analysis/sentiment/scorer.js';
 import { analyzeTechnicals } from './analysis/technical/scorer.js';
 import { registerBotCallbacks } from './api/routes.js';
@@ -26,6 +28,7 @@ import { getStrategyProfileManager } from './config/strategy-profiles.js';
 import { DataAggregator, type StockData } from './data/data-aggregator.js';
 import { FinnhubClient } from './data/finnhub.js';
 import { MarketauxClient } from './data/marketaux.js';
+import { getSocialSentimentAnalyzer } from './data/social-sentiment.js';
 import { SteerClient } from './data/steer-client.js';
 import { TickerMapper } from './data/ticker-mapper.js';
 import { type WebResearchData, WebResearcher } from './data/web-researcher.js';
@@ -626,12 +629,20 @@ class TradingBot {
 
     log.info({ stockCount: this.activeStocks.length }, 'Starting analysis loop');
 
+    // Fetch SPY candles once for regime detection (shared across all stocks)
+    let spyCandles: import('./data/yahoo-finance.js').OHLCVCandle[] = [];
+    try {
+      spyCandles = await this.yahoo.getHistoricalData('SPY', 90);
+    } catch (err) {
+      log.debug({ err }, 'Failed to fetch SPY candles for regime detection');
+    }
+
     // Parallel analysis with bounded concurrency (5 stocks at a time)
     const limit = pLimit(5);
     const analysisPromises = this.activeStocks.map((stock) =>
       limit(async () => {
         try {
-          await this.analyzeStock(stock, portfolio);
+          await this.analyzeStock(stock, portfolio, spyCandles);
         } catch (err) {
           log.error({ symbol: stock.symbol, err }, 'Analysis failed for stock');
         }
@@ -641,7 +652,11 @@ class TradingBot {
     await Promise.all(analysisPromises);
   }
 
-  private async analyzeStock(stock: StockInfo, portfolio: PortfolioState): Promise<void> {
+  private async analyzeStock(
+    stock: StockInfo,
+    portfolio: PortfolioState,
+    spyCandles: import('./data/yahoo-finance.js').OHLCVCandle[] = [],
+  ): Promise<void> {
     const { symbol, t212Ticker } = stock;
 
     // 1. Get full stock data
@@ -680,6 +695,36 @@ class TradingBot {
       }
     }
 
+    // 3c. Regime detection (uses SPY candles fetched once per loop)
+    let regimeAnalysis = null;
+    try {
+      if (spyCandles.length > 0) {
+        regimeAnalysis = getRegimeDetector().detect(
+          spyCandles,
+          data.marketContext.vixLevel ?? undefined,
+        );
+      }
+    } catch (err) {
+      log.debug({ symbol, err }, 'Regime detection failed, continuing without');
+    }
+
+    // 3d. Multi-timeframe analysis
+    let multiTimeframeResult = null;
+    try {
+      multiTimeframeResult = createMultiTimeframeAnalyzer().analyze(symbol, data.candles);
+    } catch (err) {
+      log.debug({ symbol, err }, 'Multi-timeframe analysis failed, continuing without');
+    }
+
+    // 3e. Social sentiment (if module has data)
+    let socialSentimentResult = null;
+    try {
+      const socialAnalyzer = getSocialSentimentAnalyzer();
+      socialSentimentResult = socialAnalyzer.analyzeSymbol(symbol, []);
+    } catch (err) {
+      log.debug({ symbol, err }, 'Social sentiment failed, continuing without');
+    }
+
     // 4. Build AI context (portfolio passed from caller)
     const aiContext = this.buildAIContext(
       symbol,
@@ -692,6 +737,9 @@ class TradingBot {
       portfolio,
       portfolioCorrelations,
       webResearchData,
+      regimeAnalysis,
+      multiTimeframeResult,
+      socialSentimentResult,
     );
 
     // 5. AI decision
@@ -1427,6 +1475,14 @@ class TradingBot {
     const audit = getAuditLogger();
     log.info({ positionCount: allPositions.length }, 'Re-evaluating open positions');
 
+    // Fetch SPY candles once for regime detection
+    let spyCandles: import('./data/yahoo-finance.js').OHLCVCandle[] = [];
+    try {
+      spyCandles = await this.yahoo.getHistoricalData('SPY', 90);
+    } catch (err) {
+      log.debug({ err }, 'Failed to fetch SPY candles for re-eval regime detection');
+    }
+
     for (const pos of allPositions) {
       try {
         const data = await this.dataAggregator.getStockData(pos.symbol);
@@ -1451,6 +1507,26 @@ class TradingBot {
           correlation: c.correlation,
         }));
 
+        // Regime + multi-timeframe for re-eval context
+        let regimeAnalysis = null;
+        try {
+          if (spyCandles.length > 0) {
+            regimeAnalysis = getRegimeDetector().detect(
+              spyCandles,
+              data.marketContext.vixLevel ?? undefined,
+            );
+          }
+        } catch {
+          /* non-critical */
+        }
+
+        let multiTimeframeResult = null;
+        try {
+          multiTimeframeResult = createMultiTimeframeAnalyzer().analyze(pos.symbol, data.candles);
+        } catch {
+          /* non-critical */
+        }
+
         const portfolio = await this.getPortfolioState();
         const aiContext = this.buildAIContext(
           pos.symbol,
@@ -1462,6 +1538,9 @@ class TradingBot {
           sentimentInput,
           portfolio,
           portfolioCorrelations,
+          null,
+          regimeAnalysis,
+          multiTimeframeResult,
         );
 
         // Add position context to signal re-evaluation
@@ -1733,6 +1812,9 @@ class TradingBot {
     portfolio: PortfolioState,
     portfolioCorrelations?: Array<{ symbol: string; correlation: number }>,
     webResearchData?: WebResearchData | null,
+    regimeAnalysis?: import('./analysis/regime-detector.js').RegimeAnalysis | null,
+    multiTimeframeResult?: import('./analysis/multi-timeframe.js').MultiTimeframeResult | null,
+    socialSentimentResult?: import('./data/social-sentiment.js').SocialSentimentResult | null,
   ): AIContext {
     const candles = data.candles;
     const latest = candles[candles.length - 1];
@@ -1744,16 +1826,20 @@ class TradingBot {
     const priceChange5d = fiveDaysAgo ? (price - fiveDaysAgo.close) / fiveDaysAgo.close : 0;
     const priceChange1m = thirtyDaysAgo ? (price - thirtyDaysAgo.close) / thirtyDaysAgo.close : 0;
 
-    // Fetch historical signals
+    // Fetch historical signals (only when enabled)
     const db = getDb();
-    const historicalSignalCount = configManager.get<number>('ai.historicalSignalCount');
-    const prevSignals = db
-      .select()
-      .from(schema.signals)
-      .where(eq(schema.signals.symbol, symbol))
-      .orderBy(desc(schema.signals.timestamp))
-      .limit(historicalSignalCount)
-      .all();
+    const includeHistorical = configManager.get<boolean>('ai.includeHistoricalSignals');
+    let prevSignals: (typeof schema.signals.$inferSelect)[] = [];
+    if (includeHistorical) {
+      const historicalSignalCount = configManager.get<number>('ai.historicalSignalCount');
+      prevSignals = db
+        .select()
+        .from(schema.signals)
+        .where(eq(schema.signals.symbol, symbol))
+        .orderBy(desc(schema.signals.timestamp))
+        .limit(historicalSignalCount)
+        .all();
+    }
 
     const mc = data.marketContext;
 
@@ -1763,13 +1849,15 @@ class TradingBot {
       return sum + val; // positive = buy, negative = sell
     }, 0);
 
-    // Compute days to earnings
-    const daysToEarnings =
-      data.earnings.length > 0
-        ? Math.ceil(
-            (new Date(data.earnings[0].date).getTime() - Date.now()) / (1000 * 60 * 60 * 24),
-          )
-        : null;
+    // Compute days to earnings (nearest future date only)
+    const now = Date.now();
+    const nextEarningsTs = data.earnings
+      .map((e) => new Date(e.date).getTime())
+      .filter((t) => t > now)
+      .sort((a, b) => a - b)[0];
+    const daysToEarnings = nextEarningsTs
+      ? Math.ceil((nextEarningsTs - now) / (1000 * 60 * 60 * 24))
+      : null;
 
     // Existing positions from DB
     const dbPositions = db.select().from(schema.positions).all();
@@ -1858,11 +1946,20 @@ class TradingBot {
         todayPnl: portfolio.todayPnl,
         todayPnlPct: portfolio.todayPnlPct,
         sectorExposure: portfolio.sectorExposure,
+        sectorExposureValue: portfolio.sectorExposureValue,
         existingPositions: dbPositions.map((p) => ({
           symbol: p.symbol,
           pnlPct: p.pnlPct ?? 0,
           entryPrice: p.entryPrice,
           currentPrice: p.currentPrice ?? p.entryPrice,
+          shares: p.shares,
+          stopLoss: p.stopLoss ?? null,
+          trailingStop: p.trailingStop ?? null,
+          holdDays: Math.ceil(
+            (Date.now() - new Date(p.entryTime).getTime()) / (1000 * 60 * 60 * 24),
+          ),
+          dcaCount: p.dcaCount ?? 0,
+          partialExitCount: p.partialExitCount ?? 0,
         })),
       },
       marketContext: {
@@ -1894,6 +1991,39 @@ class TradingBot {
               perfMonth: webResearchData.perfMonth,
               perfQuarter: webResearchData.perfQuarter,
               perfYear: webResearchData.perfYear,
+              relativeVolume: webResearchData.relativeVolume,
+              averageVolume: webResearchData.averageVolume,
+            },
+          }
+        : {}),
+      ...(regimeAnalysis
+        ? {
+            regime: {
+              regime: regimeAnalysis.regime,
+              confidence: regimeAnalysis.confidence,
+              spyTrend: regimeAnalysis.details.spyTrend,
+              volatilityPctile: regimeAnalysis.details.volatilityPctile,
+              newEntriesAllowed: regimeAnalysis.details.adjustments.newEntriesAllowed,
+              positionSizeMultiplier: regimeAnalysis.details.adjustments.positionSizeMultiplier,
+            },
+          }
+        : {}),
+      ...(multiTimeframeResult
+        ? {
+            multiTimeframe: {
+              compositeScore: multiTimeframeResult.compositeScore,
+              alignment: multiTimeframeResult.alignment,
+              timeframeScores: multiTimeframeResult.timeframeScores,
+            },
+          }
+        : {}),
+      ...(socialSentimentResult && socialSentimentResult.mentionCount > 0
+        ? {
+            socialSentiment: {
+              overallScore: socialSentimentResult.overallScore,
+              buzzScore: socialSentimentResult.buzzScore,
+              mentionCount: socialSentimentResult.mentionCount,
+              trendDirection: socialSentimentResult.trendDirection,
             },
           }
         : {}),
