@@ -5,6 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Backtesting Engine**: Full backtesting with historical data loader, strategy execution, and performance reporting; accessible via `POST /api/backtest` endpoint
+- **Conditional Orders**: OCO (One-Cancels-Other), Bracket (entry + SL + TP), Trailing Stop, and If-Then order types
+- **Dollar-Cost Averaging (DCA)**: Build positions over time with configurable intervals and amounts
+- **Partial Exit Management**: Scale out of positions at multiple targets (e.g., 25% at 5%, 50% at 10%, 100% at 20%)
+- **Strategy Profiles**: Pre-configured strategy sets (conservative, balanced, aggressive, scalper, swing) with one-click activation
+- **Tax Tracking**: Tax lot tracking with FIFO/LIFO/HIFO support, wash sale detection, tax-loss harvesting candidates
+- **Trade Journal**: Journal entries with tags, notes, mood, and lessons; pattern analysis and insights
+- **Webhooks**: External integrations for Discord, Slack, and custom endpoints; webhook configuration and logging
+- **Social Sentiment Analysis**: Aggregate sentiment from Reddit, Twitter, and StockTwits
+- **Web Research**: Deep fundamental analysis via Perplexity API integration
+- **AI Self-Improvement**: AI analyzes past decisions, identifies patterns, and updates internal strategies
+- **Market Regime Detection**: Identify bull/bear/sideways market regimes and adapt strategy parameters
+- **Performance Attribution**: Break down returns by alpha, beta, sector contributions, and factor exposures
+- **Monte Carlo Simulation**: Portfolio simulation and risk analysis via `POST /monte-carlo/simulate`
+- **Portfolio Optimizer**: Portfolio optimization and rebalancing suggestions
+- **Multi-Timeframe Analysis**: Multi-timeframe technical analysis confirmation
+- **Risk Parity Sizing**: Risk parity position sizing across portfolio to equalize risk contribution
+- **ROI Table**: Time-based ROI targets (e.g., 2% at 1h, 5% at 4h, 10% at 1d)
+- **Pair Locks**: Prevent conflicting trades on the same symbol with automatic locking
+- **Price Streaming**: Real-time price streaming via WebSocket
+- **Steer Client**: Alternative data provider integration
+- **Trading Protections**: Cooldown periods, max drawdown limits, losing streak protection
+- **ATR-Based Stop-Loss**: Dynamic stop-loss calculator based on Average True Range
+- **Exit Condition DSL**: Custom exit logic with simple expressions (e.g., `rsi > 70 and macd_cross_down`)
+- **Order Management**: Full order tracking, modification, and synchronization with Trading212
+- **Health Metrics**: System health monitoring (API latency, error rates, queue depths)
+- **Report Generator**: Automated daily, weekly, and monthly performance report generation
+- New database tables: `orders`, `conditionalOrders`, `pairLocks`, `tradeJournal`, `taxLots`, `webhookConfigs`, `webhookLogs`, `strategyProfiles` (total: 23 tables)
+- 45+ new REST endpoints including: backtesting, strategy profiles, Monte Carlo, trade journal, tax management, portfolio optimization, orders, protections, attribution, regime detection
+- TypeScript types configuration fix: Added `"types": ["node"]` to tsconfig.json
+
+### Changed
+- REST API expanded from 15+ to 60+ endpoints
+- Database schema expanded from 15 to 23 tables
+- Node.js requirement updated from 20+ to 24+
+- Test coverage: 90.5% lines, 92.26% functions, 83.76% branches (2,562 tests across 88 test files)
+- Documentation comprehensively updated across CLAUDE.md and README.md
+
 ## [1.1.0] - 2026-02-13
 
 ### Added
