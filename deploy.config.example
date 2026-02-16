@@ -1,0 +1,7 @@
+# VPS Deployment Configuration
+# Copy this file to deploy.config and fill in your details
+# DO NOT commit deploy.config to git!
+
+SERVER=ubuntu@your-vps-ip-address
+SSH_KEY=$HOME/path/to/your/ssh-key.pem
+DEPLOY_DIR=/home/ubuntu/trader212

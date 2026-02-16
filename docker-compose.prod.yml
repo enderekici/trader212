@@ -1,0 +1,29 @@
+services:
+  bot:
+    build: .
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "3001:3001"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3001/api/status').then(r=>{if(!r.ok)throw 1})"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    environment:
+      - API_URL=http://bot:3001
+      - API_SECRET_KEY=${API_SECRET_KEY:-}
+    ports:
+      - "3000:3000"
+    depends_on:
+      bot:
+        condition: service_healthy
+    restart: unless-stopped
