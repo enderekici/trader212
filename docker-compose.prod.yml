@@ -1,6 +1,6 @@
 services:
   bot:
-    build: .
+    image: ghcr.io/enderekici/trader212:latest
     env_file: .env
     volumes:
       - ./data:/app/data
@@ -15,9 +15,7 @@ services:
       start_period: 30s
 
   web:
-    build:
-      context: .
-      dockerfile: Dockerfile.web
+    image: ghcr.io/enderekici/trader212:latest-web
     environment:
       - API_URL=http://bot:3001
       - API_SECRET_KEY=${API_SECRET_KEY:-}
