@@ -112,14 +112,10 @@ export class YahooFinanceClient {
 
   async getFundamentals(symbol: string): Promise<FundamentalData | null> {
     try {
-      const modules = 'summaryProfile,financialData,defaultKeyStatistics,earningsHistory';
-      const { data } = await axios.get(`${YAHOO_QUOTESUMMARY_URL}/${encodeURIComponent(symbol)}`, {
-        params: { modules },
-        headers: YF_HEADERS,
-        timeout: 15_000,
+      const result = await yf.quoteSummary(symbol, {
+        modules: ['summaryProfile', 'financialData', 'defaultKeyStatistics', 'earningsHistory'],
       });
 
-      const result = data?.quoteSummary?.result?.[0];
       if (!result) {
         log.warn({ symbol }, 'No fundamentals data returned');
         return null;
