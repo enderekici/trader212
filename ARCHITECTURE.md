@@ -637,6 +637,141 @@ Bot action audit trail / session replay. Indexed on `(timestamp, eventType)`.
 | details | TEXT | JSON with full context |
 | severity | TEXT | info, warn, error |
 
+### `orders`
+
+Order tracking and lifecycle management. Tracks each exchange order with full status history. Indexed on `(tradeId)`, `(positionId)`, and `(status, symbol)`.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | INTEGER | Auto-increment primary key |
+| tradeId | INTEGER | FK to trades.id (null if trade not yet created) |
+| positionId | INTEGER | FK to positions.id |
+| symbol | TEXT | Stock symbol |
+| side | TEXT | BUY, SELL |
+| orderType | TEXT | market, limit, stop |
+| status | TEXT | pending, open, filled, partially_filled, cancelled, expired, failed |
+| requestedQuantity | REAL | Shares requested |
+| filledQuantity | REAL | Shares filled (default: 0) |
+| requestedPrice | REAL | Limit price (null for market orders) |
+| filledPrice | REAL | Average fill price |
+| stopPrice | REAL | Trigger price for stop orders |
+| t212OrderId | TEXT | Trading212 exchange order ID |
+| cancelReason | TEXT | Why order was cancelled |
+| orderTag | TEXT | entry, exit, dca, stoploss, take_profit, partial_exit |
+| replacedByOrderId | INTEGER | FK to orders.id (order replacement chain) |
+| accountType | TEXT | INVEST, ISA |
+| createdAt | TEXT | Order creation timestamp |
+| updatedAt | TEXT | Last update timestamp |
+| filledAt | TEXT | Fill completion timestamp |
+
+### `conditional_orders`
+
+Conditional order system for OCO, price triggers, and advanced order types. Indexed on `(status, symbol)`.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | INTEGER | Auto-increment primary key |
+| symbol | TEXT | Stock symbol |
+| triggerType | TEXT | price_above, price_below, time, indicator |
+| triggerCondition | TEXT | JSON trigger condition |
+| action | TEXT | JSON action: { type, shares, price?, ... } |
+| status | TEXT | pending, triggered, executed, cancelled, expired |
+| linkedOrderId | INTEGER | For OCO: the other order's id |
+| ocoGroupId | TEXT | OCO group identifier |
+| expiresAt | TEXT | Order expiration timestamp |
+| createdAt | TEXT | Creation timestamp |
+| triggeredAt | TEXT | Trigger execution timestamp |
+
+### `pair_locks`
+
+Pair locking system to prevent conflicting trades. Supports per-symbol and global locks. Indexed on `(symbol, active, lockEnd)`.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | INTEGER | Auto-increment primary key |
+| symbol | TEXT | Stock symbol ('*' for global lock) |
+| lockEnd | TEXT | ISO timestamp when lock expires |
+| reason | TEXT | cooldown, stoploss_guard, max_drawdown, low_profit |
+| side | TEXT | long, short, * (all sides) |
+| active | BOOLEAN | Lock is currently active |
+| createdAt | TEXT | Lock creation timestamp |
+
+### `trade_journal`
+
+Trade journal entries with notes and tags. Supports post-trade analysis and pattern identification. Indexed on `(symbol, createdAt)`.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | INTEGER | Auto-increment primary key |
+| tradeId | INTEGER | FK to trades.id |
+| positionId | INTEGER | FK to positions.id |
+| symbol | TEXT | Stock symbol |
+| note | TEXT | Journal entry text |
+| tags | TEXT | JSON array of tags |
+| createdAt | TEXT | Entry timestamp |
+
+### `tax_lots`
+
+Tax lot tracking for cost basis and wash sale detection. Supports FIFO/LIFO/HIFO accounting. Indexed on `(symbol, saleDate)`.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | INTEGER | Auto-increment primary key |
+| symbol | TEXT | Stock symbol |
+| shares | REAL | Number of shares |
+| costBasis | REAL | Cost basis per share |
+| purchaseDate | TEXT | Purchase timestamp |
+| saleDate | TEXT | Sale timestamp (null if still held) |
+| salePrice | REAL | Sale price per share |
+| pnl | REAL | Realized P&L |
+| holdingPeriod | TEXT | short (<1 year), long (≥1 year) |
+| accountType | TEXT | INVEST, ISA |
+| createdAt | TEXT | Lot creation timestamp |
+
+### `webhook_configs`
+
+Webhook configuration for external integrations (Discord, Slack, custom endpoints).
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | INTEGER | Auto-increment primary key |
+| name | TEXT | Webhook name |
+| url | TEXT | Webhook URL |
+| secret | TEXT | Webhook secret for signing |
+| direction | TEXT | inbound, outbound |
+| eventTypes | TEXT | JSON array of event types to trigger |
+| active | BOOLEAN | Webhook is active |
+| createdAt | TEXT | Configuration timestamp |
+
+### `webhook_logs`
+
+Webhook invocation history and debugging. Indexed on `(createdAt)`.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | INTEGER | Auto-increment primary key |
+| webhookId | INTEGER | FK to webhook_configs.id |
+| direction | TEXT | inbound, outbound |
+| eventType | TEXT | Event type that triggered webhook |
+| payload | TEXT | JSON payload sent/received |
+| statusCode | INTEGER | HTTP status code |
+| response | TEXT | Response from webhook |
+| createdAt | TEXT | Invocation timestamp |
+
+### `strategy_profiles`
+
+Pre-configured strategy profile sets (conservative, balanced, aggressive, scalper, swing).
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | INTEGER | Auto-increment primary key |
+| name | TEXT | Profile name (unique) |
+| description | TEXT | Profile description |
+| config | TEXT | JSON object of config overrides |
+| active | BOOLEAN | Profile is currently active |
+| createdAt | TEXT | Profile creation timestamp |
+| updatedAt | TEXT | Last update timestamp |
+
 ## Config System
 
 All runtime configuration lives in the `config` table. The `ConfigManager` class:
@@ -650,6 +785,102 @@ All runtime configuration lives in the `config` table. The `ConfigManager` class
 Config categories: `trading212`, `pairlist`, `dataSources`, `analysis`, `ai`, `risk`, `execution`, `monitoring`.
 
 Secrets (API keys, tokens) are **never** stored in the DB -- they remain in `.env` only.
+
+## Environment Variables
+
+All secrets and deployment-specific configuration are managed via `.env` file (never committed to git). Copy `.env.example` to `.env` and configure:
+
+### Trading212 API
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `TRADING212_API_KEY` | **Yes** | Your Trading212 API key (demo or live). Get from Settings → API in Trading212 app |
+| `T212_ENVIRONMENT` | No | `demo` (default) or `live`. Controls which Trading212 environment to use |
+| `T212_ACCOUNT_TYPE` | No | `INVEST` (default) or `ISA`. Which account type to trade in |
+
+### API Security
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `API_SECRET_KEY` | **Recommended** | Bearer token for REST API authentication. Required in production (`NODE_ENV=production`). Disabled if empty |
+| `CORS_ORIGINS` | No | Comma-separated allowed origins. Default: `http://localhost:3000` |
+
+### AI Providers
+
+Configure ONE of these providers via `AI_PROVIDER` env var (`anthropic`, `ollama`, or `openai-compatible`).
+
+#### Anthropic Claude
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `ANTHROPIC_API_KEY` | **Yes** (if using Anthropic) | Anthropic API key from console.anthropic.com |
+| `ANTHROPIC_MODEL` | No | Model name. Default: `claude-3-5-sonnet-20241022` |
+| `AI_PROVIDER` | **Yes** | Set to `anthropic` |
+
+#### Ollama (Local LLM)
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `OLLAMA_BASE_URL` | **Yes** (if using Ollama) | Ollama server URL. Default: `http://localhost:11434` |
+| `OLLAMA_MODEL` | **Yes** | Model name (e.g., `llama2`, `mistral`, `phi`) |
+| `AI_PROVIDER` | **Yes** | Set to `ollama` |
+
+#### OpenAI-Compatible (LM Studio, LocalAI, etc.)
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `OPENAI_COMPAT_BASE_URL` | **Yes** (if using OpenAI-compatible) | API base URL (e.g., `http://localhost:1234/v1`) |
+| `OPENAI_COMPAT_API_KEY` | No | API key (use `not-needed` for local servers) |
+| `OPENAI_COMPAT_MODEL` | **Yes** | Model name (e.g., `llama-3-8b-instruct-finance-rag`) |
+| `AI_PROVIDER` | **Yes** | Set to `openai-compatible` |
+
+### Data Sources
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `FINNHUB_API_KEY` | **Yes** | Finnhub API key(s). Supports comma-separated multiple keys for rotation (e.g., `key1,key2,key3`). Free tier: 60 calls/min |
+| `MARKETAUX_API_TOKEN` | **Yes** | Marketaux API token(s). Supports comma-separated multiple tokens for rotation. Free tier: 100 calls/day |
+
+### Telegram (Optional)
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `TELEGRAM_BOT_TOKEN` | No | Telegram bot token from @BotFather. Enables Telegram notifications and commands |
+| `TELEGRAM_CHAT_ID` | No | Your Telegram chat ID. Get by messaging bot and checking bot logs |
+
+### Additional Data Sources (Optional)
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `PERPLEXITY_API_KEY` | No | Perplexity API key for web research feature |
+| `STEER_API_KEY` | No | Steer API key for alternative market data |
+
+### Example .env File
+
+```env
+# Trading212
+TRADING212_API_KEY=your_demo_key_here
+T212_ENVIRONMENT=demo
+T212_ACCOUNT_TYPE=INVEST
+
+# API Security
+API_SECRET_KEY=your_strong_random_key_here
+CORS_ORIGINS=http://localhost:3000,http://your-vps-ip:3000
+
+# AI (using local LM Studio)
+AI_PROVIDER=openai-compatible
+OPENAI_COMPAT_BASE_URL=http://localhost:1234/v1
+OPENAI_COMPAT_API_KEY=not-needed
+OPENAI_COMPAT_MODEL=llama-3-8b-instruct-finance-rag
+
+# Data Sources
+FINNHUB_API_KEY=key1,key2,key3
+MARKETAUX_API_TOKEN=token1,token2
+
+# Telegram (optional)
+TELEGRAM_BOT_TOKEN=123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11
+TELEGRAM_CHAT_ID=123456789
+```
 
 ## Scheduler Jobs
 
@@ -689,6 +920,158 @@ The Express server at `:3001` also hosts a WebSocket server for real-time update
 | `alert` | Server -> Client | Alert/notification |
 | `research_completed` | Server -> Client | AI research report finished |
 
+## REST API Endpoints
+
+The Express server exposes 60+ REST endpoints at `:3001/api/*`. All endpoints except `/api/status` require Bearer token authentication via `API_SECRET_KEY` env var.
+
+### Status & Health
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/status` | Bot status, uptime, market status, environment, account type |
+| GET | `/api/health` | Health check with API latency, error rates, queue depths |
+
+### Portfolio & Positions
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/portfolio` | Positions + cash + total value + P&L |
+| GET | `/api/positions/:symbol/orders` | All orders for a specific position |
+
+### Trades & Orders
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/trades` | Trade history with filters (symbol, from, to, side, limit, offset) |
+| GET | `/api/trades/:id` | Single trade detail with full context |
+| GET | `/api/orders` | List all orders with status filtering |
+| GET | `/api/orders/:id` | Single order detail with lifecycle history |
+
+### Signals & Analysis
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/signals` | Signal history with filters (symbol, from, to, limit, offset) |
+| GET | `/api/signals/:symbol/latest` | Latest signal for a symbol with full indicator values |
+| GET | `/api/signals/:symbol/history` | Signal history timeline for a symbol |
+| GET | `/api/stock/:symbol` | Stock detail (latest signal + fundamentals + position) |
+
+### Performance & Analytics
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/performance` | Aggregate metrics (win rate, Sharpe, Sortino, Calmar, max drawdown) |
+| GET | `/api/performance/daily` | Daily performance metrics time series |
+| GET | `/api/attribution` | Performance attribution (alpha, beta, sector contributions, factor exposures) |
+| GET | `/regime` | Current market regime (bull/bear/sideways) with confidence scores |
+
+### Pairlist
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/pairlist` | Current pairlist with filter stats |
+| GET | `/api/pairlist/history` | Pairlist snapshot history |
+| POST | `/api/pairlist/static` | Add symbol to static pairlist (body: `{ symbol }`) |
+| DELETE | `/api/pairlist/static/:symbol` | Remove symbol from static pairlist |
+
+### Configuration
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/config` | All config grouped by category |
+| GET | `/api/config/:category` | Config for specific category (e.g., `risk`, `execution`) |
+| PUT | `/api/config/:key` | Update config value (Zod validated) |
+
+### Bot Control
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/control/pause` | Pause the bot (stops all trading activity) |
+| POST | `/api/control/resume` | Resume the bot |
+| POST | `/api/control/close/:symbol` | Close a position immediately |
+| POST | `/api/control/analyze/:symbol` | Force analysis on a symbol |
+| POST | `/api/control/refresh-pairlist` | Force pairlist refresh |
+| POST | `/api/control/emergency-stop` | Emergency stop: close all positions + pause bot |
+
+### Trade Plans
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/trade-plans` | List recent trade plans with approval status |
+| POST | `/api/trade-plans/:id/approve` | Approve a pending trade plan |
+| POST | `/api/trade-plans/:id/reject` | Reject a pending trade plan |
+
+### AI & Research
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/research` | List AI research reports |
+| POST | `/api/research/run` | Trigger manual AI research (body: `{ focus?, symbols? }`) |
+| GET | `/api/model-stats` | AI model performance statistics (accuracy, win rates, avg returns) |
+
+### Protections & Locks
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/protections/locks` | List active pair locks |
+| DELETE | `/api/protections/locks/:symbol` | Remove a pair lock |
+
+### Audit & Logging
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/audit` | Audit log entries (query: `date`, `type`, `limit`) |
+| GET | `/api/correlation` | Portfolio correlation matrix (Pearson correlation on daily returns) |
+
+### Backtesting
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/backtest` | Run backtest (body: `{ strategy, startDate, endDate, symbols, capital }`) |
+
+### Strategy Profiles
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/strategy-profiles` | List all strategy profiles (conservative, balanced, aggressive, scalper, swing) |
+| POST | `/strategy-profiles/:name/activate` | Activate a strategy profile (applies config overrides) |
+
+### Monte Carlo Simulation
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/monte-carlo/simulate` | Run Monte Carlo portfolio simulation |
+
+### Trade Journal
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/journal` | Get journal entries (query: `symbol`, `from`, `to`, `limit`) |
+| POST | `/journal` | Create journal entry (body: `{ tradeId, notes, tags, mood, lessons }`) |
+| GET | `/journal/search` | Search journal entries (query: `q`, `tags`) |
+| GET | `/journal/insights` | Get journal insights and pattern analysis |
+
+### Tax Management
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/tax/summary` | Tax summary for a year (query: `year`) with wash sales, holding periods |
+| GET | `/tax/harvest-candidates` | Tax-loss harvesting candidates with unrealized losses |
+
+### Portfolio Optimization
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/portfolio/optimize` | Portfolio optimization suggestions (rebalancing, risk parity adjustments) |
+
+### Webhooks
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/webhooks` | List webhook configurations |
+| POST | `/webhooks` | Create webhook (body: `{ name, url, secret, eventTypes }`) |
+| GET | `/webhooks/logs` | Webhook invocation history |
+
 ## Web Dashboard
 
 The dashboard is a Next.js 15 application (App Router) with Tailwind CSS v4:
@@ -723,6 +1106,212 @@ The dashboard is a Next.js 15 application (App Router) with Tailwind CSS v4:
 - `ConfigEditor` -- Live config editor grouped by category
 
 **Dependencies:** Next.js 15, React 19, Tailwind CSS v4, SWR, lucide-react, lightweight-charts, clsx, tailwind-merge.
+
+## Advanced Features
+
+### Conditional Orders
+
+Supports complex order types for advanced execution strategies:
+
+- **OCO (One-Cancels-Other)**: Two linked orders where execution of one cancels the other (e.g., stop-loss + take-profit)
+- **Bracket Orders**: Entry order with automatic stop-loss and take-profit orders
+- **Trailing Stop**: Dynamic stop-loss that follows price at a fixed distance or percentage
+- **If-Then Orders**: Conditional execution based on price triggers or indicator values
+
+Managed via `src/execution/conditional-orders.ts` and `conditional_orders` database table.
+
+### Dollar-Cost Averaging (DCA)
+
+Build positions gradually over time with configurable intervals and amounts:
+
+- Configure DCA rounds, intervals, and allocation per round
+- Automatic execution at scheduled times
+- Position averaging with cost basis tracking
+- Supports both time-based and price-based DCA triggers
+
+Managed via `src/execution/dca-manager.ts`.
+
+### Partial Exit Management
+
+Scale out of positions at multiple profit targets:
+
+- Define multiple exit levels (e.g., 25% at +5%, 50% at +10%, 100% at +20%)
+- Automatic execution as targets are reached
+- Preserves runner for maximum profit potential
+- Tracks partial exit history per position
+
+Managed via `src/execution/partial-exit-manager.ts`.
+
+### Pair Locks & Protections
+
+Prevent conflicting trades and protect against adverse conditions:
+
+- **Pair Locks**: Prevent trades on specific symbols for a duration
+- **Cooldown Period**: Mandatory wait time after closing a position
+- **Stoploss Guard**: Lock trading after N consecutive stoplosses
+- **Max Drawdown Protection**: Pause trading when drawdown exceeds threshold
+- **Low Profit Pairs**: Auto-lock underperforming symbols
+
+Managed via `src/execution/pair-locks.ts` and `src/execution/protections.ts`.
+
+### Exit Condition DSL
+
+Custom exit logic using a simple domain-specific language:
+
+```
+rsi > 70 and macd_cross_down
+or
+price_below sma20 and volume > avg_volume * 2
+```
+
+Supports indicator values, price levels, volume, and logical operators. Evaluated in real-time during position monitoring.
+
+Managed via `src/execution/exit-condition-dsl.ts`.
+
+### Strategy Profiles
+
+Pre-configured strategy sets for different trading styles:
+
+- **Conservative**: Low risk, longer holds, strict stops
+- **Balanced**: Moderate risk-reward, diversified approach
+- **Aggressive**: Higher risk tolerance, faster exits
+- **Scalper**: High-frequency, small profit targets
+- **Swing**: Multi-day holds, wider stops
+
+One-click activation applies full config overrides. Stored in `strategy_profiles` table.
+
+Managed via `src/config/strategy-profiles.ts`.
+
+### Tax Tracking & Optimization
+
+Comprehensive tax lot tracking and optimization:
+
+- **Cost Basis Tracking**: FIFO, LIFO, or HIFO accounting methods
+- **Wash Sale Detection**: 30-day wash sale rule monitoring with warnings
+- **Tax-Loss Harvesting**: Automatic identification of harvesting candidates
+- **Holding Period Tracking**: Short-term vs. long-term capital gains classification
+- **Annual Tax Reporting**: Detailed tax summaries by year
+
+Managed via `src/monitoring/tax-tracker.ts` and `tax_lots` table.
+
+### Trade Journal
+
+Post-trade analysis and pattern identification:
+
+- Add notes, tags, mood, and lessons to each trade
+- Search journal entries by tags, symbols, or keywords
+- Pattern analysis identifies common mistakes and successful setups
+- Insights dashboard shows recurring themes
+- Supports both manual entries and automated AI-generated insights
+
+Managed via `src/monitoring/trade-journal.ts` and `trade_journal` table.
+
+### Backtesting Engine
+
+Full strategy backtesting with historical data:
+
+- Historical data loading from Yahoo Finance
+- Strategy execution simulation with realistic fills
+- Performance reporting (Sharpe, Sortino, max drawdown, win rate)
+- Walk-forward analysis support
+- Comparison of multiple strategies side-by-side
+
+Managed via `src/backtest/` directory.
+
+### Market Regime Detection
+
+Adaptive strategy based on market conditions:
+
+- Identifies bull, bear, and sideways market regimes
+- Uses multiple timeframe analysis and volatility measures
+- Adjusts position sizing and stop-loss distances based on regime
+- Historical regime tracking for pattern analysis
+
+Managed via `src/analysis/regime-detector.ts`.
+
+### Performance Attribution
+
+Detailed breakdown of returns and risk factors:
+
+- **Alpha**: Excess returns above benchmark (SPY)
+- **Beta**: Portfolio correlation with market
+- **Sector Contributions**: Returns attributed to each sector
+- **Factor Exposures**: Value, growth, momentum, quality factors
+- **Trade Attribution**: Performance breakdown by individual trades
+
+Managed via `src/monitoring/attribution.ts`.
+
+### Monte Carlo Simulation
+
+Portfolio risk analysis through simulation:
+
+- Runs thousands of portfolio simulations
+- Probability distributions for returns and drawdown
+- Value-at-Risk (VaR) and Conditional VaR (CVaR) calculations
+- Stress testing against historical scenarios
+- Confidence intervals for performance projections
+
+Managed via `src/analysis/monte-carlo.ts`.
+
+### Risk Parity Position Sizing
+
+Equal risk contribution across portfolio:
+
+- Calculates position sizes to equalize volatility contribution
+- Rebalancing recommendations when risk becomes unbalanced
+- Accounts for correlation between positions
+- Dynamic adjustment based on market volatility
+
+Managed via `src/execution/risk-parity.ts`.
+
+### Social Sentiment Analysis
+
+Aggregate sentiment from social media:
+
+- **Reddit**: Wallstreetbets, investing, stocks subreddits
+- **Twitter/X**: Real-time sentiment tracking
+- **StockTwits**: Trader sentiment and volume spikes
+- Sentiment scoring (-100 to +100) integrated into AI decision engine
+- Historical sentiment tracking for pattern analysis
+
+Managed via `src/data/social-sentiment.ts`.
+
+### Web Research Integration
+
+Deep fundamental research via Perplexity API:
+
+- Automated web research for stock analysis
+- Earnings call transcript analysis
+- News aggregation and summarization
+- Competitive analysis and industry trends
+- Integrated into AI research reports
+
+Managed via `src/data/web-researcher.ts`.
+
+### AI Self-Improvement
+
+AI analyzes its own performance and adapts:
+
+- Analyzes past decisions and outcomes
+- Identifies patterns (e.g., "overtrading tech stocks", "poor exits in volatile conditions")
+- Generates insights and strategy updates
+- Adjusts internal confidence thresholds
+- Logs all insights to `audit_log` for review
+
+Managed via `src/ai/self-improvement.ts`.
+
+### Webhooks
+
+External integrations for notifications and automation:
+
+- **Discord**: Trade alerts, daily summaries
+- **Slack**: Team notifications, bot status
+- **Custom Endpoints**: HTTP POST webhooks for any event
+- Event filtering and payload customization
+- Retry logic with exponential backoff
+- Full invocation history in `webhook_logs` table
+
+Managed via `src/api/webhooks.ts`.
 
 ## Source Structure
 
