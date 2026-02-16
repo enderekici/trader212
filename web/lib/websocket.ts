@@ -3,18 +3,25 @@
 import { useEffect, useRef, useState } from 'react';
 import type { WSMessage } from './types';
 
-// Derive the WebSocket URL at runtime from the browser's current location.
-// The backend WebSocket runs on port 3001 (same host, different port).
-// Override with NEXT_PUBLIC_WS_URL if the backend is on a different host.
-function getWsUrl(): string {
-  if (process.env.NEXT_PUBLIC_WS_URL) {
-    return process.env.NEXT_PUBLIC_WS_URL;
+/**
+ * Fetches the authenticated WebSocket URL from the server.
+ * The server-side API route adds the auth token to the URL.
+ */
+async function getAuthenticatedWsUrl(): Promise<string> {
+  try {
+    const response = await fetch('/api/ws-url');
+    if (!response.ok) {
+      throw new Error(`Failed to get WebSocket URL: ${response.statusText}`);
+    }
+    const data = await response.json();
+    return data.url;
+  } catch (error) {
+    console.error('Failed to fetch authenticated WebSocket URL:', error);
+    // Fallback to unauthenticated connection
+    const proto = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+    return `${proto}//${host}:3001/ws`;
   }
-  if (typeof window !== 'undefined') {
-    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${proto}//${window.location.hostname}:3001`;
-  }
-  return 'ws://localhost:3001';
 }
 
 export function useWebSocket(events?: string[]) {
@@ -28,11 +35,13 @@ export function useWebSocket(events?: string[]) {
   useEffect(() => {
     let disposed = false;
 
-    function connect() {
+    async function connect() {
       if (disposed) return;
       if (wsRef.current?.readyState === WebSocket.OPEN || wsRef.current?.readyState === WebSocket.CONNECTING) return;
 
-      const ws = new WebSocket(`${getWsUrl()}/ws`);
+      // Fetch authenticated WebSocket URL from server
+      const wsUrl = await getAuthenticatedWsUrl();
+      const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
       ws.onopen = () => {
