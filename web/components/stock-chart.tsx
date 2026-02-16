@@ -32,23 +32,23 @@ export function StockChart({
       height,
       layout: {
         background: { type: ColorType.Solid, color: 'transparent' },
-        textColor: 'hsl(240, 5%, 64.9%)',
+        textColor: '#9fa0a6',
         fontSize: 11,
       },
       grid: {
-        vertLines: { color: 'hsl(240, 3.7%, 12%)' },
-        horzLines: { color: 'hsl(240, 3.7%, 12%)' },
+        vertLines: { color: '#1c1c22' },
+        horzLines: { color: '#1c1c22' },
       },
       rightPriceScale: {
-        borderColor: 'hsl(240, 3.7%, 15.9%)',
+        borderColor: '#26262c',
       },
       timeScale: {
-        borderColor: 'hsl(240, 3.7%, 15.9%)',
+        borderColor: '#26262c',
         timeVisible: true,
       },
       crosshair: {
-        vertLine: { color: 'hsl(240, 3.7%, 25%)', labelBackgroundColor: '#333' },
-        horzLine: { color: 'hsl(240, 3.7%, 25%)', labelBackgroundColor: '#333' },
+        vertLine: { color: '#3c3c44', labelBackgroundColor: '#333' },
+        horzLine: { color: '#3c3c44', labelBackgroundColor: '#333' },
       },
     });
 
