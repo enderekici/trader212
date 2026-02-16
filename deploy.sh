@@ -22,24 +22,26 @@ BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# Step 1: Create deployment directory on server
+# Step 1: Build Docker images locally
+echo -e "${BLUE}🔨 Building Docker images locally...${NC}"
+docker-compose -f docker-compose.prod.yml build --no-cache
+
+# Step 2: Save images to tar files
+echo -e "${BLUE}💾 Saving Docker images...${NC}"
+docker save trader212-trader212-bot:latest | gzip > /tmp/trader212-bot.tar.gz
+docker save trader212-trader212-web:latest | gzip > /tmp/trader212-web.tar.gz
+
+# Step 3: Create deployment directory on server
 echo -e "${BLUE}📁 Creating deployment directory on server...${NC}"
 ssh -i "$SSH_KEY" "$SERVER" "mkdir -p $DEPLOY_DIR"
 
-# Step 2: Copy project files (excluding node_modules, data, etc.)
-echo -e "${BLUE}📦 Copying project files...${NC}"
-rsync -avz --progress \
-  -e "ssh -i $SSH_KEY" \
-  --exclude 'node_modules' \
-  --exclude 'data' \
-  --exclude '.git' \
-  --exclude 'dist' \
-  --exclude 'web/node_modules' \
-  --exclude 'web/.next' \
-  --exclude '.env.local' \
-  ./ "$SERVER:$DEPLOY_DIR/"
+# Step 4: Copy Docker images and compose file
+echo -e "${BLUE}📦 Copying Docker images to server...${NC}"
+scp -i "$SSH_KEY" /tmp/trader212-bot.tar.gz "$SERVER:/tmp/"
+scp -i "$SSH_KEY" /tmp/trader212-web.tar.gz "$SERVER:/tmp/"
+scp -i "$SSH_KEY" docker-compose.prod.yml "$SERVER:$DEPLOY_DIR/"
 
-# Step 3: Copy .env file (create if doesn't exist on server)
+# Step 5: Copy .env file
 echo -e "${YELLOW}⚠️  Checking .env file...${NC}"
 if [ -f .env ]; then
   echo -e "${BLUE}📋 Copying .env file...${NC}"
@@ -48,8 +50,8 @@ else
   echo -e "${YELLOW}⚠️  No .env file found locally. You'll need to create it on the server.${NC}"
 fi
 
-# Step 4: Deploy and start services
-echo -e "${BLUE}🐳 Building and starting Docker containers...${NC}"
+# Step 6: Load images and start services on server
+echo -e "${BLUE}🐳 Loading images and starting services...${NC}"
 ssh -i "$SSH_KEY" "$SERVER" << 'ENDSSH'
 cd /home/ubuntu/trader212
 
@@ -73,10 +75,15 @@ fi
 echo "Stopping existing containers..."
 docker-compose -f docker-compose.prod.yml down 2>/dev/null || true
 
-# Build and start
-echo "Building Docker images..."
-docker-compose -f docker-compose.prod.yml build --no-cache
+# Load Docker images
+echo "Loading Docker images..."
+docker load < /tmp/trader212-bot.tar.gz
+docker load < /tmp/trader212-web.tar.gz
 
+# Clean up image files
+rm /tmp/trader212-bot.tar.gz /tmp/trader212-web.tar.gz
+
+# Start services
 echo "Starting services..."
 docker-compose -f docker-compose.prod.yml up -d
 
@@ -87,10 +94,10 @@ sleep 10
 docker-compose -f docker-compose.prod.yml ps
 ENDSSH
 
+# Clean up local temp files
+rm /tmp/trader212-bot.tar.gz /tmp/trader212-web.tar.gz
+
 echo -e "${GREEN}✅ Deployment complete!${NC}"
-echo ""
-echo -e "${BLUE}📊 Access your dashboard at: http://144.24.180.184:3000${NC}"
-echo -e "${BLUE}🤖 Bot API available at: http://144.24.180.184:3001${NC}"
 echo ""
 echo -e "${YELLOW}To view logs:${NC}"
 echo "  ssh -i $SSH_KEY $SERVER 'cd $DEPLOY_DIR && docker-compose -f docker-compose.prod.yml logs -f'"
