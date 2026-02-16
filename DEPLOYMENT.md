@@ -22,6 +22,7 @@ nano deploy.config
 #   SERVER=ubuntu@your-vps-ip
 #   SSH_KEY=$HOME/path/to/your/key.pem
 #   DEPLOY_DIR=/home/ubuntu/trader212
+#   GHCR_TOKEN=your_github_token (optional, only if repo is private)
 ```
 
 ### 2. Initial Deployment
@@ -35,10 +36,11 @@ chmod +x deploy.sh manage-vps.sh
 ```
 
 This will:
-- Copy all project files to the VPS
+- Pull pre-built Docker images from GitHub Container Registry
 - Install Docker and Docker Compose (if needed)
-- Build Docker images
 - Start the bot and web dashboard
+
+**Note:** Images are automatically built by GitHub Actions CI and pushed to GHCR. No local Docker or building required!
 
 ### 3. Access Your Bot
 
