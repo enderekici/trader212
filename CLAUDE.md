@@ -59,8 +59,8 @@ Autonomous AI trading bot for Trading212. ESM TypeScript, Node.js 24+.
     - `finnhub.ts` - Finnhub adapter (quotes, news, earnings, insiders)
     - `marketaux.ts` - Marketaux adapter (news + sentiment)
     - `social-sentiment.ts` - Social media sentiment aggregation (Reddit, Twitter, StockTwits)
-    - `web-researcher.ts` - Web research via Perplexity API for deep stock analysis
-    - `steer-client.ts` - Steer market data client (alternative data provider)
+    - `web-researcher.ts` - Web research via Steer headless browser (Finviz, StockAnalysis scraping; optional, requires external Steer instance)
+    - `steer-client.ts` - Steer headless browser HTTP client (scrape/extract; gracefully degrades if unavailable)
     - `price-streamer.ts` - Real-time price streaming via WebSocket
     - `ticker-mapper.ts` - Symbol <-> Trading212 ticker mapping
   - `src/ai/` - AI decision engine
@@ -201,7 +201,7 @@ Key flows:
 - **Market Regime Detection**: identifies bull/bear/sideways market regimes and adjusts strategy parameters accordingly
 - **Performance Attribution**: breaks down returns by alpha, beta, sector contributions, and factor exposures
 - **Social Sentiment**: aggregates sentiment from Reddit, Twitter, StockTwits for additional signal
-- **Web Research**: deep research via Perplexity API for fundamental analysis and news context
+- **Web Research** (optional): Finviz/StockAnalysis scraping via Steer headless browser; requires external Steer instance at `STEER_URL`, gracefully skipped if unavailable
 
 ## Database
 SQLite via better-sqlite3 + drizzle-orm. 23 tables:

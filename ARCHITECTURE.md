@@ -868,8 +868,7 @@ Configure ONE of these providers via `AI_PROVIDER` env var (`anthropic`, `ollama
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `PERPLEXITY_API_KEY` | No | Perplexity API key for web research feature |
-| `STEER_API_KEY` | No | Steer API key for alternative market data |
+| `STEER_URL` | No | Steer headless browser URL for web research (default: `http://localhost:3010`) |
 
 ### Example .env File
 
@@ -1294,13 +1293,13 @@ Managed via `src/data/social-sentiment.ts`.
 
 ### Web Research Integration
 
-Deep fundamental research via Perplexity API:
+Fundamental data scraping via Steer headless browser:
 
-- Automated web research for stock analysis
-- Earnings call transcript analysis
-- News aggregation and summarization
-- Competitive analysis and industry trends
-- Integrated into AI research reports
+- Scrapes Finviz for analyst targets, PEG ratio, short interest, institutional ownership
+- Scrapes StockAnalysis.com for additional fundamental metrics
+- Results cached with configurable TTL (`webResearch.cacheTtlHours`)
+- Data fed into AI prompts as supplemental fundamental context
+- Requires a running Steer instance at `STEER_URL` (optional, gracefully degrades)
 
 Managed via `src/data/web-researcher.ts`.
 

@@ -58,7 +58,7 @@ An autonomous, AI-powered stock trading bot for the [Trading212](https://www.tra
 - **Performance Attribution** -- Break down returns by alpha, beta, sector contributions, factor exposures
 - **Market Regime Detection** -- Identify bull/bear/sideways markets and adapt strategy parameters
 - **Social Sentiment** -- Aggregate sentiment from Reddit, Twitter, StockTwits
-- **Web Research** -- Deep fundamental research via Perplexity API
+- **Web Research** -- Finviz/StockAnalysis scraping via Steer headless browser
 - **AI Self-Improvement** -- AI analyzes past decisions, identifies patterns, generates insights
 
 ### Tax & Record Keeping
@@ -185,7 +185,7 @@ cd web && npm install && npm run dev
 | Runtime | Node.js 24+, ESM TypeScript |
 | Database | SQLite via better-sqlite3, Drizzle ORM (23 tables) |
 | AI | Anthropic SDK, Ollama, OpenAI-compatible |
-| Data | Yahoo Finance, Finnhub, Marketaux, Social Sentiment, Perplexity Web Research |
+| Data | Yahoo Finance, Finnhub, Marketaux, Social Sentiment, Steer Web Research |
 | Indicators | technicalindicators (25+ indicators) |
 | API | Express, WebSocket (ws), 60+ REST endpoints |
 | Web | Next.js 15 (App Router), Tailwind CSS v4, lucide-react, lightweight-charts, SWR |

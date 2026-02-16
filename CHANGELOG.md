@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Trade Journal**: Journal entries with tags, notes, mood, and lessons; pattern analysis and insights
 - **Webhooks**: External integrations for Discord, Slack, and custom endpoints; webhook configuration and logging
 - **Social Sentiment Analysis**: Aggregate sentiment from Reddit, Twitter, and StockTwits
-- **Web Research**: Deep fundamental analysis via Perplexity API integration
+- **Web Research**: Finviz/StockAnalysis scraping via Steer headless browser (analyst data, short interest, institutional ownership)
 - **AI Self-Improvement**: AI analyzes past decisions, identifies patterns, and updates internal strategies
 - **Market Regime Detection**: Identify bull/bear/sideways market regimes and adapt strategy parameters
 - **Performance Attribution**: Break down returns by alpha, beta, sector contributions, and factor exposures
