@@ -8,7 +8,7 @@ Technical deep-dive into the Trader212 autonomous trading bot.
                           +------------------+
                           |    Scheduler     |
                           |   (node-cron)    |
-                          |   12 jobs        |
+                          |   14 jobs        |
                           +--------+---------+
                                    | triggers
         +--------------------------+---------------------------+
@@ -17,7 +17,7 @@ Technical deep-dive into the Trader212 autonomous trading bot.
 |    Pairlist    |       | Data Aggregator   |       |    Position      |
 |    Pipeline    |       |                   |       |    Monitor       |
 |                |       |  Yahoo Finance    |       |                  |
-|  6 Filters     |------>|  Finnhub          |       |  Trailing Stop   |
+|  8 Filters     |------>|  Finnhub          |       |  Trailing Stop   |
 |  3 Modes       | pairs |  Marketaux        |       |  Re-evaluation   |
 |  (dyn/stat/hyb)|       +--------+----------+       +--------+---------+
 +----------------+                | data                      |
@@ -94,7 +94,11 @@ The pairlist pipeline refreshes every 30 minutes (configurable via `pairlist.ref
 3. **MarketCapFilter** -- Requires minimum $2B market capitalization
 4. **VolatilityFilter** -- Keeps stocks with 0.5%-10% daily volatility over 20 days
 5. **BlacklistFilter** -- Removes manually blacklisted symbols
-6. **MaxPairsFilter** -- Caps the final list at 30 stocks
+6. **SectorFilter** -- Whitelist/blacklist by sector (e.g., only Semiconductors, exclude Energy)
+7. **PerformanceFilter** -- Filters by recent price performance (e.g., minimum 30-day return)
+8. **MaxPairsFilter** -- Caps the final list at 30 stocks
+
+Before filtering, the pipeline runs an **enrichment step** that batch-fetches price, volume, and market cap from Yahoo Finance quotes, and loads sector data from the fundamentals cache.
 
 The filter chain is configurable -- filters can be reordered, enabled, or disabled from the dashboard.
 
@@ -203,8 +207,9 @@ The AI returns a structured JSON response:
 | Anthropic | `@anthropic-ai/sdk` | `ANTHROPIC_API_KEY` + model selection |
 | Ollama | HTTP client | Local URL + model name |
 | OpenAI-compatible | HTTP client | Base URL + API key + model |
+| Rules Engine | Deterministic | Configurable score thresholds, no LLM calls |
 
-The provider is configurable at runtime via `ai.provider` in the config table.
+The provider is configurable at runtime via `ai.provider` in the config table. The rules engine (`ai.provider = "rules"`) provides a zero-cost, deterministic alternative using configurable score thresholds for BUY/SELL/HOLD decisions -- useful for backtesting reproducibility.
 
 #### AI Market Research
 
@@ -823,7 +828,7 @@ All secrets and deployment-specific configuration are managed via `.env` file (n
 
 ### AI Providers
 
-Configure ONE of these providers via `AI_PROVIDER` env var (`anthropic`, `ollama`, or `openai-compatible`).
+Configure ONE of these providers via `AI_PROVIDER` env var (`anthropic`, `ollama`, `openai-compatible`, or `rules`).
 
 #### Anthropic Claude
 
@@ -899,7 +904,7 @@ TELEGRAM_CHAT_ID=123456789
 
 ## Scheduler Jobs
 
-The bot runs 12 scheduled jobs via node-cron:
+The bot runs 14 scheduled jobs via node-cron:
 
 | Job | Schedule | Market Hours Only | Description |
 |-----|----------|-------------------|-------------|
@@ -915,6 +920,8 @@ The bot runs 12 scheduled jobs via node-cron:
 | `marketResearch` | Every N min (default: 120) | Yes | AI market research |
 | `modelEvaluation` | Daily at 6 PM ET | No | Evaluate AI prediction accuracy |
 | `expirePlans` | Every 5 min | No | Expire old pending trade plans |
+| `conditionalOrders` | Configurable interval | Yes | Monitor and trigger conditional orders |
+| `aiSelfImprovement` | Daily at 6:30 PM ET | No | AI self-improvement feedback loop |
 
 Jobs marked "Market Hours Only" are skipped when the US market is closed (weekends, NYSE holidays).
 
@@ -1042,7 +1049,7 @@ The Express server exposes 60+ REST endpoints at `:3001/api/*`. All endpoints ex
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/api/backtest` | Run backtest (body: `{ strategy, startDate, endDate, symbols, capital }`) |
+| POST | `/api/backtest` | Run backtest (body: `{ strategy, startDate, endDate, symbols, capital, slippagePct?, spreadBps?, walkForward? }`) |
 
 ### Strategy Profiles
 
@@ -1348,8 +1355,8 @@ src/
 |       +-- metrics.ts        # Metrics data access
 +-- pairlist/
 |   +-- index.ts              # Pairlist module entry
-|   +-- pipeline.ts           # Filter pipeline runner
-|   +-- filters.ts            # Volume, Price, MarketCap, Volatility, Blacklist, MaxPairs
+|   +-- pipeline.ts           # Filter pipeline runner + enrichStocks()
+|   +-- filters.ts            # Volume, Price, MarketCap, Volatility, Blacklist, Sector, Performance, MaxPairs
 +-- data/
 |   +-- data-aggregator.ts    # Orchestrates all data sources
 |   +-- yahoo-finance.ts      # Yahoo Finance adapter
@@ -1361,45 +1368,90 @@ src/
 |   +-- prompt-builder.ts     # Structured prompt construction
 |   +-- decision-processor.ts # Parse + validate AI responses
 |   +-- market-research.ts    # AI market research for stock discovery
+|   +-- rules-engine.ts       # Deterministic rules-based decision engine
+|   +-- self-improvement.ts   # AI self-improvement feedback loop
 |   +-- adapters/
 |       +-- anthropic.ts      # Anthropic Claude adapter
 |       +-- ollama.ts         # Ollama adapter
 |       +-- openai-compat.ts  # OpenAI-compatible adapter
 +-- execution/
-|   +-- order-manager.ts      # Order placement + dry-run sim
+|   +-- order-manager.ts      # Order placement + dry-run sim (with paper trading slippage)
 |   +-- risk-guard.ts         # Pre-trade risk validation
 |   +-- trade-planner.ts      # Trade plan creation and management
 |   +-- approval-manager.ts   # Auto/manual trade approval flow
-|   +-- position-tracker.ts   # Position monitoring and trailing stops
+|   +-- position-tracker.ts   # Position monitoring, trailing stops, exit DSL
+|   +-- partial-exit-manager.ts  # Partial position exits (scale out)
+|   +-- conditional-orders.ts # OCO, Bracket, Trailing, If-Then orders
+|   +-- dca-manager.ts        # Dollar-cost averaging
+|   +-- pair-locks.ts         # Pair locking
+|   +-- protections.ts        # Trading protections
+|   +-- atr-stoploss.ts       # ATR-based stop-loss
+|   +-- exit-condition-dsl.ts # Exit condition DSL parser + evaluator
+|   +-- risk-parity.ts        # Risk parity position sizing
+|   +-- roi-table.ts          # Time-based ROI targets
 +-- analysis/
 |   +-- analyzer.ts           # Analysis orchestrator
 |   +-- correlation.ts        # Pearson correlation analyzer
+|   +-- multi-timeframe.ts    # Weekly/monthly confluence scoring
+|   +-- regime-detector.ts    # Bull/bear/sideways market regime
+|   +-- monte-carlo.ts        # Monte Carlo portfolio simulation
+|   +-- portfolio-optimizer.ts # Min-variance/max-Sharpe optimization
 |   +-- technical/
 |   |   +-- indicators.ts     # 25+ indicator calculations
-|   |   +-- scorer.ts         # Technical score computation
+|   |   +-- scorer.ts         # Technical score computation (configurable weights)
 |   +-- fundamental/
-|   |   +-- scorer.ts         # Fundamental score computation
+|   |   +-- scorer.ts         # Fundamental score computation (configurable weights)
 |   +-- sentiment/
-|       +-- scorer.ts         # Sentiment score computation
+|       +-- scorer.ts         # Sentiment score computation (configurable weights)
 +-- monitoring/
 |   +-- telegram.ts           # Telegram notifications + commands
 |   +-- performance.ts        # Performance tracking + summaries
 |   +-- model-tracker.ts      # AI model accuracy tracking
 |   +-- audit-log.ts          # Audit log (session replay)
+|   +-- attribution.ts        # Performance attribution (alpha, beta, factors)
+|   +-- trade-journal.ts      # Trade journal with tags and notes
+|   +-- tax-tracker.ts        # Tax lot tracking + wash sale detection
+|   +-- report-generator.ts   # Scheduled reports (daily/weekly)
+|   +-- health-metrics.ts     # System health monitoring
++-- data/
+|   +-- data-aggregator.ts    # Orchestrates all data sources
+|   +-- yahoo-finance.ts      # Yahoo Finance adapter
+|   +-- finnhub.ts            # Finnhub adapter
+|   +-- marketaux.ts          # Marketaux adapter
+|   +-- ticker-mapper.ts      # Symbol <-> T212 ticker mapping
+|   +-- social-sentiment.ts   # Social media sentiment aggregation
+|   +-- steer-client.ts       # Steer headless browser client
+|   +-- web-researcher.ts     # Web research via Steer
+|   +-- price-streamer.ts     # Real-time price streaming
 +-- api/
 |   +-- server.ts             # Express REST API server
 |   +-- routes.ts             # All REST endpoint definitions
 |   +-- websocket.ts          # WebSocket server
+|   +-- webhooks.ts           # Webhook system (Discord, Slack, custom)
+|   +-- middleware/auth.ts     # Bearer token auth middleware
 |   +-- trading212/
 |       +-- client.ts         # Trading212 API client
 |       +-- types.ts          # T212 type definitions
 |       +-- errors.ts         # T212 error handling
++-- backtest/
+|   +-- engine.ts             # Backtest engine (with slippage/spread modeling)
+|   +-- data-loader.ts        # Historical data loader
+|   +-- reporter.ts           # Backtest result reporting
+|   +-- types.ts              # Backtest type definitions
+|   +-- walk-forward.ts       # Walk-forward out-of-sample validation
++-- config/
+|   +-- defaults.ts           # Default config values
+|   +-- manager.ts            # ConfigManager (DB-backed, live-updatable)
+|   +-- schema-validator.ts   # Runtime config validation (Zod)
+|   +-- strategy-profiles.ts  # Pre-configured strategy profiles
 +-- utils/
 |   +-- logger.ts             # Pino logger factory
 |   +-- helpers.ts            # Shared utilities
 |   +-- market-hours.ts       # US market hours logic
 |   +-- holidays.ts           # NYSE holiday calendar (2024-2028)
 |   +-- key-rotator.ts        # API key rotation
+|   +-- circuit-breaker.ts    # Circuit breaker for external APIs
+|   +-- error-handlers.ts     # Global error handlers
 +-- bot/
     +-- scheduler.ts          # Cron job scheduler
 

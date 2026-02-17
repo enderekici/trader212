@@ -11,12 +11,12 @@ An autonomous, AI-powered stock trading bot for the [Trading212](https://www.tra
 ## Features
 
 ### Core Trading Pipeline
-- **Dynamic Pairlist Pipeline** -- Automatically discovers and filters stocks through 6 configurable stages (volume, price, market cap, volatility, blacklist, max pairs)
+- **Dynamic Pairlist Pipeline** -- Automatically discovers and filters stocks through 8 configurable stages (volume, price, market cap, volatility, blacklist, sector, performance, max pairs) with automatic data enrichment
 - **Pairlist Modes** -- Dynamic (auto-discover), Static (user-specified symbols), or Hybrid (static + dynamic up to max)
 - **Multi-Source Data Layer** -- Aggregates OHLCV, quotes, news, earnings, and insider data from Yahoo Finance, Finnhub, and Marketaux
 - **25+ Technical Indicators** -- RSI, MACD, Bollinger Bands, ADX, Stochastic, MFI, CCI, OBV, VWAP, Parabolic SAR, support/resistance, and more
 - **Fundamental & Sentiment Analysis** -- P/E, revenue growth, profit margins, debt ratios, insider activity, news sentiment scoring
-- **AI Decision Engine** -- Multi-provider support (Anthropic Claude, Ollama, OpenAI-compatible) with structured prompt building and conviction scoring
+- **AI Decision Engine** -- Multi-provider support (Anthropic Claude, Ollama, OpenAI-compatible, Rules Engine) with structured prompt building, conviction scoring, and confluence gate
 
 ### Trade Planning & Execution
 - **Trade Plan / Pre-Entry Blueprint** -- Every trade starts as a detailed plan with position sizing, stop-loss, take-profit, R:R ratio, AI risks, urgency, and exit conditions
@@ -53,7 +53,7 @@ An autonomous, AI-powered stock trading bot for the [Trading212](https://www.tra
 
 ### Analysis & Optimization
 - **Strategy Profiles** -- Pre-configured sets (conservative, balanced, aggressive, scalper, swing) with one-click activation
-- **Backtesting Engine** -- Full backtesting with historical data loader and performance reporting
+- **Backtesting Engine** -- Full backtesting with historical data loader, slippage/spread modeling, walk-forward analysis, and performance reporting
 - **Monte Carlo Simulation** -- Run thousands of simulations to stress-test strategies
 - **Performance Attribution** -- Break down returns by alpha, beta, sector contributions, factor exposures
 - **Market Regime Detection** -- Identify bull/bear/sideways markets and adapt strategy parameters
@@ -70,7 +70,7 @@ An autonomous, AI-powered stock trading bot for the [Trading212](https://www.tra
 
 ### Infrastructure
 - **API Key Rotation** -- Single comma-separated env var per service (FINNHUB_API_KEY, MARKETAUX_API_TOKEN); round-robin rotation with per-key rate tracking
-- **12 Scheduler Jobs** -- Pairlist refresh, analysis loop, position monitor, T212 sync, daily/weekly reports, news monitoring, position re-eval, AI research, model evaluation, plan expiry
+- **14 Scheduler Jobs** -- Pairlist refresh, analysis loop, position monitor, T212 sync, daily/weekly reports, news monitoring, position re-eval, AI research, model evaluation, plan expiry, conditional orders, AI self-improvement
 - **60+ REST Endpoints** -- Full CRUD for trades, signals, positions, config, pairlist, research, audit, correlation, bot control, backtesting, strategy profiles, tax management, trade journal, webhooks, and more
 - **10 WebSocket Events** -- Real-time streaming of prices, trades, signals, positions, status, plans, and research
 - **Docker Ready** -- Multi-stage Dockerfiles for bot and web, docker-compose for one-command deployment
@@ -105,7 +105,7 @@ cd web && npm install && npm run dev
 ```
                           +------------------+
                           |    Scheduler     |
-                          |  (12 cron jobs)  |
+                          |  (14 cron jobs)  |
                           +--------+---------+
                                    | triggers
         +--------------------------+---------------------------+
@@ -114,7 +114,7 @@ cd web && npm install && npm run dev
 |    Pairlist    |       | Data Aggregator   |       |    Position      |
 |    Pipeline    |       |                   |       |    Monitor       |
 |                |       |  Yahoo Finance    |       |                  |
-|  6 Filters     |------>|  Finnhub          |       |  Trailing Stop   |
+|  8 Filters     |------>|  Finnhub          |       |  Trailing Stop   |
 |  3 Modes       | pairs |  Marketaux        |       |  Re-evaluation   |
 |  (dyn/stat/hyb)|       +--------+----------+       +--------+---------+
 +----------------+                | data                      |
@@ -184,7 +184,7 @@ cd web && npm install && npm run dev
 |-------|-----------|
 | Runtime | Node.js 24+, ESM TypeScript |
 | Database | SQLite via better-sqlite3, Drizzle ORM (23 tables) |
-| AI | Anthropic SDK, Ollama, OpenAI-compatible |
+| AI | Anthropic SDK, Ollama, OpenAI-compatible, Rules Engine |
 | Data | Yahoo Finance, Finnhub, Marketaux, Social Sentiment, Steer Web Research |
 | Indicators | technicalindicators (25+ indicators) |
 | API | Express, WebSocket (ws), 60+ REST endpoints |

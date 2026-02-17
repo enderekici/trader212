@@ -43,7 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - REST API expanded from 15+ to 60+ endpoints
 - Database schema expanded from 15 to 23 tables
 - Node.js requirement updated from 20+ to 24+
-- Test coverage: 90.5% lines, 92.26% functions, 83.76% branches (2,562 tests across 88 test files)
+- Test coverage: 90%+ lines/statements/functions, 83%+ branches (2,648 tests across 91 unit + 21 integration test files)
 - Documentation comprehensively updated across CLAUDE.md and README.md
 
 ## [1.1.0] - 2026-02-13

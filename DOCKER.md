@@ -121,7 +121,7 @@ See `.env.example` for the full list. Key variables:
 |----------|----------|-------------|
 | `TRADING212_API_KEY` | Yes | Trading212 API key |
 | `ANTHROPIC_API_KEY` | One AI provider required | Anthropic API key |
-| `AI_PROVIDER` | No | AI provider: `"anthropic"` \| `"ollama"` \| `"openai-compatible"` |
+| `AI_PROVIDER` | No | AI provider: `"anthropic"` \| `"ollama"` \| `"openai-compatible"` \| `"rules"` |
 | `AI_OLLAMA_BASE_URL` | If using Ollama | Ollama server URL (default: http://localhost:11434) |
 | `AI_OLLAMA_MODEL` | If using Ollama | Ollama model name (default: palmyra-fin) |
 | `AI_OPENAI_COMPAT_BASE_URL` | If using OpenAI-compat | OpenAI-compatible API base URL |

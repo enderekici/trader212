@@ -96,7 +96,7 @@ Before enabling live trading, complete this safety checklist:
 |----------|----------|-------------|
 | `TRADING212_API_KEY` | Yes | Trading212 API key (demo or live) |
 | `ANTHROPIC_API_KEY` | If using Anthropic | Claude API key |
-| `AI_PROVIDER` | No | AI provider override: `"anthropic"` \| `"ollama"` \| `"openai-compatible"` |
+| `AI_PROVIDER` | No | AI provider override: `"anthropic"` \| `"ollama"` \| `"openai-compatible"` \| `"rules"` |
 | `AI_OLLAMA_BASE_URL` | If using Ollama | Ollama server URL (default: http://localhost:11434) |
 | `AI_OLLAMA_MODEL` | If using Ollama | Ollama model name (default: palmyra-fin) |
 | `AI_OPENAI_COMPAT_BASE_URL` | If using OpenAI-compat | Base URL for OpenAI-compatible API |
@@ -152,6 +152,7 @@ All other settings are stored in the `config` database table and can be changed 
 | Anthropic Claude | ~$0.01–0.05 per analysis | 2–10s | Highest |
 | Ollama (local) | Free | 5–30s (depends on hardware) | Varies by model |
 | OpenAI-compatible | Varies | Varies | Varies |
+| Rules Engine | Free | <1ms | Deterministic, threshold-based |
 
 The bot defaults to Anthropic with `claude-sonnet-4-5-20250929`. For free local inference, install [Ollama](https://ollama.com) and pull a finance-tuned model:
 
@@ -160,3 +161,5 @@ ollama pull palmyra-fin
 ```
 
 Then set `ai.provider = "ollama"` in the dashboard.
+
+For a zero-cost deterministic alternative, set `ai.provider = "rules"`. The rules engine makes BUY/SELL/HOLD decisions based on configurable score thresholds (e.g., `ai.rules.buyTechMin`, `ai.rules.sellTechMax`) without any LLM calls. Useful for backtesting reproducibility and debugging.

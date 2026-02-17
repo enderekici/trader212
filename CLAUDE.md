@@ -49,10 +49,10 @@ Autonomous AI trading bot for Trading212. ESM TypeScript, Node.js 24+.
       - `strategy-profiles.ts` - Strategy profile management
       - `tax-lots.ts` - Tax lot tracking for FIFO/LIFO/HIFO
       - `webhooks.ts` - Webhook configuration and logs
-  - `src/pairlist/` - Dynamic pairlist pipeline with 6 filters + static/hybrid modes
+  - `src/pairlist/` - Dynamic pairlist pipeline with 8 filters + static/hybrid modes
     - `index.ts` - Module entry, `createPairlistPipeline()` factory
-    - `pipeline.ts` - Filter pipeline runner
-    - `filters.ts` - VolumeFilter, PriceFilter, MarketCapFilter, VolatilityFilter, BlacklistFilter, MaxPairsFilter
+    - `pipeline.ts` - Filter pipeline runner with `enrichStocks()` (Yahoo Finance batch quotes)
+    - `filters.ts` - VolumeFilter, PriceFilter, MarketCapFilter, VolatilityFilter, BlacklistFilter, MaxPairsFilter, PerformanceFilter, SectorFilter
   - `src/data/` - Data sources
     - `data-aggregator.ts` - Orchestrates all data sources, returns StockData
     - `yahoo-finance.ts` - Yahoo Finance adapter (OHLCV, quotes, fundamentals)
@@ -69,6 +69,7 @@ Autonomous AI trading bot for Trading212. ESM TypeScript, Node.js 24+.
     - `decision-processor.ts` - Parse + validate AI JSON responses
     - `market-research.ts` - MarketResearcher: scheduled AI research for stock discovery
     - `self-improvement.ts` - AI self-improvement system: analyzes past decisions, identifies patterns, updates strategies
+    - `rules-engine.ts` - RulesEngine: deterministic threshold-based decisions (zero-cost, backtest-reproducible)
     - `adapters/` - Provider adapters
       - `anthropic.ts` - Anthropic Claude adapter (@anthropic-ai/sdk)
       - `ollama.ts` - Ollama adapter (HTTP client)
@@ -121,10 +122,11 @@ Autonomous AI trading bot for Trading212. ESM TypeScript, Node.js 24+.
     - `trading212/types.ts` - Trading212 type definitions
     - `trading212/errors.ts` - Trading212 error handling
   - `src/backtest/` - Backtesting engine
-    - `engine.ts` - Backtesting engine: runs strategies on historical data
+    - `engine.ts` - Backtesting engine: runs strategies on historical data (with slippage/spread modeling)
     - `data-loader.ts` - Historical data loader for backtests
     - `reporter.ts` - Backtest result reporting and visualization
     - `types.ts` - Backtest-specific type definitions
+    - `walk-forward.ts` - Walk-forward analysis: rolling train/test windows for out-of-sample validation
   - `src/utils/` - Utilities
     - `logger.ts` - Pino logger factory: createLogger('module-name')
     - `helpers.ts` - formatCurrency(), formatPercent(), and shared utilities
@@ -160,7 +162,7 @@ Autonomous AI trading bot for Trading212. ESM TypeScript, Node.js 24+.
     - `websocket.ts` - WebSocket client for real-time updates
     - `types.ts` - TypeScript types for API responses
 - `data/` - SQLite database (gitignored)
-- `test/` - Vitest tests (unit/ and integration/)
+- `test/` - Vitest tests (91 unit + 21 integration test files, 2648 tests total)
 
 ## Key Conventions
 - ESM modules with .js import extensions in source files
@@ -177,7 +179,7 @@ Autonomous AI trading bot for Trading212. ESM TypeScript, Node.js 24+.
 - `NODE_ENV` is NOT in `.env` -- it is a deployment concern owned by Dockerfiles / launch commands. Locally it defaults to `undefined` (dev mode); Docker sets `production`.
 
 ## Architecture
-Pairlist Pipeline -> Data Aggregation -> Analysis (Technical + Fundamental + Sentiment) -> AI Decision -> Trade Planner -> Approval -> Risk Guard -> Execution -> Position Re-evaluation -> Monitoring
+Pairlist Pipeline (with enrichment) -> Data Aggregation -> Analysis (Technical + Fundamental + Sentiment) -> Confluence Gate -> AI Decision (or Rules Engine) -> Conviction Gate -> Trade Planner -> Approval -> Risk Guard -> Execution -> Position Re-evaluation (with Exit DSL) -> Monitoring
 
 Key flows:
 - **Trade Plan / Pre-Entry Blueprint**: AI decision creates a plan (position size, stops, targets, R:R ratio, risks, urgency, exit conditions) stored in `trade_plans` table -> approval flow -> execution
@@ -196,7 +198,7 @@ Key flows:
 - **Strategy Profiles**: pre-configured strategy sets (conservative, balanced, aggressive, scalper, swing) that can be activated with one click
 - **Tax-Loss Harvesting**: automatically identifies candidates for tax-loss harvesting; tracks wash sales; supports FIFO/LIFO/HIFO
 - **Trade Journal**: records notes, tags, mood, and lessons for each trade; generates insights on common mistakes and patterns
-- **Backtesting**: full backtesting engine with historical data loader and reporting
+- **Backtesting**: full backtesting engine with historical data loader, reporting, transaction cost modeling (slippage/spread), and walk-forward out-of-sample validation
 - **Webhooks**: send trade notifications and alerts to Discord, Slack, or custom endpoints
 - **Market Regime Detection**: identifies bull/bear/sideways market regimes and adjusts strategy parameters accordingly
 - **Performance Attribution**: breaks down returns by alpha, beta, sector contributions, and factor exposures
@@ -214,7 +216,7 @@ SQLite via better-sqlite3 + drizzle-orm. 23 tables:
 - **Strategy**: `strategyProfiles`
 
 ## Pairlist Modes
-- `dynamic` (default): T212 US equities -> filter pipeline (volume, price, market cap, volatility, blacklist, max pairs)
+- `dynamic` (default): T212 US equities -> enrichment (Yahoo Finance quotes) -> filter pipeline (volume, price, market cap, volatility, blacklist, sector, performance, max pairs)
 - `static`: user-specified symbols only (skip filters), managed via `pairlist.staticSymbols` config and POST/DELETE `/api/pairlist/static` endpoints
 - `hybrid`: static symbols always included + filtered dynamic symbols up to maxPairs
 
@@ -225,7 +227,13 @@ Finnhub and Marketaux support multiple API keys via single comma-separated env v
 NYSE hours with holiday awareness (2024-2028 calendar in `src/utils/holidays.ts`). Includes early close detection. `getMarketTimes()` returns full market status (open/pre/after/closed) with countdown timers, holiday flag, and early close flag. Used by scheduler to skip market-hours-only jobs.
 
 ## AI Providers
-Three adapters in `src/ai/adapters/`: anthropic.ts, ollama.ts, openai-compat.ts. Selected at runtime via `ai.provider` config key. Market research uses the same provider via `src/ai/market-research.ts`.
+Four options selected at runtime via `ai.provider` config key:
+- `anthropic` - Anthropic Claude adapter (default)
+- `ollama` - Ollama adapter for local inference
+- `openai-compatible` - OpenAI-compatible adapter (any OpenAI-compatible API)
+- `rules` - Deterministic threshold-based rules engine (zero cost, no LLM calls, backtest-reproducible)
+
+Market research uses the same provider via `src/ai/market-research.ts` (except `rules` which doesn't support `rawChat`).
 
 ## Scheduler Jobs (14 total)
 1. `pairlistRefresh` - Refresh pairlist (configurable interval, market hours only)
@@ -309,7 +317,7 @@ Three adapters in `src/ai/adapters/`: anthropic.ts, ollama.ts, openai-compat.ts.
 - GET `/api/correlation` - Portfolio correlation matrix
 
 ### Backtesting
-- POST `/api/backtest` - Run a backtest (body: { strategy, startDate, endDate, symbols, capital })
+- POST `/api/backtest` - Run a backtest (body: { strategy, startDate, endDate, symbols, capital, slippagePct?, spreadBps?, walkForward?: { windows, trainRatio } })
 
 ### Strategy Profiles
 - GET `/strategy-profiles` - List strategy profiles
