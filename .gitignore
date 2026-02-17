@@ -2,6 +2,7 @@ node_modules/
 dist/
 /data/
 .env
+web/.env.local
 .next/
 coverage/
 *.log

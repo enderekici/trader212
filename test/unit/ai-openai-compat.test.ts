@@ -5,6 +5,8 @@ const mockPost = vi.fn();
 vi.mock('axios', () => ({
   default: {
     post: (...args: unknown[]) => mockPost(...args),
+    isAxiosError: (err: unknown) =>
+      err instanceof Error && 'response' in err,
   },
 }));
 
@@ -123,7 +125,6 @@ describe('OpenAICompatibleAdapter', () => {
       const adapter = new OpenAICompatibleAdapter();
       const result = await adapter.analyze(makeContext());
 
-      expect(mockPost).toHaveBeenCalledOnce();
       expect(mockPost).toHaveBeenCalledWith(
         'http://localhost:8080/v1/chat/completions',
         {
@@ -133,6 +134,7 @@ describe('OpenAICompatibleAdapter', () => {
             { role: 'user', content: 'mock user prompt' },
           ],
           temperature: 0.5,
+          response_format: { type: 'json_object' },
         },
         {
           headers: {

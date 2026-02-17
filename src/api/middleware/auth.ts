@@ -4,8 +4,8 @@ import { createLogger } from '../../utils/logger.js';
 const log = createLogger('auth');
 
 export function authMiddleware(req: Request, res: Response, next: NextFunction): void {
-  // Skip auth for health check
-  if (req.path === '/api/status') {
+  // Skip auth for health/status checks
+  if (req.path === '/api/status' || req.path === '/api/health') {
     next();
     return;
   }

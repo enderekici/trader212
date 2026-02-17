@@ -73,7 +73,10 @@ export class TickerMapper {
 
   toT212Ticker(symbol: string): string | null {
     this.ensureLoaded();
-    return this.symbolToT212.get(symbol) ?? null;
+    if (!this.loaded) {
+      return `${symbol}_US_EQ`;
+    }
+    return this.symbolToT212.get(symbol) ?? `${symbol}_US_EQ`;
   }
 
   toSymbol(t212Ticker: string): string | null {

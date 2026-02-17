@@ -137,13 +137,13 @@ describe('TickerMapper', () => {
       expect(mapper.toT212Ticker('TSLA')).toBe('TSLA_US_EQ');
     });
 
-    it('returns null for unknown symbol', async () => {
+    it('falls back to SYMBOL_US_EQ for unknown symbol', async () => {
       await mapper.load();
-      expect(mapper.toT212Ticker('UNKNOWN')).toBeNull();
+      expect(mapper.toT212Ticker('UNKNOWN')).toBe('UNKNOWN_US_EQ');
     });
 
-    it('returns null when not loaded (but does not throw)', () => {
-      expect(mapper.toT212Ticker('AAPL')).toBeNull();
+    it('falls back to SYMBOL_US_EQ when not loaded (does not throw)', () => {
+      expect(mapper.toT212Ticker('AAPL')).toBe('AAPL_US_EQ');
     });
   });
 

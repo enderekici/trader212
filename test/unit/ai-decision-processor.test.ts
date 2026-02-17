@@ -269,18 +269,22 @@ That concludes my analysis.`;
       expect(result).toBeNull();
     });
 
-    it('returns null when urgency is invalid', () => {
+    it('normalizes invalid urgency to no_rush', () => {
       const result = processAIDecision(
         JSON.stringify({ ...validDecision, urgency: 'right_now' }),
       );
-      expect(result).toBeNull();
+      expect(result).not.toBeNull();
+      expect(result!.urgency).toBe('no_rush');
     });
 
-    it('returns null when required fields are missing', () => {
+    it('fills defaults when optional fields are missing', () => {
       const result = processAIDecision(
         JSON.stringify({ decision: 'BUY' }),
       );
-      expect(result).toBeNull();
+      expect(result).not.toBeNull();
+      expect(result!.decision).toBe('BUY');
+      expect(result!.conviction).toBe(50);
+      expect(result!.urgency).toBe('no_rush');
     });
 
     it('returns null when conviction is not a number', () => {
@@ -290,11 +294,12 @@ That concludes my analysis.`;
       expect(result).toBeNull();
     });
 
-    it('returns null when risks is not an array', () => {
+    it('coerces string risks to single-element array', () => {
       const result = processAIDecision(
         JSON.stringify({ ...validDecision, risks: 'some risk' }),
       );
-      expect(result).toBeNull();
+      expect(result).not.toBeNull();
+      expect(result!.risks).toEqual(['some risk']);
     });
 
     it('returns null when reasoning is not a string', () => {
