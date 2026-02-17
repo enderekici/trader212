@@ -1,6 +1,7 @@
+import { desc } from 'drizzle-orm';
 import { configManager } from '../config/manager.js';
 import { getDb } from '../db/index.js';
-import { pairlistHistory } from '../db/schema.js';
+import { fundamentalCache, pairlistHistory } from '../db/schema.js';
 import { createLogger } from '../utils/logger.js';
 import type { PairlistFilter, StockInfo } from './filters.js';
 
@@ -42,6 +43,83 @@ export class PairlistPipeline {
       t212Ticker: symbol.toUpperCase(),
       name: symbol.toUpperCase(),
     };
+  }
+
+  /**
+   * Enrich bare StockInfo objects with price, volume, marketCap, sector from Yahoo Finance.
+   * Uses batch quotes with concurrency limiting and fundamentals cache for sector data.
+   */
+  async enrichStocks(stocks: StockInfo[]): Promise<StockInfo[]> {
+    const needsEnrichment = stocks.filter((s) => s.price == null);
+    if (needsEnrichment.length === 0) return stocks;
+
+    log.info({ count: needsEnrichment.length }, 'Enriching pairlist stocks with market data');
+
+    const { YahooFinanceClient } = await import('../data/yahoo-finance.js');
+    const yahoo = new YahooFinanceClient();
+    const quoteMap = new Map<string, { price: number; volume: number; marketCap: number | null }>();
+
+    // Batch-fetch quotes with concurrency limiting
+    const concurrency = 20;
+    const symbols = needsEnrichment.map((s) => s.symbol);
+
+    for (let i = 0; i < symbols.length; i += concurrency) {
+      const batch = symbols.slice(i, i + concurrency);
+      const results = await Promise.allSettled(batch.map((s) => yahoo.getQuote(s)));
+
+      for (let j = 0; j < batch.length; j++) {
+        const result = results[j];
+        if (result.status === 'fulfilled' && result.value) {
+          quoteMap.set(batch[j], {
+            price: result.value.price,
+            volume: result.value.avgVolume,
+            marketCap: result.value.marketCap,
+          });
+        }
+      }
+    }
+
+    // Load sector data from fundamentals cache
+    const sectorMap = new Map<string, string>();
+    try {
+      const db = getDb();
+      const cachedFundamentals = db
+        .select({ symbol: fundamentalCache.symbol, sector: fundamentalCache.sector })
+        .from(fundamentalCache)
+        .orderBy(desc(fundamentalCache.fetchedAt))
+        .all();
+
+      for (const row of cachedFundamentals) {
+        if (row.sector && !sectorMap.has(row.symbol)) {
+          sectorMap.set(row.symbol, row.sector);
+        }
+      }
+    } catch (err) {
+      log.warn({ err }, 'Failed to load sector data from cache');
+    }
+
+    // Apply enrichment
+    let enriched = 0;
+    for (const stock of stocks) {
+      const quote = quoteMap.get(stock.symbol);
+      if (quote) {
+        stock.price = quote.price;
+        stock.volume = quote.volume;
+        stock.marketCap = quote.marketCap ?? undefined;
+        enriched++;
+      }
+
+      if (!stock.sector) {
+        stock.sector = sectorMap.get(stock.symbol);
+      }
+    }
+
+    log.info(
+      { enriched, total: needsEnrichment.length, quotesFound: quoteMap.size },
+      'Stock enrichment complete',
+    );
+
+    return stocks;
   }
 
   async run(stocks: StockInfo[]): Promise<StockInfo[]> {
@@ -94,7 +172,8 @@ export class PairlistPipeline {
 
   /** Dynamic mode: current behavior - run all filters on the input */
   private async runDynamic(stocks: StockInfo[]): Promise<StockInfo[]> {
-    let current = [...stocks];
+    // Enrich stocks with market data before filtering
+    let current = await this.enrichStocks([...stocks]);
     const stats: Record<string, number> = {};
 
     for (const filter of this.filters) {
@@ -128,8 +207,8 @@ export class PairlistPipeline {
     // Remove static symbols from the dynamic pool before filtering
     const dynamicPool = stocks.filter((s) => !staticSet.has(s.symbol.toUpperCase()));
 
-    // Run filters on the dynamic pool only
-    let filteredDynamic = [...dynamicPool];
+    // Enrich and run filters on the dynamic pool only
+    let filteredDynamic = await this.enrichStocks([...dynamicPool]);
     const stats: Record<string, number> = {};
 
     for (const filter of this.filters) {

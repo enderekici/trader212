@@ -11,6 +11,15 @@ vi.mock('../../src/utils/logger.js', () => ({
   }),
 }));
 
+// Mock the config manager
+vi.mock('../../src/config/manager.js', () => ({
+  configManager: {
+    get: vi.fn().mockImplementation(() => {
+      throw new Error('not configured');
+    }),
+  },
+}));
+
 // Mock DB for getSectorMedianPE
 const mockFundRows = vi.fn().mockReturnValue([]);
 const mockFundChain: Record<string, any> = {};

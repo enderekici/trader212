@@ -1064,4 +1064,172 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
     category: 'monitoring',
     description: 'Weekly report day',
   },
+
+  // Pairlist — Sector Filter
+  {
+    key: 'pairlist.sector.allowed',
+    value: '[]',
+    category: 'pairlist',
+    description: 'Whitelist of sectors to include (empty = all)',
+  },
+  {
+    key: 'pairlist.sector.excluded',
+    value: '[]',
+    category: 'pairlist',
+    description: 'Blacklist of sectors to exclude',
+  },
+
+  // Scoring — Configurable Weights
+  {
+    key: 'scoring.technical.weights',
+    value: '{}',
+    category: 'scoring',
+    description: 'Override technical indicator weights (e.g. {"rsi":20,"macd":10})',
+  },
+  {
+    key: 'scoring.fundamental.weights',
+    value: '{}',
+    category: 'scoring',
+    description: 'Override fundamental metric weights (e.g. {"pe":20,"revenueGrowth":25})',
+  },
+  {
+    key: 'scoring.sentiment.newsWeight',
+    value: '0.7',
+    category: 'scoring',
+    description: 'News weight in sentiment composite (0-1)',
+  },
+  {
+    key: 'scoring.sentiment.insiderWeight',
+    value: '0.3',
+    category: 'scoring',
+    description: 'Insider weight in sentiment composite (0-1)',
+  },
+
+  // Scoring — Insider Enhancement
+  {
+    key: 'scoring.insider.roleMultipliers',
+    value: '{"ceo":3,"cfo":3,"director":2,"vp":1,"other":1}',
+    category: 'scoring',
+    description: 'Role-based multiplier for insider transactions',
+  },
+  {
+    key: 'scoring.insider.clusterWindowDays',
+    value: '14',
+    category: 'scoring',
+    description: 'Days window for insider cluster detection',
+  },
+  {
+    key: 'scoring.insider.clusterMinCount',
+    value: '3',
+    category: 'scoring',
+    description: 'Min buy transactions for cluster bonus',
+  },
+  {
+    key: 'scoring.insider.clusterBonus',
+    value: '15',
+    category: 'scoring',
+    description: 'Score bonus for insider buy cluster',
+  },
+  {
+    key: 'scoring.insider.divisor',
+    value: '500',
+    category: 'scoring',
+    description: 'Divisor for insider net buying score scaling',
+  },
+
+  // Exit — DSL
+  {
+    key: 'exit.dslEnabled',
+    value: 'true',
+    category: 'exit',
+    description: 'Enable DSL-based exit condition evaluation',
+  },
+
+  // Analysis — Confluence Gate
+  {
+    key: 'analysis.confluenceEnabled',
+    value: 'false',
+    category: 'analysis',
+    description: 'Pre-filter stocks by signal alignment before AI call',
+  },
+  {
+    key: 'analysis.confluenceMinSignals',
+    value: '2',
+    category: 'analysis',
+    description: 'Min domains (tech/fund/sent) scoring above threshold',
+  },
+  {
+    key: 'analysis.confluenceMinScore',
+    value: '55',
+    category: 'analysis',
+    description: 'Min score per domain for confluence',
+  },
+  {
+    key: 'analysis.confluenceMinAvgScore',
+    value: '50',
+    category: 'analysis',
+    description: 'Min average score across all domains',
+  },
+
+  // AI — Conviction Gate
+  {
+    key: 'ai.minConvictionScore',
+    value: '65',
+    category: 'ai',
+    description: 'Min AI conviction to execute a BUY',
+  },
+
+  // AI — Rules Engine
+  {
+    key: 'ai.rules.buyTechMin',
+    value: '65',
+    category: 'ai',
+    description: 'Rules engine: min technical score for BUY',
+  },
+  {
+    key: 'ai.rules.buyFundMin',
+    value: '55',
+    category: 'ai',
+    description: 'Rules engine: min fundamental score for BUY',
+  },
+  {
+    key: 'ai.rules.buySentMin',
+    value: '60',
+    category: 'ai',
+    description: 'Rules engine: min sentiment score for BUY',
+  },
+  {
+    key: 'ai.rules.sellTechMax',
+    value: '35',
+    category: 'ai',
+    description: 'Rules engine: max technical score for SELL',
+  },
+  {
+    key: 'ai.rules.sellFundMax',
+    value: '30',
+    category: 'ai',
+    description: 'Rules engine: max fundamental score for SELL',
+  },
+
+  // Execution — Paper Trading
+  {
+    key: 'execution.paperTrading',
+    value: 'false',
+    category: 'execution',
+    description: 'Enable paper trading realism (slippage, spread)',
+  },
+
+  // Trading — Slippage & Spread
+  {
+    key: 'trading.slippageMarketPct',
+    value: '0.001',
+    category: 'trading',
+    description: 'Simulated slippage percentage (0.1%)',
+  },
+  {
+    key: 'trading.spreadBps',
+    value: '1',
+    category: 'trading',
+    description: 'Simulated spread in basis points',
+  },
 ];

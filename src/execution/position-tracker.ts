@@ -246,6 +246,57 @@ export class PositionTracker {
         }
       }
 
+      // Check exit conditions via DSL (if enabled)
+      let dslEnabled = true;
+      try {
+        dslEnabled = configManager.get<boolean>('exit.dslEnabled');
+      } catch {
+        /* use defaults */
+      }
+
+      if (dslEnabled && pos.aiExitConditions) {
+        try {
+          const { parseExitConditionText, evaluateExitCondition } = await import(
+            './exit-condition-dsl.js'
+          );
+          const dslConditions = parseExitConditionText(pos.aiExitConditions);
+
+          if (dslConditions.length > 0) {
+            const pnlPct = (pos.currentPrice - pos.entryPrice) / pos.entryPrice;
+            const pnlAbs = (pos.currentPrice - pos.entryPrice) * pos.shares;
+            const entryMs = new Date(pos.entryTime).getTime();
+            const heldMs = Date.now() - entryMs;
+            const daysHeld = heldMs / (1000 * 60 * 60 * 24);
+            const hoursHeld = heldMs / (1000 * 60 * 60);
+
+            const context: import('./exit-condition-dsl.js').ExitContext = {
+              currentPrice: pos.currentPrice,
+              entryPrice: pos.entryPrice,
+              pnlPct,
+              pnlAbs,
+              daysHeld,
+              hoursHeld,
+              indicators: {},
+            };
+
+            for (const cond of dslConditions) {
+              if (evaluateExitCondition(cond, context)) {
+                log.info(
+                  { symbol: pos.symbol, condition: pos.aiExitConditions },
+                  'DSL exit condition triggered',
+                );
+                positionsToClose.push(pos.symbol);
+                exitReasons[pos.symbol] = 'DSL exit condition triggered';
+                break;
+              }
+            }
+            if (positionsToClose.includes(pos.symbol)) continue;
+          }
+        } catch (err) {
+          log.warn({ symbol: pos.symbol, err }, 'Failed to evaluate DSL exit conditions');
+        }
+      }
+
       // Check AI-defined exit conditions (stored as JSON)
       if (pos.aiExitConditions) {
         try {

@@ -11,6 +11,8 @@ export interface BacktestConfig {
   trailingStop: boolean;
   commission: number;
   entryThreshold: number;
+  slippagePct?: number;
+  spreadBps?: number;
 }
 
 export interface BacktestTrade {
@@ -86,4 +88,27 @@ export interface EntrySignal {
   symbol: string;
   score: number;
   price: number;
+}
+
+export interface WalkForwardWindow {
+  windowIndex: number;
+  trainStart: string;
+  trainEnd: string;
+  testStart: string;
+  testEnd: string;
+  trainResult: BacktestResult;
+  testResult: BacktestResult;
+}
+
+export interface WalkForwardResult {
+  config: BacktestConfig;
+  windows: WalkForwardWindow[];
+  aggregateMetrics: {
+    avgTestReturn: number;
+    avgTestSharpe: number | null;
+    avgTestWinRate: number;
+    avgTestMaxDrawdown: number;
+    totalTestTrades: number;
+    oosConsistency: number;
+  };
 }

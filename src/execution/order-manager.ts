@@ -51,11 +51,26 @@ export class OrderManager {
     const dryRun = configManager.get<boolean>('execution.dryRun');
     const db = getDb();
 
-    const stopLossPrice = params.price * (1 - params.stopLossPct);
-    const takeProfitPrice = params.price * (1 + params.takeProfitPct);
     const now = new Date().toISOString();
 
     if (dryRun) {
+      // Paper trading realism: simulate slippage
+      let fillPrice = params.price;
+      let buySlippage = 0;
+      try {
+        const paperTrading = configManager.get<boolean>('execution.paperTrading');
+        if (paperTrading) {
+          const slippagePct = configManager.get<number>('trading.slippageMarketPct');
+          fillPrice = params.price * (1 + slippagePct);
+          buySlippage = fillPrice - params.price;
+        }
+      } catch {
+        /* use defaults */
+      }
+
+      const effectiveStopLoss = fillPrice * (1 - params.stopLossPct);
+      const effectiveTakeProfit = fillPrice * (1 + params.takeProfitPct);
+
       // Create order record for dry-run tracking
       const localOrderId = createOrder({
         symbol: params.symbol,
@@ -77,9 +92,10 @@ export class OrderManager {
         {
           symbol: params.symbol,
           shares: params.shares,
-          price: params.price,
-          stopLoss: stopLossPrice,
-          takeProfit: takeProfitPrice,
+          price: fillPrice,
+          stopLoss: effectiveStopLoss,
+          takeProfit: effectiveTakeProfit,
+          slippage: buySlippage,
           takeProfitOrderId: dryTpOrderId,
           mode: 'DRY_RUN',
         },
@@ -107,15 +123,15 @@ export class OrderManager {
             t212Ticker: params.t212Ticker,
             side: 'BUY',
             shares: params.shares,
-            entryPrice: params.price,
+            entryPrice: fillPrice,
             entryTime: now,
-            stopLoss: stopLossPrice,
-            takeProfit: takeProfitPrice,
+            stopLoss: effectiveStopLoss,
+            takeProfit: effectiveTakeProfit,
             aiReasoning: params.aiReasoning,
             convictionScore: params.conviction,
             aiModel: params.aiModel,
             intendedPrice: params.price,
-            slippage: 0,
+            slippage: buySlippage,
             accountType: params.accountType,
           })
           .run();
@@ -127,13 +143,13 @@ export class OrderManager {
             symbol: params.symbol,
             t212Ticker: params.t212Ticker,
             shares: params.shares,
-            entryPrice: params.price,
+            entryPrice: fillPrice,
             entryTime: now,
-            currentPrice: params.price,
+            currentPrice: fillPrice,
             pnl: 0,
             pnlPct: 0,
-            stopLoss: stopLossPrice,
-            takeProfit: takeProfitPrice,
+            stopLoss: effectiveStopLoss,
+            takeProfit: effectiveTakeProfit,
             convictionScore: params.conviction,
             takeProfitOrderId: dryTpOrderId,
             accountType: params.accountType,
@@ -152,7 +168,7 @@ export class OrderManager {
         status: 'filled',
         t212OrderId: dryT212Id,
         filledQuantity: params.shares,
-        filledPrice: params.price,
+        filledPrice: fillPrice,
         filledAt: now,
       });
 
@@ -410,8 +426,23 @@ export class OrderManager {
 
     if (dryRun) {
       const exitPrice = position.currentPrice ?? position.entryPrice;
-      const pnl = (exitPrice - position.entryPrice) * position.shares;
-      const pnlPct = (exitPrice - position.entryPrice) / position.entryPrice;
+
+      // Paper trading realism: simulate slippage
+      let exitFillPrice = exitPrice;
+      let sellSlippage = 0;
+      try {
+        const paperTrading = configManager.get<boolean>('execution.paperTrading');
+        if (paperTrading) {
+          const slippagePct = configManager.get<number>('trading.slippageMarketPct');
+          exitFillPrice = exitPrice * (1 - slippagePct);
+          sellSlippage = exitPrice - exitFillPrice;
+        }
+      } catch {
+        /* use defaults */
+      }
+
+      const pnl = (exitFillPrice - position.entryPrice) * position.shares;
+      const pnlPct = (exitFillPrice - position.entryPrice) / position.entryPrice;
 
       // Create order record for dry-run tracking
       const localOrderId = createOrder({
@@ -431,7 +462,8 @@ export class OrderManager {
           symbol: params.symbol,
           shares: params.shares,
           entryPrice: position.entryPrice,
-          exitPrice,
+          exitPrice: exitFillPrice,
+          slippage: sellSlippage,
           pnl,
           pnlPct: `${(pnlPct * 100).toFixed(2)}%`,
           exitReason: params.exitReason,
@@ -449,14 +481,14 @@ export class OrderManager {
             side: 'SELL',
             shares: params.shares,
             entryPrice: position.entryPrice,
-            exitPrice,
+            exitPrice: exitFillPrice,
             pnl,
             pnlPct,
             entryTime: position.entryTime,
             exitTime: now,
             exitReason: params.exitReason,
             intendedPrice: exitPrice,
-            slippage: 0,
+            slippage: sellSlippage,
             accountType: params.accountType,
           })
           .run();
@@ -469,7 +501,7 @@ export class OrderManager {
         status: 'filled',
         t212OrderId: dryT212Id,
         filledQuantity: params.shares,
-        filledPrice: exitPrice,
+        filledPrice: exitFillPrice,
         filledAt: now,
       });
 

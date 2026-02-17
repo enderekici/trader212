@@ -3,6 +3,7 @@ import { createLogger } from '../utils/logger.js';
 import { AnthropicAdapter } from './adapters/anthropic.js';
 import { OllamaAdapter } from './adapters/ollama.js';
 import { OpenAICompatibleAdapter } from './adapters/openai-compat.js';
+import { RulesEngine } from './rules-engine.js';
 
 const log = createLogger('ai-agent');
 
@@ -173,6 +174,8 @@ export function getActiveModelName(): string {
       return configManager.get<string>('ai.ollama.model');
     case 'openai-compatible':
       return configManager.get<string>('ai.openaiCompat.model');
+    case 'rules':
+      return 'rules-engine';
     default:
       return configManager.get<string>('ai.model');
   }
@@ -186,6 +189,8 @@ export function createAIAgent(): AIAgent {
       return new OllamaAdapter();
     case 'openai-compatible':
       return new OpenAICompatibleAdapter();
+    case 'rules':
+      return new RulesEngine();
     default:
       return new AnthropicAdapter();
   }

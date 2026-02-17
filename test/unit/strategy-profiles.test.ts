@@ -586,8 +586,8 @@ describe('config/strategy-profiles', () => {
       const manager = getStrategyProfileManager();
       await manager.seedBuiltinPresets();
 
-      // Should create 3 presets: Conservative, Aggressive, Scalp
-      expect(mockDb.insert).toHaveBeenCalledTimes(3);
+      // Should create 5 presets: Conservative, Aggressive, Scalp, Swing, Balanced
+      expect(mockDb.insert).toHaveBeenCalledTimes(5);
     });
 
     it('skips creating presets that already exist', async () => {
@@ -604,7 +604,9 @@ describe('config/strategy-profiles', () => {
       mockDb.select
         .mockReturnValueOnce(createChainableMock(existingProfile)) // Conservative exists
         .mockReturnValueOnce(createChainableMock(undefined)) // Aggressive doesn't exist
-        .mockReturnValueOnce(createChainableMock(undefined)); // Scalp doesn't exist
+        .mockReturnValueOnce(createChainableMock(undefined)) // Scalp doesn't exist
+        .mockReturnValueOnce(createChainableMock(undefined)) // Swing doesn't exist
+        .mockReturnValueOnce(createChainableMock(undefined)); // Balanced doesn't exist
 
       mockDb.insert.mockReturnValue(createChainableMock({ id: 2 }));
 
@@ -612,8 +614,8 @@ describe('config/strategy-profiles', () => {
       const manager = getStrategyProfileManager();
       await manager.seedBuiltinPresets();
 
-      // Should create only 2 presets (Aggressive and Scalp)
-      expect(mockDb.insert).toHaveBeenCalledTimes(2);
+      // Should create only 4 presets (Aggressive, Scalp, Swing, Balanced)
+      expect(mockDb.insert).toHaveBeenCalledTimes(4);
     });
   });
 
@@ -639,8 +641,8 @@ describe('config/strategy-profiles', () => {
       const manager = getStrategyProfileManager();
       await manager.seedBuiltinPresets();
 
-      // Verify the Aggressive preset was created
-      expect(mockDb.insert).toHaveBeenCalledTimes(3);
+      // Verify all 5 presets were created
+      expect(mockDb.insert).toHaveBeenCalledTimes(5);
     });
 
     it('Scalp preset has correct config values', async () => {
@@ -651,8 +653,8 @@ describe('config/strategy-profiles', () => {
       const manager = getStrategyProfileManager();
       await manager.seedBuiltinPresets();
 
-      // Verify the Scalp preset was created
-      expect(mockDb.insert).toHaveBeenCalledTimes(3);
+      // Verify all 5 presets were created
+      expect(mockDb.insert).toHaveBeenCalledTimes(5);
     });
   });
 

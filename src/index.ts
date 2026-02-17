@@ -760,6 +760,52 @@ class TradingBot {
     };
     const sentimentScore = scoreSentiment(sentimentInput);
 
+    // 2b. Confluence gate — pre-filter before AI call
+    let confluenceEnabled = false;
+    try {
+      confluenceEnabled = configManager.get<boolean>('analysis.confluenceEnabled');
+    } catch {
+      /* use defaults */
+    }
+
+    if (confluenceEnabled) {
+      let minSignals = 2;
+      let minScore = 55;
+      let minAvgScore = 50;
+      try {
+        minSignals = configManager.get<number>('analysis.confluenceMinSignals');
+      } catch {
+        /* use defaults */
+      }
+      try {
+        minScore = configManager.get<number>('analysis.confluenceMinScore');
+      } catch {
+        /* use defaults */
+      }
+      try {
+        minAvgScore = configManager.get<number>('analysis.confluenceMinAvgScore');
+      } catch {
+        /* use defaults */
+      }
+
+      const scores = [technicalScore, fundamentalScore, sentimentScore];
+      const passingSignals = scores.filter((s) => s >= minScore).length;
+      const avgScore = scores.reduce((a, b) => a + b, 0) / scores.length;
+
+      if (passingSignals < minSignals || avgScore < minAvgScore) {
+        log.debug(
+          { symbol, technicalScore, fundamentalScore, sentimentScore, passingSignals, avgScore },
+          'Confluence gate: insufficient signal alignment, skipping AI call',
+        );
+        const audit = getAuditLogger();
+        audit.logSignal(
+          symbol,
+          `Skipped by confluence gate: ${passingSignals}/${minSignals} signals, avg ${avgScore.toFixed(0)}/${minAvgScore}`,
+        );
+        return;
+      }
+    }
+
     // 3. Compute portfolio correlations
     const correlationResults = this.correlationAnalyzer.checkCorrelationWithPortfolio(symbol);
     const portfolioCorrelations = correlationResults.map((c) => ({
@@ -920,8 +966,34 @@ class TradingBot {
       // Non-critical, swallow webhook errors
     }
 
-    // 8. Execute if actionable
-    if (decision.decision === 'BUY' || decision.decision === 'SELL') {
+    // 8. Execute if actionable (with conviction gate for BUY)
+    if (decision.decision === 'BUY') {
+      let minConviction = 65;
+      try {
+        minConviction = configManager.get<number>('ai.minConvictionScore');
+      } catch {
+        /* use defaults */
+      }
+
+      if (decision.conviction < minConviction) {
+        log.info(
+          { symbol, conviction: decision.conviction, minConviction },
+          'BUY conviction below threshold, holding',
+        );
+        return;
+      }
+
+      await this.executeTrade(
+        symbol,
+        t212Ticker,
+        data,
+        decision,
+        portfolio,
+        technicalScore,
+        fundamentalScore,
+        sentimentScore,
+      );
+    } else if (decision.decision === 'SELL') {
       await this.executeTrade(
         symbol,
         t212Ticker,

@@ -197,3 +197,45 @@ export class PerformanceFilter implements PairlistFilter {
     return filtered;
   }
 }
+
+export class SectorFilter implements PairlistFilter {
+  readonly name = 'sector';
+
+  async filter(stocks: StockInfo[]): Promise<StockInfo[]> {
+    const allowed = configManager.get<string[]>('pairlist.sector.allowed');
+    const excluded = configManager.get<string[]>('pairlist.sector.excluded');
+
+    const allowedSet = new Set(allowed.map((s) => s.toLowerCase()));
+    const excludedSet = new Set(excluded.map((s) => s.toLowerCase()));
+
+    const filtered = stocks.filter((stock) => {
+      const sector = (stock.sector ?? '').toLowerCase();
+
+      // If whitelist is set, only allow those sectors
+      if (allowedSet.size > 0) {
+        if (!sector || !allowedSet.has(sector)) return false;
+      }
+
+      // If blacklist is set, exclude those sectors
+      if (excludedSet.size > 0) {
+        if (sector && excludedSet.has(sector)) return false;
+      }
+
+      return true;
+    });
+
+    const removed = stocks.length - filtered.length;
+    if (removed > 0) {
+      log.info(
+        {
+          removed,
+          allowedCount: allowed.length,
+          excludedCount: excluded.length,
+          remaining: filtered.length,
+        },
+        'SectorFilter applied',
+      );
+    }
+    return filtered;
+  }
+}

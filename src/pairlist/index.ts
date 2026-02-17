@@ -4,7 +4,9 @@ import {
   BlacklistFilter,
   MarketCapFilter,
   MaxPairsFilter,
+  PerformanceFilter,
   PriceFilter,
+  SectorFilter,
   VolatilityFilter,
   VolumeFilter,
 } from './filters.js';
@@ -17,6 +19,8 @@ const filterMap: Record<string, () => PairlistFilter> = {
   volatility: () => new VolatilityFilter(),
   blacklist: () => new BlacklistFilter(),
   maxPairs: () => new MaxPairsFilter(),
+  performance: () => new PerformanceFilter(),
+  sector: () => new SectorFilter(),
 };
 
 export function createPairlistPipeline(): PairlistPipeline {
@@ -40,7 +44,9 @@ export {
   BlacklistFilter,
   MarketCapFilter,
   MaxPairsFilter,
+  PerformanceFilter,
   PriceFilter,
+  SectorFilter,
   VolatilityFilter,
   VolumeFilter,
 } from './filters.js';

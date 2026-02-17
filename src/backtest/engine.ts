@@ -274,33 +274,40 @@ export class BacktestEngine {
   }
 
   private executeEntry(signal: EntrySignal, entryPrice: number, date: string): void {
+    // Transaction cost modeling
+    const slippageAdj = this.config.slippagePct ?? 0;
+    const spreadAdj = (this.config.spreadBps ?? 0) / 20000;
+    const adjustedEntryPrice = entryPrice * (1 + slippageAdj + spreadAdj);
+
     const equity = this.computeEquityFromCash();
     const maxPositionValue = this.config.maxPositionSizePct * equity;
     const positionValue = Math.min(maxPositionValue, this.cash);
 
     if (positionValue <= 0) return;
 
-    const shares = Math.floor(positionValue / entryPrice);
+    const shares = Math.floor(positionValue / adjustedEntryPrice);
     if (shares <= 0) return;
 
-    const cost = shares * entryPrice + this.config.commission;
+    const cost = shares * adjustedEntryPrice + this.config.commission;
     if (cost > this.cash) return;
 
-    const stopLoss = entryPrice * (1 - this.config.stopLossPct);
+    const stopLoss = adjustedEntryPrice * (1 - this.config.stopLossPct);
     const takeProfit =
-      this.config.takeProfitPct != null ? entryPrice * (1 + this.config.takeProfitPct) : undefined;
+      this.config.takeProfitPct != null
+        ? adjustedEntryPrice * (1 + this.config.takeProfitPct)
+        : undefined;
 
     this.cash -= cost;
 
     const position: BacktestPosition = {
       symbol: signal.symbol,
       shares,
-      entryPrice,
+      entryPrice: adjustedEntryPrice,
       entryTime: date,
       stopLoss,
       trailingStop: this.config.trailingStop ? stopLoss : undefined,
       takeProfit,
-      highWaterMark: entryPrice,
+      highWaterMark: adjustedEntryPrice,
       technicalScore: signal.score,
     };
 
@@ -310,7 +317,7 @@ export class BacktestEngine {
       {
         symbol: signal.symbol,
         shares,
-        entryPrice,
+        entryPrice: adjustedEntryPrice,
         stopLoss,
         takeProfit,
         date,
@@ -323,21 +330,26 @@ export class BacktestEngine {
     const position = this.positions.get(symbol);
     if (!position) return;
 
-    const grossPnl = (exitPrice - position.entryPrice) * position.shares;
+    // Transaction cost modeling
+    const slippageAdj = this.config.slippagePct ?? 0;
+    const spreadAdj = (this.config.spreadBps ?? 0) / 20000;
+    const adjustedExitPrice = exitPrice * (1 - slippageAdj - spreadAdj);
+
+    const grossPnl = (adjustedExitPrice - position.entryPrice) * position.shares;
     const pnl = grossPnl - this.config.commission;
-    const pnlPct = (exitPrice - position.entryPrice) / position.entryPrice;
+    const pnlPct = (adjustedExitPrice - position.entryPrice) / position.entryPrice;
 
     const entryMs = new Date(position.entryTime).getTime();
     const exitMs = new Date(date).getTime();
     const holdMinutes = (exitMs - entryMs) / 60000;
 
-    this.cash += position.shares * exitPrice - this.config.commission;
+    this.cash += position.shares * adjustedExitPrice - this.config.commission;
 
     const trade: BacktestTrade = {
       symbol,
       side: 'SELL',
       entryPrice: position.entryPrice,
-      exitPrice,
+      exitPrice: adjustedExitPrice,
       shares: position.shares,
       entryTime: position.entryTime,
       exitTime: date,

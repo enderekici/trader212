@@ -28,6 +28,22 @@ import {
 
 const log = createLogger('technical-scorer');
 
+const DEFAULT_TECHNICAL_WEIGHTS: Record<string, number> = {
+  rsi: 15,
+  macd: 15,
+  movingAverage: 15,
+  emaCross: 5,
+  bollinger: 10,
+  adx: 5,
+  stochastic: 10,
+  williamsR: 5,
+  mfi: 5,
+  cci: 5,
+  parabolicSar: 5,
+  roc: 3,
+  volumeRatio: 2,
+};
+
 export interface TechnicalAnalysis {
   rsi: number | null;
   macd: MACDResult | null;
@@ -176,12 +192,21 @@ function computeScore(price: number, inputs: ScoreInputs): number {
   let totalWeight = 0;
   let weightedSum = 0;
 
+  // Merge config weights over defaults
+  let configWeights: Record<string, number> = {};
+  try {
+    configWeights = configManager.get<Record<string, number>>('scoring.technical.weights');
+  } catch {
+    /* use defaults */
+  }
+  const weights = { ...DEFAULT_TECHNICAL_WEIGHTS, ...configWeights };
+
   const add = (signal: number, weight: number) => {
     totalWeight += weight;
     weightedSum += signal * weight;
   };
 
-  // RSI (weight 15) — oversold=bullish, overbought=bearish
+  // RSI — oversold=bullish, overbought=bearish
   if (inputs.rsi != null) {
     let rsiSignal: number;
     if (inputs.rsi < 30) rsiSignal = 80 + (30 - inputs.rsi);
@@ -189,17 +214,17 @@ function computeScore(price: number, inputs: ScoreInputs): number {
     else if (inputs.rsi > 70) rsiSignal = 20 - (inputs.rsi - 70);
     else if (inputs.rsi > 60) rsiSignal = 35;
     else rsiSignal = 50;
-    add(Math.max(0, Math.min(100, rsiSignal)), 15);
+    add(Math.max(0, Math.min(100, rsiSignal)), weights.rsi);
   }
 
-  // MACD (weight 15) — histogram positive=bullish
+  // MACD — histogram positive=bullish
   if (inputs.macd != null) {
     const hist = inputs.macd.histogram;
     const macdSignal = hist > 0 ? Math.min(50 + hist * 10, 90) : Math.max(50 + hist * 10, 10);
-    add(macdSignal, 15);
+    add(macdSignal, weights.macd);
   }
 
-  // Moving average trend (weight 15)
+  // Moving average trend
   if (inputs.sma20 != null && inputs.sma50 != null && inputs.sma200 != null) {
     let maSignal = 50;
     if (price > inputs.sma20 && price > inputs.sma50 && price > inputs.sma200) maSignal = 85;
@@ -213,33 +238,33 @@ function computeScore(price: number, inputs: ScoreInputs): number {
     if (inputs.sma50 > inputs.sma200) maSignal = Math.min(maSignal + 5, 100);
     else maSignal = Math.max(maSignal - 5, 0);
 
-    add(maSignal, 15);
+    add(maSignal, weights.movingAverage);
   }
 
-  // EMA crossover (weight 5)
+  // EMA crossover
   if (inputs.ema12 != null && inputs.ema26 != null) {
-    add(inputs.ema12 > inputs.ema26 ? 70 : 30, 5);
+    add(inputs.ema12 > inputs.ema26 ? 70 : 30, weights.emaCross);
   }
 
-  // Bollinger Bands (weight 10)
+  // Bollinger Bands
   if (inputs.bollinger != null) {
     const bbRange = inputs.bollinger.upper - inputs.bollinger.lower;
     if (bbRange > 0) {
       const position = (price - inputs.bollinger.lower) / bbRange;
       // Near lower band = bullish, near upper = bearish (mean-reversion)
       const bbSignal = Math.max(0, Math.min(100, (1 - position) * 100));
-      add(bbSignal, 10);
+      add(bbSignal, weights.bollinger);
     }
   }
 
-  // ADX (weight 5) — strong trend amplifier
+  // ADX — strong trend amplifier
   if (inputs.adx != null) {
     // ADX > 25 means strong trend; we reward strong trends slightly
     const adxSignal = inputs.adx > 25 ? 65 : inputs.adx > 20 ? 55 : 45;
-    add(adxSignal, 5);
+    add(adxSignal, weights.adx);
   }
 
-  // Stochastic (weight 10)
+  // Stochastic
   if (inputs.stochastic != null) {
     let stochSignal: number;
     if (inputs.stochastic.k < 20) stochSignal = 80;
@@ -248,48 +273,48 @@ function computeScore(price: number, inputs: ScoreInputs): number {
     // K crossing above D = bullish
     if (inputs.stochastic.k > inputs.stochastic.d) stochSignal += 10;
     else stochSignal -= 10;
-    add(Math.max(0, Math.min(100, stochSignal)), 10);
+    add(Math.max(0, Math.min(100, stochSignal)), weights.stochastic);
   }
 
-  // Williams %R (weight 5)
+  // Williams %R
   if (inputs.williamsR != null) {
     // -80 to -100 = oversold=bullish, 0 to -20 = overbought=bearish
     const wrSignal = inputs.williamsR < -80 ? 75 : inputs.williamsR > -20 ? 25 : 50;
-    add(wrSignal, 5);
+    add(wrSignal, weights.williamsR);
   }
 
-  // MFI (weight 5)
+  // MFI
   if (inputs.mfi != null) {
     let mfiSignal: number;
     if (inputs.mfi < 20) mfiSignal = 80;
     else if (inputs.mfi > 80) mfiSignal = 20;
     else mfiSignal = 50;
-    add(mfiSignal, 5);
+    add(mfiSignal, weights.mfi);
   }
 
-  // CCI (weight 5)
+  // CCI
   if (inputs.cci != null) {
     const cciSignal = inputs.cci < -100 ? 75 : inputs.cci > 100 ? 25 : 50;
-    add(cciSignal, 5);
+    add(cciSignal, weights.cci);
   }
 
-  // Parabolic SAR (weight 5)
+  // Parabolic SAR
   if (inputs.parabolicSar != null) {
-    add(price > inputs.parabolicSar ? 70 : 30, 5);
+    add(price > inputs.parabolicSar ? 70 : 30, weights.parabolicSar);
   }
 
-  // ROC (weight 3)
+  // ROC
   if (inputs.roc != null) {
     const rocSignal =
       inputs.roc > 0 ? Math.min(50 + inputs.roc * 5, 85) : Math.max(50 + inputs.roc * 5, 15);
-    add(rocSignal, 3);
+    add(rocSignal, weights.roc);
   }
 
-  // Volume ratio (weight 2)
+  // Volume ratio
   if (inputs.volumeRatio != null) {
     // High volume = conviction signal (neutral direction)
     const volSignal = inputs.volumeRatio > 1.5 ? 60 : inputs.volumeRatio < 0.5 ? 40 : 50;
-    add(volSignal, 2);
+    add(volSignal, weights.volumeRatio);
   }
 
   if (totalWeight === 0) return 50;

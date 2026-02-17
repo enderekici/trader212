@@ -1,3 +1,4 @@
+import { configManager } from '../../config/manager.js';
 import type { EarningsEvent, FinnhubNews, InsiderTx } from '../../data/finnhub.js';
 import type { MarketauxArticle } from '../../data/marketaux.js';
 import { createLogger } from '../../utils/logger.js';
@@ -128,21 +129,81 @@ export function analyzeSentiment(input: SentimentInput): SentimentAnalysis {
     newsScore = Math.max(0, Math.min(100, 50 + avgSentiment * 50));
   }
 
-  // Insider transaction sentiment
+  // Read insider config
+  let roleMultipliers: Record<string, number> = { ceo: 3, cfo: 3, director: 2, vp: 1, other: 1 };
+  let clusterWindowDays = 14;
+  let clusterMinCount = 3;
+  let clusterBonus = 15;
+  let insiderDivisor = 500;
+  try {
+    roleMultipliers = configManager.get<Record<string, number>>('scoring.insider.roleMultipliers');
+  } catch {
+    /* use defaults */
+  }
+  try {
+    clusterWindowDays = configManager.get<number>('scoring.insider.clusterWindowDays');
+  } catch {
+    /* use defaults */
+  }
+  try {
+    clusterMinCount = configManager.get<number>('scoring.insider.clusterMinCount');
+  } catch {
+    /* use defaults */
+  }
+  try {
+    clusterBonus = configManager.get<number>('scoring.insider.clusterBonus');
+  } catch {
+    /* use defaults */
+  }
+  try {
+    insiderDivisor = configManager.get<number>('scoring.insider.divisor');
+  } catch {
+    /* use defaults */
+  }
+
+  // Insider transaction sentiment with role-based weighting
   let insiderNetBuying = 0;
   for (const tx of input.insiderTransactions) {
-    // P = Purchase, S = Sale
+    // Determine role multiplier from name
+    const name = (tx.name ?? '').toLowerCase();
+    let multiplier = roleMultipliers.other ?? 1;
+    if (name.includes('ceo') || name.includes('chief executive'))
+      multiplier = roleMultipliers.ceo ?? 3;
+    else if (name.includes('cfo') || name.includes('chief financial'))
+      multiplier = roleMultipliers.cfo ?? 3;
+    else if (name.includes('director')) multiplier = roleMultipliers.director ?? 2;
+    else if (name.includes('vp') || name.includes('vice president'))
+      multiplier = roleMultipliers.vp ?? 1;
+
     if (tx.transactionCode === 'P') {
-      insiderNetBuying += tx.change;
+      insiderNetBuying += tx.change * multiplier;
     } else if (tx.transactionCode === 'S') {
-      insiderNetBuying += tx.change; // change is negative for sales
+      insiderNetBuying += tx.change * multiplier; // change is negative for sales
+    }
+  }
+
+  // Cluster detection: bonus if 3+ buy transactions within N-day window
+  let clusterBonusScore = 0;
+  const buyTxs = input.insiderTransactions
+    .filter((tx) => tx.transactionCode === 'P')
+    .map((tx) => new Date(tx.filingDate).getTime())
+    .sort((a, b) => a - b);
+
+  for (let i = 0; i <= buyTxs.length - clusterMinCount; i++) {
+    const windowEnd = buyTxs[i] + clusterWindowDays * 24 * 60 * 60 * 1000;
+    const countInWindow = buyTxs.filter((t) => t >= buyTxs[i] && t <= windowEnd).length;
+    if (countInWindow >= clusterMinCount) {
+      clusterBonusScore = clusterBonus;
+      break;
     }
   }
 
   let insiderScore = 50;
   if (input.insiderTransactions.length > 0) {
-    if (insiderNetBuying > 0) insiderScore = Math.min(50 + insiderNetBuying / 1000, 80);
-    else if (insiderNetBuying < 0) insiderScore = Math.max(50 + insiderNetBuying / 1000, 20);
+    if (insiderNetBuying > 0)
+      insiderScore = Math.min(50 + insiderNetBuying / insiderDivisor + clusterBonusScore, 95);
+    else if (insiderNetBuying < 0)
+      insiderScore = Math.max(50 + insiderNetBuying / insiderDivisor, 10);
   }
 
   // Earnings proximity
@@ -157,8 +218,20 @@ export function analyzeSentiment(input: SentimentInput): SentimentAnalysis {
     }
   }
 
-  // Combined score: news 70%, insider 30%
-  const combinedScore = Math.round(newsScore * 0.7 + insiderScore * 0.3);
+  // Combined score: configurable news/insider split (default 70/30)
+  let newsWeight = 0.7;
+  let insiderWeight = 0.3;
+  try {
+    newsWeight = configManager.get<number>('scoring.sentiment.newsWeight');
+  } catch {
+    /* use defaults */
+  }
+  try {
+    insiderWeight = configManager.get<number>('scoring.sentiment.insiderWeight');
+  } catch {
+    /* use defaults */
+  }
+  const combinedScore = Math.round(newsScore * newsWeight + insiderScore * insiderWeight);
   const score = Math.max(0, Math.min(100, combinedScore));
 
   log.debug(

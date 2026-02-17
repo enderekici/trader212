@@ -12,6 +12,15 @@ vi.mock('../../src/utils/logger.js', () => ({
   }),
 }));
 
+// Mock the config manager
+vi.mock('../../src/config/manager.js', () => ({
+  configManager: {
+    get: vi.fn().mockImplementation(() => {
+      throw new Error('not configured');
+    }),
+  },
+}));
+
 import {
   analyzeSentiment,
   scoreSentiment,
@@ -282,28 +291,29 @@ describe('Sentiment Scorer', () => {
       expect(result.score).toBeLessThan(50);
     });
 
-    it('caps insider buying score at 80', () => {
+    it('caps insider buying score at 95', () => {
       const input = makeInput({
         insiderTransactions: [
           makeInsiderTx({ transactionCode: 'P', change: 100000 }),
         ],
       });
       const result = analyzeSentiment(input);
-      // insiderScore = min(50 + 100000/1000, 80) = 80
-      // combined = 50*0.7 + 80*0.3 = 35 + 24 = 59
-      expect(result.score).toBe(59);
+      // role multiplier = 1 (John Doe = "other"), divisor = 500
+      // insiderScore = min(50 + 100000/500 + 0, 95) = 95
+      // combined = 50*0.7 + 95*0.3 = 35 + 28.5 = 63.5 -> 64
+      expect(result.score).toBe(64);
     });
 
-    it('floors insider selling score at 20', () => {
+    it('floors insider selling score at 10', () => {
       const input = makeInput({
         insiderTransactions: [
           makeInsiderTx({ transactionCode: 'S', change: -100000 }),
         ],
       });
       const result = analyzeSentiment(input);
-      // insiderScore = max(50 + (-100000)/1000, 20) = 20
-      // combined = 50*0.7 + 20*0.3 = 35 + 6 = 41
-      expect(result.score).toBe(41);
+      // insiderScore = max(50 + (-100000)/500, 10) = 10
+      // combined = 50*0.7 + 10*0.3 = 35 + 3 = 38
+      expect(result.score).toBe(38);
     });
 
     it('ignores transactions with unknown codes', () => {
@@ -381,9 +391,9 @@ describe('Sentiment Scorer', () => {
       });
       const result = analyzeSentiment(input);
       // newsScore = 50 + 1.0*50 = 100
-      // insiderScore = min(50 + 50000/1000, 80) = 80
-      // combined = 100*0.7 + 80*0.3 = 70 + 24 = 94
-      expect(result.score).toBe(94);
+      // insiderScore = min(50 + 50000/500 + 0, 95) = 95
+      // combined = 100*0.7 + 95*0.3 = 70 + 28.5 = 98.5 -> 99
+      expect(result.score).toBe(99);
     });
 
     it('final score is clamped to [0, 100]', () => {

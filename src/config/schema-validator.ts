@@ -14,6 +14,8 @@ const pairlistFilterEnum = z.enum([
   'volatility',
   'blacklist',
   'maxPairs',
+  'performance',
+  'sector',
 ]);
 
 const pairlistSchemas = new Map<string, z.ZodType>([
@@ -32,6 +34,12 @@ const pairlistSchemas = new Map<string, z.ZodType>([
   ['pairlist.maxPairs', z.number().int().min(1).max(500)],
   ['pairlist.mode', z.enum(['dynamic', 'static', 'hybrid'])],
   ['pairlist.staticSymbols', z.array(z.string())],
+  ['pairlist.performance.enabled', z.boolean()],
+  ['pairlist.performance.minWinRate', z.number().min(0).max(1)],
+  ['pairlist.performance.minTrades', z.number().int().min(1).max(1000)],
+  ['pairlist.performance.lookbackDays', z.number().int().min(1).max(365)],
+  ['pairlist.sector.allowed', z.array(z.string())],
+  ['pairlist.sector.excluded', z.array(z.string())],
 ]);
 
 // ── Data Sources ─────────────────────────────────────────────────────────────
@@ -52,6 +60,10 @@ const dataSchemas = new Map<string, z.ZodType>([
 
 // ── Analysis ─────────────────────────────────────────────────────────────────
 const analysisSchemas = new Map<string, z.ZodType>([
+  ['analysis.confluenceEnabled', z.boolean()],
+  ['analysis.confluenceMinSignals', z.number().int().min(1).max(3)],
+  ['analysis.confluenceMinScore', z.number().int().min(0).max(100)],
+  ['analysis.confluenceMinAvgScore', z.number().int().min(0).max(100)],
   ['analysis.intervalMinutes', z.number().int().min(1).max(1440)],
   ['analysis.historicalDays', z.number().int().min(1).max(3650)],
   ['analysis.rsi.period', z.number().int().min(2).max(200)],
@@ -73,10 +85,23 @@ const analysisSchemas = new Map<string, z.ZodType>([
   ['analysis.supportResistance.lookback', z.number().int().min(1).max(200)],
 ]);
 
+// ── Scoring ──────────────────────────────────────────────────────────────────
+const scoringSchemas = new Map<string, z.ZodType>([
+  ['scoring.technical.weights', z.record(z.string(), z.number().min(0).max(100))],
+  ['scoring.fundamental.weights', z.record(z.string(), z.number().min(0).max(100))],
+  ['scoring.sentiment.newsWeight', z.number().min(0).max(1)],
+  ['scoring.sentiment.insiderWeight', z.number().min(0).max(1)],
+  ['scoring.insider.roleMultipliers', z.record(z.string(), z.number().min(0).max(10))],
+  ['scoring.insider.clusterWindowDays', z.number().int().min(1).max(90)],
+  ['scoring.insider.clusterMinCount', z.number().int().min(1).max(20)],
+  ['scoring.insider.clusterBonus', z.number().min(0).max(50)],
+  ['scoring.insider.divisor', z.number().min(1).max(10_000)],
+]);
+
 // ── AI ───────────────────────────────────────────────────────────────────────
 const aiSchemas = new Map<string, z.ZodType>([
   ['ai.enabled', z.boolean()],
-  ['ai.provider', z.enum(['anthropic', 'ollama', 'openai-compatible'])],
+  ['ai.provider', z.enum(['anthropic', 'ollama', 'openai-compatible', 'rules'])],
   ['ai.model', z.string().min(1).max(200)],
   ['ai.ollama.baseUrl', z.string().url()],
   ['ai.ollama.model', z.string().min(1).max(200)],
@@ -93,6 +118,12 @@ const aiSchemas = new Map<string, z.ZodType>([
   ['ai.research.topStocksCount', z.number().int().min(1).max(500)],
   ['ai.research.detailedThreshold', z.number().int().min(1).max(100)],
   ['ai.research.maxConcurrentFetches', z.number().int().min(1).max(20)],
+  ['ai.minConvictionScore', z.number().int().min(0).max(100)],
+  ['ai.rules.buyTechMin', z.number().int().min(0).max(100)],
+  ['ai.rules.buyFundMin', z.number().int().min(0).max(100)],
+  ['ai.rules.buySentMin', z.number().int().min(0).max(100)],
+  ['ai.rules.sellTechMax', z.number().int().min(0).max(100)],
+  ['ai.rules.sellFundMax', z.number().int().min(0).max(100)],
 ]);
 
 // ── Risk ─────────────────────────────────────────────────────────────────────
@@ -134,6 +165,7 @@ const executionSchemas = new Map<string, z.ZodType>([
   ['execution.orderReplacement.replaceAfterSeconds', z.number().int().min(1).max(600)],
   ['execution.orderReplacement.priceDeviationPct', z.number().min(0.0001).max(0.1)],
   ['execution.orderReplacement.maxReplacements', z.number().int().min(1).max(20)],
+  ['execution.paperTrading', z.boolean()],
 ]);
 
 // ── Protection ───────────────────────────────────────────────────────────────
@@ -159,6 +191,7 @@ const protectionSchemas = new Map<string, z.ZodType>([
 const exitSchemas = new Map<string, z.ZodType>([
   ['exit.roiEnabled', z.boolean()],
   ['exit.roiTable', z.record(z.string(), z.number().min(-1).max(10))],
+  ['exit.dslEnabled', z.boolean()],
 ]);
 
 // ── DCA ──────────────────────────────────────────────────────────────────────
@@ -278,6 +311,12 @@ const streamingSchemas = new Map<string, z.ZodType>([
   ['streaming.intervalSeconds', z.number().int().min(5).max(300)],
 ]);
 
+// ── Trading ──────────────────────────────────────────────────────────────────
+const tradingSchemas = new Map<string, z.ZodType>([
+  ['trading.slippageMarketPct', z.number().min(0).max(0.1)],
+  ['trading.spreadBps', z.number().min(0).max(100)],
+]);
+
 // ── Monitoring ───────────────────────────────────────────────────────────────
 const timeRegex = /^\d{2}:\d{2}$/;
 const monitoringSchemas = new Map<string, z.ZodType>([
@@ -295,6 +334,7 @@ export const configSchemas: Map<string, z.ZodType> = new Map([
   ...pairlistSchemas,
   ...dataSchemas,
   ...analysisSchemas,
+  ...scoringSchemas,
   ...aiSchemas,
   ...riskSchemas,
   ...executionSchemas,
@@ -316,6 +356,7 @@ export const configSchemas: Map<string, z.ZodType> = new Map([
   ...reportsSchemas,
   ...webResearchSchemas,
   ...streamingSchemas,
+  ...tradingSchemas,
   ...monitoringSchemas,
 ]);
 

@@ -80,6 +80,14 @@ const backtestSchema = z.object({
   trailingStop: z.boolean().default(false),
   commission: z.number().min(0).default(0),
   entryThreshold: z.number().min(0).max(1).default(0.6),
+  slippagePct: z.number().min(0).max(0.1).optional(),
+  spreadBps: z.number().min(0).max(100).optional(),
+  walkForward: z
+    .object({
+      windows: z.number().int().min(2).max(20).default(5),
+      trainRatio: z.number().min(0.5).max(0.9).default(0.7),
+    })
+    .optional(),
 });
 
 const log = createLogger('api-routes');
@@ -873,6 +881,23 @@ export function createRouter(): Router {
       }
 
       const backtestConfig: BacktestConfig = parsed.data;
+
+      // If walk-forward requested, run walk-forward instead of single backtest
+      if (parsed.data.walkForward) {
+        const { WalkForwardAnalyzer } = await import('../backtest/walk-forward.js');
+        const analyzer = new WalkForwardAnalyzer(
+          backtestConfig,
+          parsed.data.walkForward.windows,
+          parsed.data.walkForward.trainRatio,
+        );
+        const wfResult = await analyzer.run();
+        res.json({
+          type: 'walk-forward',
+          ...wfResult,
+        });
+        return;
+      }
+
       const engine = await createBacktestEngine(backtestConfig);
       const result = await engine.run();
 

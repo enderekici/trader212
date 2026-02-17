@@ -1,10 +1,22 @@
 import { and, desc, eq, gt, isNotNull } from 'drizzle-orm';
+import { configManager } from '../../config/manager.js';
 import type { FundamentalData } from '../../data/yahoo-finance.js';
 import { getDb } from '../../db/index.js';
 import { fundamentalCache } from '../../db/schema.js';
 import { createLogger } from '../../utils/logger.js';
 
 const log = createLogger('fundamental-scorer');
+
+const DEFAULT_FUNDAMENTAL_WEIGHTS: Record<string, number> = {
+  pe: 15,
+  forwardPe: 10,
+  revenueGrowth: 20,
+  profitMargin: 10,
+  operatingMargin: 10,
+  debtToEquity: 15,
+  currentRatio: 10,
+  earningsSurprise: 10,
+};
 
 /** Get sector median P/E from fundamental_cache (only valid P/E > 0) */
 function getSectorMedianPE(sector: string | null): number | null {
@@ -68,12 +80,21 @@ export function analyzeFundamentals(data: FundamentalData): FundamentalAnalysis 
   let totalWeight = 0;
   let weightedSum = 0;
 
+  // Merge config weights over defaults
+  let configWeights: Record<string, number> = {};
+  try {
+    configWeights = configManager.get<Record<string, number>>('scoring.fundamental.weights');
+  } catch {
+    /* use defaults */
+  }
+  const weights = { ...DEFAULT_FUNDAMENTAL_WEIGHTS, ...configWeights };
+
   const add = (signal: number, weight: number) => {
     totalWeight += weight;
     weightedSum += signal * weight;
   };
 
-  // P/E Ratio (weight 15) — sector-relative when possible
+  // P/E Ratio — sector-relative when possible
   if (data.peRatio != null && data.peRatio > 0) {
     const sectorMedianPE = getSectorMedianPE(data.sector);
     let peSignal: number;
@@ -97,10 +118,10 @@ export function analyzeFundamentals(data: FundamentalData): FundamentalAnalysis 
       else if (data.peRatio < 50) peSignal = 25;
       else peSignal = 15;
     }
-    add(peSignal, 15);
+    add(peSignal, weights.pe);
   }
 
-  // Forward P/E (weight 10) — same logic but slightly more weight to growth expectation
+  // Forward P/E — same logic but slightly more weight to growth expectation
   if (data.forwardPE != null && data.forwardPE > 0) {
     let fpeSignal: number;
     if (data.forwardPE < 10) fpeSignal = 85;
@@ -113,10 +134,10 @@ export function analyzeFundamentals(data: FundamentalData): FundamentalAnalysis 
     if (data.peRatio != null && data.peRatio > 0 && data.forwardPE < data.peRatio) {
       fpeSignal = Math.min(fpeSignal + 10, 100);
     }
-    add(fpeSignal, 10);
+    add(fpeSignal, weights.forwardPe);
   }
 
-  // Revenue Growth YoY (weight 20)
+  // Revenue Growth YoY
   if (data.revenueGrowthYoY != null) {
     let growthSignal: number;
     if (data.revenueGrowthYoY > 0.3) growthSignal = 90;
@@ -126,10 +147,10 @@ export function analyzeFundamentals(data: FundamentalData): FundamentalAnalysis 
     else if (data.revenueGrowthYoY > 0) growthSignal = 50;
     else if (data.revenueGrowthYoY > -0.1) growthSignal = 35;
     else growthSignal = 15;
-    add(growthSignal, 20);
+    add(growthSignal, weights.revenueGrowth);
   }
 
-  // Profit Margin (weight 10)
+  // Profit Margin
   if (data.profitMargin != null) {
     let marginSignal: number;
     if (data.profitMargin > 0.25) marginSignal = 85;
@@ -137,10 +158,10 @@ export function analyzeFundamentals(data: FundamentalData): FundamentalAnalysis 
     else if (data.profitMargin > 0.08) marginSignal = 55;
     else if (data.profitMargin > 0) marginSignal = 40;
     else marginSignal = 15;
-    add(marginSignal, 10);
+    add(marginSignal, weights.profitMargin);
   }
 
-  // Operating Margin (weight 10)
+  // Operating Margin
   if (data.operatingMargin != null) {
     let opMarginSignal: number;
     if (data.operatingMargin > 0.3) opMarginSignal = 85;
@@ -148,10 +169,10 @@ export function analyzeFundamentals(data: FundamentalData): FundamentalAnalysis 
     else if (data.operatingMargin > 0.1) opMarginSignal = 55;
     else if (data.operatingMargin > 0) opMarginSignal = 40;
     else opMarginSignal = 15;
-    add(opMarginSignal, 10);
+    add(opMarginSignal, weights.operatingMargin);
   }
 
-  // Debt to Equity (weight 15)
+  // Debt to Equity
   if (data.debtToEquity != null) {
     let debtSignal: number;
     if (data.debtToEquity < 0.3) debtSignal = 85;
@@ -160,10 +181,10 @@ export function analyzeFundamentals(data: FundamentalData): FundamentalAnalysis 
     else if (data.debtToEquity < 1.5) debtSignal = 45;
     else if (data.debtToEquity < 2.0) debtSignal = 30;
     else debtSignal = 15;
-    add(debtSignal, 15);
+    add(debtSignal, weights.debtToEquity);
   }
 
-  // Current Ratio (weight 10)
+  // Current Ratio
   if (data.currentRatio != null) {
     let crSignal: number;
     if (data.currentRatio > 3) crSignal = 70;
@@ -171,10 +192,10 @@ export function analyzeFundamentals(data: FundamentalData): FundamentalAnalysis 
     else if (data.currentRatio > 1.5) crSignal = 70;
     else if (data.currentRatio > 1) crSignal = 55;
     else crSignal = 20;
-    add(crSignal, 10);
+    add(crSignal, weights.currentRatio);
   }
 
-  // Earnings Surprise (weight 10)
+  // Earnings Surprise
   if (data.earningsSurprise != null) {
     let esSignal: number;
     if (data.earningsSurprise > 0.1) esSignal = 85;
@@ -182,7 +203,7 @@ export function analyzeFundamentals(data: FundamentalData): FundamentalAnalysis 
     else if (data.earningsSurprise > 0) esSignal = 60;
     else if (data.earningsSurprise > -0.05) esSignal = 40;
     else esSignal = 20;
-    add(esSignal, 10);
+    add(esSignal, weights.earningsSurprise);
   }
 
   const score = totalWeight > 0 ? Math.round(weightedSum / totalWeight) : 50;

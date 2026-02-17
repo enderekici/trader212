@@ -27,7 +27,7 @@ const PRESET_CONSERVATIVE: Record<string, unknown> = {
   'risk.maxStopLossPct': 0.05,
   'risk.maxDailyLossPct': 0.03,
   'risk.maxDailyTrades': 5,
-  'risk.minRiskRewardRatio': 3.0,
+  'execution.minRiskRewardRatio': 3.0,
   'ai.minConvictionScore': 80,
 };
 
@@ -37,7 +37,7 @@ const PRESET_AGGRESSIVE: Record<string, unknown> = {
   'risk.maxStopLossPct': 0.12,
   'risk.maxDailyLossPct': 0.1,
   'risk.maxDailyTrades': 15,
-  'risk.minRiskRewardRatio': 1.5,
+  'execution.minRiskRewardRatio': 1.5,
   'ai.minConvictionScore': 60,
 };
 
@@ -47,11 +47,47 @@ const PRESET_SCALP: Record<string, unknown> = {
   'risk.maxStopLossPct': 0.03,
   'risk.maxDailyLossPct': 0.05,
   'risk.maxDailyTrades': 20,
-  'risk.minRiskRewardRatio': 2.0,
+  'execution.minRiskRewardRatio': 2.0,
   'execution.maxHoldDays': 3,
-  'execution.roiEnabled': true,
-  'execution.roiStopLossPct': 0.02,
+  'exit.roiEnabled': true,
   'ai.minConvictionScore': 70,
+};
+
+const PRESET_SWING: Record<string, unknown> = {
+  'risk.maxPositions': 4,
+  'risk.maxPositionSizePct': 0.2,
+  'risk.maxStopLossPct': 0.15,
+  'risk.maxDailyTrades': 5,
+  'execution.minRiskRewardRatio': 2.0,
+  'execution.maxHoldDays': 30,
+  'exit.roiEnabled': true,
+  'exit.roiTable': { '0': 0.2, '1440': 0.12, '4320': 0.08, '10080': 0.04, '20160': 0.02 },
+  'partialExit.enabled': true,
+  'partialExit.tiers': [
+    { pctGain: 0.05, sellPct: 0.25 },
+    { pctGain: 0.1, sellPct: 0.5 },
+    { pctGain: 0.2, sellPct: 1.0 },
+  ],
+  'analysis.confluenceEnabled': true,
+  'analysis.confluenceMinSignals': 2,
+  'multiTimeframe.enabled': true,
+  'analysis.intervalMinutes': 30,
+  'ai.minConvictionScore': 70,
+};
+
+const PRESET_BALANCED: Record<string, unknown> = {
+  'risk.maxPositions': 5,
+  'risk.maxPositionSizePct': 0.15,
+  'risk.maxStopLossPct': 0.1,
+  'risk.maxDailyTrades': 8,
+  'execution.minRiskRewardRatio': 1.5,
+  'execution.maxHoldDays': 14,
+  'partialExit.enabled': true,
+  'partialExit.tiers': [
+    { pctGain: 0.05, sellPct: 0.33 },
+    { pctGain: 0.1, sellPct: 0.5 },
+  ],
+  'ai.minConvictionScore': 65,
 };
 
 export class StrategyProfileManager {
@@ -176,6 +212,18 @@ export class StrategyProfileManager {
         name: 'Scalp',
         description: 'Short-term strategy: many small positions, quick exits, ROI enabled',
         config: PRESET_SCALP,
+      },
+      {
+        name: 'Swing',
+        description:
+          'Multi-day holds: wide stops, ROI table with multi-day windows, partial exits at 5%/10%/20%, confluence gate, multi-timeframe',
+        config: PRESET_SWING,
+      },
+      {
+        name: 'Balanced',
+        description:
+          'Moderate risk/reward: 5 positions, 15% max size, 10% stop, partial exits at 5%/10%',
+        config: PRESET_BALANCED,
       },
     ];
 
