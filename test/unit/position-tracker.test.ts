@@ -60,6 +60,14 @@ vi.mock('../../src/data/yahoo-finance.js', () => ({
   }),
 }));
 
+// Exit condition DSL mock
+const mockParseExitConditionText = vi.fn().mockReturnValue([]);
+const mockEvaluateExitCondition = vi.fn().mockReturnValue(false);
+vi.mock('../../src/execution/exit-condition-dsl.js', () => ({
+  parseExitConditionText: (...args: unknown[]) => mockParseExitConditionText(...args),
+  evaluateExitCondition: (...args: unknown[]) => mockEvaluateExitCondition(...args),
+}));
+
 // ── Import SUT ─────────────────────────────────────────────────────────────
 import { configManager } from '../../src/config/manager.js';
 import { PositionTracker } from '../../src/execution/position-tracker.js';
@@ -648,6 +656,396 @@ describe('PositionTracker', () => {
 
       expect(result.positionsToClose).toContain('AAPL');
       expect(result.exitReasons.AAPL).toBe('roi_table');
+    });
+  });
+
+  // ── Exit condition DSL wiring ──────────────────────────────────────────
+  describe('checkExitConditions — DSL wiring', () => {
+    it('triggers position close when DSL condition evaluates to true', async () => {
+      const entryTime = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+      mockDbAll.mockReturnValueOnce([
+        {
+          symbol: 'TSLA',
+          entryPrice: 200,
+          currentPrice: 230,
+          shares: 5,
+          entryTime,
+          stopLoss: null,
+          trailingStop: null,
+          takeProfit: null,
+          aiExitConditions: 'profit% > 10',
+        },
+      ]);
+
+      // exit.roiEnabled = false (skip ROI), exit.dslEnabled = true
+      mockConfigGet
+        .mockReturnValueOnce(false)  // exit.roiEnabled
+        .mockReturnValueOnce(true);  // exit.dslEnabled
+
+      const fakeParsedCondition = { type: 'profit', metric: 'pnl_pct', operator: 'gt', value: 0.1 };
+      mockParseExitConditionText.mockReturnValueOnce([fakeParsedCondition]);
+      mockEvaluateExitCondition.mockReturnValueOnce(true);
+
+      const result = await tracker.checkExitConditions();
+
+      expect(result.positionsToClose).toContain('TSLA');
+      expect(result.exitReasons.TSLA).toBe('DSL exit condition triggered');
+      expect(mockParseExitConditionText).toHaveBeenCalledWith('profit% > 10');
+      expect(mockEvaluateExitCondition).toHaveBeenCalledWith(
+        fakeParsedCondition,
+        expect.objectContaining({
+          currentPrice: 230,
+          entryPrice: 200,
+          pnlPct: expect.any(Number),
+          pnlAbs: expect.any(Number),
+          daysHeld: expect.any(Number),
+          hoursHeld: expect.any(Number),
+          indicators: {},
+        }),
+      );
+    });
+
+    it('does not trigger when DSL condition evaluates to false', async () => {
+      const entryTime = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      mockDbAll.mockReturnValueOnce([
+        {
+          symbol: 'TSLA',
+          entryPrice: 200,
+          currentPrice: 205,
+          shares: 5,
+          entryTime,
+          stopLoss: null,
+          trailingStop: null,
+          takeProfit: null,
+          aiExitConditions: 'profit% > 10',
+        },
+      ]);
+
+      mockConfigGet
+        .mockReturnValueOnce(false)  // exit.roiEnabled
+        .mockReturnValueOnce(true);  // exit.dslEnabled
+
+      const fakeParsedCondition = { type: 'profit', metric: 'pnl_pct', operator: 'gt', value: 0.1 };
+      mockParseExitConditionText.mockReturnValueOnce([fakeParsedCondition]);
+      mockEvaluateExitCondition.mockReturnValueOnce(false);
+
+      const result = await tracker.checkExitConditions();
+
+      expect(result.positionsToClose).not.toContain('TSLA');
+      expect(result.exitReasons.TSLA).toBeUndefined();
+    });
+
+    it('skips DSL evaluation when exit.dslEnabled is false', async () => {
+      const entryTime = new Date().toISOString();
+      mockDbAll.mockReturnValueOnce([
+        {
+          symbol: 'MSFT',
+          entryPrice: 400,
+          currentPrice: 420,
+          shares: 3,
+          entryTime,
+          stopLoss: null,
+          trailingStop: null,
+          takeProfit: null,
+          aiExitConditions: 'price above 410',
+        },
+      ]);
+
+      mockConfigGet
+        .mockReturnValueOnce(false)   // exit.roiEnabled
+        .mockReturnValueOnce(false);  // exit.dslEnabled
+
+      const result = await tracker.checkExitConditions();
+
+      // DSL functions should never be called
+      expect(mockParseExitConditionText).not.toHaveBeenCalled();
+      expect(mockEvaluateExitCondition).not.toHaveBeenCalled();
+      // aiExitConditions is not valid JSON, so JSON.parse will throw and be caught
+      expect(result.positionsToClose).toHaveLength(0);
+    });
+
+    it('skips DSL evaluation when aiExitConditions is null', async () => {
+      const entryTime = new Date().toISOString();
+      mockDbAll.mockReturnValueOnce([
+        {
+          symbol: 'GOOG',
+          entryPrice: 170,
+          currentPrice: 175,
+          shares: 10,
+          entryTime,
+          stopLoss: null,
+          trailingStop: null,
+          takeProfit: null,
+          aiExitConditions: null,
+        },
+      ]);
+
+      mockConfigGet
+        .mockReturnValueOnce(false)  // exit.roiEnabled
+        .mockReturnValueOnce(true);  // exit.dslEnabled
+
+      const result = await tracker.checkExitConditions();
+
+      expect(mockParseExitConditionText).not.toHaveBeenCalled();
+      expect(result.positionsToClose).toHaveLength(0);
+    });
+
+    it('skips DSL evaluation when aiExitConditions is empty string', async () => {
+      const entryTime = new Date().toISOString();
+      mockDbAll.mockReturnValueOnce([
+        {
+          symbol: 'AMZN',
+          entryPrice: 180,
+          currentPrice: 185,
+          shares: 8,
+          entryTime,
+          stopLoss: null,
+          trailingStop: null,
+          takeProfit: null,
+          aiExitConditions: '',
+        },
+      ]);
+
+      mockConfigGet
+        .mockReturnValueOnce(false)  // exit.roiEnabled
+        .mockReturnValueOnce(true);  // exit.dslEnabled
+
+      const result = await tracker.checkExitConditions();
+
+      // Empty string is falsy, so the DSL block (dslEnabled && pos.aiExitConditions) is skipped
+      expect(mockParseExitConditionText).not.toHaveBeenCalled();
+      expect(result.positionsToClose).toHaveLength(0);
+    });
+
+    it('handles DSL parse errors gracefully without crashing', async () => {
+      const entryTime = new Date().toISOString();
+      mockDbAll.mockReturnValueOnce([
+        {
+          symbol: 'NVDA',
+          entryPrice: 800,
+          currentPrice: 850,
+          shares: 2,
+          entryTime,
+          stopLoss: null,
+          trailingStop: null,
+          takeProfit: null,
+          aiExitConditions: 'some unparseable gibberish !@#$',
+        },
+      ]);
+
+      mockConfigGet
+        .mockReturnValueOnce(false)  // exit.roiEnabled
+        .mockReturnValueOnce(true);  // exit.dslEnabled
+
+      mockParseExitConditionText.mockImplementationOnce(() => {
+        throw new Error('DSL parse error');
+      });
+
+      const result = await tracker.checkExitConditions();
+
+      // Should not crash; error is caught and logged
+      expect(result.positionsToClose).not.toContain('NVDA');
+      expect(result.exitReasons.NVDA).toBeUndefined();
+    });
+
+    it('handles evaluateExitCondition throwing an error gracefully', async () => {
+      const entryTime = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      mockDbAll.mockReturnValueOnce([
+        {
+          symbol: 'META',
+          entryPrice: 500,
+          currentPrice: 530,
+          shares: 4,
+          entryTime,
+          stopLoss: null,
+          trailingStop: null,
+          takeProfit: null,
+          aiExitConditions: 'rsi above 70',
+        },
+      ]);
+
+      mockConfigGet
+        .mockReturnValueOnce(false)  // exit.roiEnabled
+        .mockReturnValueOnce(true);  // exit.dslEnabled
+
+      const fakeCondition = { type: 'indicator', indicator: 'RSI', operator: 'above', value: 70 };
+      mockParseExitConditionText.mockReturnValueOnce([fakeCondition]);
+      mockEvaluateExitCondition.mockImplementationOnce(() => {
+        throw new Error('Evaluation failed');
+      });
+
+      const result = await tracker.checkExitConditions();
+
+      // Error is caught in the outer try/catch, position is not closed
+      expect(result.positionsToClose).not.toContain('META');
+    });
+
+    it('defaults dslEnabled to true when configManager.get throws', async () => {
+      const entryTime = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+      mockDbAll.mockReturnValueOnce([
+        {
+          symbol: 'AAPL',
+          entryPrice: 150,
+          currentPrice: 175,
+          shares: 10,
+          entryTime,
+          stopLoss: null,
+          trailingStop: null,
+          takeProfit: null,
+          aiExitConditions: 'profit% > 5',
+        },
+      ]);
+
+      mockConfigGet
+        .mockReturnValueOnce(false)  // exit.roiEnabled
+        .mockImplementationOnce(() => { throw new Error('Config key not found'); }); // exit.dslEnabled throws
+
+      const fakeParsedCondition = { type: 'profit', metric: 'pnl_pct', operator: 'gt', value: 0.05 };
+      mockParseExitConditionText.mockReturnValueOnce([fakeParsedCondition]);
+      mockEvaluateExitCondition.mockReturnValueOnce(true);
+
+      const result = await tracker.checkExitConditions();
+
+      // dslEnabled defaults to true when configManager.get throws, so DSL runs
+      expect(mockParseExitConditionText).toHaveBeenCalledWith('profit% > 5');
+      expect(result.positionsToClose).toContain('AAPL');
+      expect(result.exitReasons.AAPL).toBe('DSL exit condition triggered');
+    });
+
+    it('skips DSL when parseExitConditionText returns empty array', async () => {
+      const entryTime = new Date().toISOString();
+      mockDbAll.mockReturnValueOnce([
+        {
+          symbol: 'NFLX',
+          entryPrice: 600,
+          currentPrice: 620,
+          shares: 3,
+          entryTime,
+          stopLoss: null,
+          trailingStop: null,
+          takeProfit: null,
+          aiExitConditions: '{"maxHoldDays": 30}',
+        },
+      ]);
+
+      mockConfigGet
+        .mockReturnValueOnce(false)  // exit.roiEnabled
+        .mockReturnValueOnce(true);  // exit.dslEnabled
+
+      // parseExitConditionText returns empty for JSON-like strings
+      mockParseExitConditionText.mockReturnValueOnce([]);
+
+      const result = await tracker.checkExitConditions();
+
+      // DSL parse returned empty, so evaluateExitCondition should not be called
+      expect(mockEvaluateExitCondition).not.toHaveBeenCalled();
+      // Falls through to JSON-based AI exit conditions — maxHoldDays=30, held ~0 days, no exit
+      expect(result.positionsToClose).toHaveLength(0);
+    });
+
+    it('only triggers first matching DSL condition and breaks', async () => {
+      const entryTime = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString();
+      mockDbAll.mockReturnValueOnce([
+        {
+          symbol: 'AMD',
+          entryPrice: 100,
+          currentPrice: 120,
+          shares: 10,
+          entryTime,
+          stopLoss: null,
+          trailingStop: null,
+          takeProfit: null,
+          aiExitConditions: 'profit% > 10 and days held > 3',
+        },
+      ]);
+
+      mockConfigGet
+        .mockReturnValueOnce(false)  // exit.roiEnabled
+        .mockReturnValueOnce(true);  // exit.dslEnabled
+
+      const cond1 = { type: 'profit', metric: 'pnl_pct', operator: 'gt', value: 0.1 };
+      const cond2 = { type: 'time', metric: 'days_held', operator: 'gt', value: 3 };
+      const compositeCond = { type: 'all', conditions: [cond1, cond2] };
+      mockParseExitConditionText.mockReturnValueOnce([compositeCond]);
+      mockEvaluateExitCondition.mockReturnValueOnce(true); // first (composite) condition matches
+
+      const result = await tracker.checkExitConditions();
+
+      expect(result.positionsToClose).toContain('AMD');
+      expect(result.exitReasons.AMD).toBe('DSL exit condition triggered');
+      // Only called once because the loop breaks after first match
+      expect(mockEvaluateExitCondition).toHaveBeenCalledTimes(1);
+    });
+
+    it('DSL exit takes priority over JSON AI exit conditions', async () => {
+      const entryTime = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000).toISOString();
+      mockDbAll.mockReturnValueOnce([
+        {
+          symbol: 'INTC',
+          entryPrice: 30,
+          currentPrice: 35,
+          shares: 20,
+          entryTime,
+          stopLoss: null,
+          trailingStop: null,
+          takeProfit: null,
+          // This string is both valid DSL and would parse as JSON fail
+          aiExitConditions: 'profit% > 5',
+        },
+      ]);
+
+      mockConfigGet
+        .mockReturnValueOnce(false)  // exit.roiEnabled
+        .mockReturnValueOnce(true);  // exit.dslEnabled
+
+      const fakeParsedCondition = { type: 'profit', metric: 'pnl_pct', operator: 'gt', value: 0.05 };
+      mockParseExitConditionText.mockReturnValueOnce([fakeParsedCondition]);
+      mockEvaluateExitCondition.mockReturnValueOnce(true);
+
+      const result = await tracker.checkExitConditions();
+
+      // DSL triggers first, so it's DSL exit reason, not JSON AI condition
+      expect(result.positionsToClose).toContain('INTC');
+      expect(result.exitReasons.INTC).toBe('DSL exit condition triggered');
+    });
+
+    it('correctly computes ExitContext values passed to evaluateExitCondition', async () => {
+      const entryTime = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(); // 3 days ago
+      mockDbAll.mockReturnValueOnce([
+        {
+          symbol: 'SPY',
+          entryPrice: 500,
+          currentPrice: 525,
+          shares: 20,
+          entryTime,
+          stopLoss: null,
+          trailingStop: null,
+          takeProfit: null,
+          aiExitConditions: 'price above 520',
+        },
+      ]);
+
+      mockConfigGet
+        .mockReturnValueOnce(false)  // exit.roiEnabled
+        .mockReturnValueOnce(true);  // exit.dslEnabled
+
+      const fakeCondition = { type: 'price', operator: 'above', value: 520 };
+      mockParseExitConditionText.mockReturnValueOnce([fakeCondition]);
+      mockEvaluateExitCondition.mockReturnValueOnce(false);
+
+      await tracker.checkExitConditions();
+
+      expect(mockEvaluateExitCondition).toHaveBeenCalledTimes(1);
+      const [, context] = mockEvaluateExitCondition.mock.calls[0];
+
+      // Verify context fields
+      expect(context.currentPrice).toBe(525);
+      expect(context.entryPrice).toBe(500);
+      expect(context.pnlPct).toBeCloseTo(0.05, 4);       // (525-500)/500 = 0.05
+      expect(context.pnlAbs).toBeCloseTo(500, 0);         // (525-500)*20 = 500
+      expect(context.daysHeld).toBeCloseTo(3, 0);          // ~3 days
+      expect(context.hoursHeld).toBeCloseTo(72, 0);        // ~72 hours
+      expect(context.indicators).toEqual({});
     });
   });
 });
