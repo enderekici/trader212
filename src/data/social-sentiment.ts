@@ -352,7 +352,7 @@ export class SocialSentimentAnalyzer {
 
         // Add StockTwits source to sources breakdown
         if (stData.totalMessages > 0) {
-          result.sources['stocktwits'] = {
+          result.sources.stocktwits = {
             count: stData.totalMessages,
             avgScore: stData.sentimentRatio !== null ? stData.sentimentRatio * 2 - 1 : 0,
           };

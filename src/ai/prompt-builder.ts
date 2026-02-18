@@ -22,7 +22,6 @@ function fmtLarge(value: number | null | undefined): string {
   return `$${value.toFixed(0)}`;
 }
 
-
 function buildRegimeSection(context: AIContext): string {
   const rg = context.regime;
   if (!rg) return '';
@@ -216,7 +215,7 @@ TECHNICAL INDICATORS (Composite Score: ${t.score.toFixed(0)}/100):
 - ROC(12): ${fmt(t.roc)}
 - Force Index: ${fmt(t.forceIndex, 0)}
 - Volume Ratio (vs 20d avg): ${fmt(t.volumeRatio)}
-- Today: High $${fmt(context.dayHigh)} | Low $${fmt(context.dayLow)} | Volume ${context.volume !== null ? (context.volume / 1e6).toFixed(2) + 'M' : 'N/A'} | Avg Volume ${context.avgVolume !== null ? (context.avgVolume / 1e6).toFixed(2) + 'M' : 'N/A'}
+- Today: High $${fmt(context.dayHigh)} | Low $${fmt(context.dayLow)} | Volume ${context.volume !== null ? `${(context.volume / 1e6).toFixed(2)}M` : 'N/A'} | Avg Volume ${context.avgVolume !== null ? `${(context.avgVolume / 1e6).toFixed(2)}M` : 'N/A'}
 - Price Performance: 1W ${t.perfWeek !== null ? `${(t.perfWeek * 100).toFixed(2)}%` : 'N/A'} | 1M ${t.perfMonth !== null ? `${(t.perfMonth * 100).toFixed(2)}%` : 'N/A'} | 3M ${t.perfQuarter !== null ? `${(t.perfQuarter * 100).toFixed(2)}%` : 'N/A'} | 1Y ${t.perfYear !== null ? `${(t.perfYear * 100).toFixed(2)}%` : 'N/A'}
 ${t.ichimoku !== null ? `- Ichimoku Cloud: Tenkan ${fmt(t.ichimoku.tenkanSen)} | Kijun ${fmt(t.ichimoku.kijunSen)} | Cloud ${fmt(t.ichimoku.senkouSpanA)} / ${fmt(t.ichimoku.senkouSpanB)}${context.currentPrice > Math.max(t.ichimoku.senkouSpanA, t.ichimoku.senkouSpanB) ? ' [PRICE ABOVE CLOUD - Bullish]' : context.currentPrice < Math.min(t.ichimoku.senkouSpanA, t.ichimoku.senkouSpanB) ? ' [PRICE BELOW CLOUD - Bearish]' : ' [PRICE IN CLOUD - Neutral]'}` : ''}
 ${t.awesomeOscillator !== null ? `- Awesome Oscillator: ${fmt(t.awesomeOscillator)} (${t.awesomeOscillator > 0 ? 'Bullish momentum' : 'Bearish momentum'})` : ''}
