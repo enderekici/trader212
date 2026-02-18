@@ -155,7 +155,7 @@ describe('RulesEngine', () => {
     });
 
     it('does NOT return BUY when tech is below threshold even if fund and sent are high', async () => {
-      const ctx = makeContext({ techScore: 60, fundScore: 80, sentScore: 80 });
+      const ctx = makeContext({ techScore: 40, fundScore: 80, sentScore: 80 });
       const result = await engine.analyze(ctx);
 
       expect(result).not.toBeNull();
@@ -194,9 +194,9 @@ describe('RulesEngine', () => {
 
   describe('HOLD decisions', () => {
     it('returns HOLD when no BUY or SELL conditions are met', async () => {
-      // tech=50 is above sellTechMax=35 and below buyTechMin=65
-      // fund=50 is above sellFundMax=30 and below buyFundMin=55
-      const ctx = makeContext({ techScore: 50, fundScore: 50, sentScore: 50 });
+      // tech=40 is above sellTechMax=35 but below buyTechMin=45
+      // fund=40 is above sellFundMax=30 but below buyFundMin=45
+      const ctx = makeContext({ techScore: 40, fundScore: 40, sentScore: 40 });
       const result = await engine.analyze(ctx);
 
       expect(result).not.toBeNull();
@@ -381,7 +381,8 @@ describe('RulesEngine', () => {
     });
 
     it('HOLD conviction is always 50', async () => {
-      const ctx = makeContext({ techScore: 50, fundScore: 45, sentScore: 50 });
+      // tech=40 < buyTechMin=45, above sellTechMax=35 → HOLD
+      const ctx = makeContext({ techScore: 40, fundScore: 40, sentScore: 40 });
       const result = await engine.analyze(ctx);
 
       expect(result).not.toBeNull();
@@ -426,9 +427,9 @@ describe('RulesEngine', () => {
       const ctx = makeContext({ techScore: 75, fundScore: 70, sentScore: 65 });
       const result = await engine.analyze(ctx);
 
-      expect(result!.suggestedStopLossPct).toBe(0.05);
-      expect(result!.suggestedPositionSizePct).toBe(0.1);
-      expect(result!.suggestedTakeProfitPct).toBe(0.15);
+      expect(result!.suggestedStopLossPct).toBe(0.07);
+      expect(result!.suggestedPositionSizePct).toBe(0.15);
+      expect(result!.suggestedTakeProfitPct).toBe(0.25);
     });
 
     it('sets urgency to "no_rush" for all decisions', async () => {
@@ -469,7 +470,7 @@ describe('RulesEngine', () => {
     });
 
     it('returns empty risks array for HOLD decisions', async () => {
-      const ctx = makeContext({ techScore: 50, fundScore: 50, sentScore: 50 });
+      const ctx = makeContext({ techScore: 40, fundScore: 40, sentScore: 40 });
       const result = await engine.analyze(ctx);
 
       expect(result!.decision).toBe('HOLD');

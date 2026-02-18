@@ -22,76 +22,6 @@ function fmtLarge(value: number | null | undefined): string {
   return `$${value.toFixed(0)}`;
 }
 
-function buildWebResearchSection(context: AIContext): string {
-  const w = context.webResearch;
-  if (!w) return '';
-
-  const hasAnyData =
-    w.pegRatio !== null ||
-    w.analystTargetPrice !== null ||
-    w.analystConsensus !== null ||
-    w.shortInterestPct !== null ||
-    w.institutionalOwnershipPct !== null ||
-    w.epsEstimateNextQ !== null ||
-    w.revenueEstimateNextQ !== null ||
-    w.perfWeek !== null ||
-    w.perfMonth !== null ||
-    w.perfQuarter !== null ||
-    w.perfYear !== null;
-
-  if (!hasAnyData) return '';
-
-  const lines: string[] = ['ANALYST & WEB RESEARCH DATA:'];
-
-  if (w.pegRatio !== null) lines.push(`- PEG Ratio: ${w.pegRatio.toFixed(2)}`);
-  if (w.analystTargetPrice !== null) {
-    const currentPrice = context.currentPrice;
-    const upside =
-      currentPrice > 0 ? ((w.analystTargetPrice - currentPrice) / currentPrice) * 100 : 0;
-    lines.push(
-      `- Analyst Target Price: $${w.analystTargetPrice.toFixed(2)} (${upside >= 0 ? '+' : ''}${upside.toFixed(1)}%)`,
-    );
-  }
-  if (w.analystConsensus !== null) {
-    const countStr = w.analystCount !== null ? ` (${w.analystCount} analysts)` : '';
-    lines.push(`- Analyst Consensus: ${w.analystConsensus}${countStr}`);
-  }
-  if (w.shortInterestPct !== null)
-    lines.push(`- Short Interest: ${(w.shortInterestPct * 100).toFixed(1)}%`);
-  if (w.institutionalOwnershipPct !== null)
-    lines.push(`- Institutional Ownership: ${(w.institutionalOwnershipPct * 100).toFixed(1)}%`);
-  if (w.epsEstimateNextQ !== null)
-    lines.push(`- EPS Estimate (next Q): $${w.epsEstimateNextQ.toFixed(2)}`);
-  if (w.revenueEstimateNextQ !== null) {
-    const revStr =
-      w.revenueEstimateNextQ >= 1e9
-        ? `$${(w.revenueEstimateNextQ / 1e9).toFixed(1)}B`
-        : w.revenueEstimateNextQ >= 1e6
-          ? `$${(w.revenueEstimateNextQ / 1e6).toFixed(1)}M`
-          : `$${w.revenueEstimateNextQ.toFixed(0)}`;
-    lines.push(`- Revenue Estimate (next Q): ${revStr}`);
-  }
-
-  // Performance line
-  const perfParts: string[] = [];
-  if (w.perfWeek !== null)
-    perfParts.push(`1W ${(w.perfWeek * 100) >= 0 ? '+' : ''}${(w.perfWeek * 100).toFixed(1)}%`);
-  if (w.perfMonth !== null)
-    perfParts.push(`1M ${(w.perfMonth * 100) >= 0 ? '+' : ''}${(w.perfMonth * 100).toFixed(1)}%`);
-  if (w.perfQuarter !== null)
-    perfParts.push(
-      `1Q ${(w.perfQuarter * 100) >= 0 ? '+' : ''}${(w.perfQuarter * 100).toFixed(1)}%`,
-    );
-  if (w.perfYear !== null)
-    perfParts.push(`1Y ${(w.perfYear * 100) >= 0 ? '+' : ''}${(w.perfYear * 100).toFixed(1)}%`);
-  if (perfParts.length > 0) lines.push(`- Performance: ${perfParts.join(' | ')}`);
-
-  // Volume data
-  if (w.relativeVolume != null) lines.push(`- Relative Volume: ${w.relativeVolume.toFixed(2)}x`);
-  if (w.averageVolume != null) lines.push(`- Average Volume: ${fmtLarge(w.averageVolume)}`);
-
-  return `${lines.join('\n')}\n\n`;
-}
 
 function buildRegimeSection(context: AIContext): string {
   const rg = context.regime;
@@ -112,6 +42,9 @@ function buildRegimeSection(context: AIContext): string {
     `- Volatility Percentile: ${rg.volatilityPctile.toFixed(0)}th`,
     `- New Entries Allowed: ${rg.newEntriesAllowed ? 'Yes' : 'NO — regime blocks new positions'}`,
     `- Position Size Multiplier: ${rg.positionSizeMultiplier.toFixed(1)}x`,
+    `- Stop-Loss Multiplier: ${rg.stopLossMultiplier.toFixed(1)}x`,
+    `- Entry Threshold Adjustment: ${rg.entryThresholdAdjustment > 0 ? '+' : ''}${rg.entryThresholdAdjustment} conviction points required`,
+    `- Market Breadth Score: ${rg.breadthScore.toFixed(0)}/100`,
   ];
   return `${lines.join('\n')}\n`;
 }
@@ -130,6 +63,12 @@ function buildMultiTimeframeSection(context: AIContext): string {
     `- Alignment: ${mt.alignment}${mt.alignment === 'mixed' ? ' — CAUTION: conflicting timeframe signals' : ''}`,
     `- Scores: ${tfLines}`,
   ];
+  if (mt.timeframeDetails && mt.timeframeDetails.length > 0) {
+    const detailLines = mt.timeframeDetails
+      .map((td) => `  ${td.timeframe}: ${td.score}/100 (${td.signal}, ${td.candleCount} candles)`)
+      .join(' | ');
+    lines.push(`- Timeframe Details: ${detailLines}`);
+  }
   return `${lines.join('\n')}\n`;
 }
 
@@ -277,28 +216,38 @@ TECHNICAL INDICATORS (Composite Score: ${t.score.toFixed(0)}/100):
 - ROC(12): ${fmt(t.roc)}
 - Force Index: ${fmt(t.forceIndex, 0)}
 - Volume Ratio (vs 20d avg): ${fmt(t.volumeRatio)}
+- Today: High $${fmt(context.dayHigh)} | Low $${fmt(context.dayLow)} | Volume ${context.volume !== null ? (context.volume / 1e6).toFixed(2) + 'M' : 'N/A'} | Avg Volume ${context.avgVolume !== null ? (context.avgVolume / 1e6).toFixed(2) + 'M' : 'N/A'}
+- Price Performance: 1W ${t.perfWeek !== null ? `${(t.perfWeek * 100).toFixed(2)}%` : 'N/A'} | 1M ${t.perfMonth !== null ? `${(t.perfMonth * 100).toFixed(2)}%` : 'N/A'} | 3M ${t.perfQuarter !== null ? `${(t.perfQuarter * 100).toFixed(2)}%` : 'N/A'} | 1Y ${t.perfYear !== null ? `${(t.perfYear * 100).toFixed(2)}%` : 'N/A'}
+${t.ichimoku !== null ? `- Ichimoku Cloud: Tenkan ${fmt(t.ichimoku.tenkanSen)} | Kijun ${fmt(t.ichimoku.kijunSen)} | Cloud ${fmt(t.ichimoku.senkouSpanA)} / ${fmt(t.ichimoku.senkouSpanB)}${context.currentPrice > Math.max(t.ichimoku.senkouSpanA, t.ichimoku.senkouSpanB) ? ' [PRICE ABOVE CLOUD - Bullish]' : context.currentPrice < Math.min(t.ichimoku.senkouSpanA, t.ichimoku.senkouSpanB) ? ' [PRICE BELOW CLOUD - Bearish]' : ' [PRICE IN CLOUD - Neutral]'}` : ''}
+${t.awesomeOscillator !== null ? `- Awesome Oscillator: ${fmt(t.awesomeOscillator)} (${t.awesomeOscillator > 0 ? 'Bullish momentum' : 'Bearish momentum'})` : ''}
+${t.adl !== null ? `- ADL (Accum/Dist): ${fmt(t.adl, 0)}` : ''}
 - Support Level: ${fmt(t.support)}
 - Resistance Level: ${fmt(t.resistance)}
 ${t.candlestickBullish || t.candlestickBearish || t.candlestickNeutral ? `- Candlestick Patterns:${t.candlestickBullish ? ` Bullish [${t.candlestickBullish}]` : ''}${t.candlestickBearish ? ` Bearish [${t.candlestickBearish}]` : ''}${t.candlestickNeutral ? ` Neutral [${t.candlestickNeutral}]` : ''}` : ''}
 
 FUNDAMENTAL METRICS (Composite Score: ${f.score.toFixed(0)}/100):
-- P/E Ratio: ${fmt(f.peRatio)}
-- Forward P/E: ${fmt(f.forwardPE)}
+- P/E Ratio: ${fmt(f.peRatio)} | Forward P/E: ${fmt(f.forwardPE)} | PEG Ratio: ${fmt(f.pegRatio)}
 - Revenue Growth YoY: ${fmtPct(f.revenueGrowthYoY)}
-- Profit Margin: ${fmtPct(f.profitMargin)}
-- Operating Margin: ${fmtPct(f.operatingMargin)}
-- Debt/Equity: ${fmt(f.debtToEquity)}
-- Current Ratio: ${fmt(f.currentRatio)}
-- Market Cap: ${fmtLarge(f.marketCap)}
-- Sector: ${f.sector || 'N/A'}
-- Beta: ${fmt(f.beta)}
+- Profit Margin: ${fmtPct(f.profitMargin)} | Operating Margin: ${fmtPct(f.operatingMargin)}
+- Debt/Equity: ${fmt(f.debtToEquity)} | Current Ratio: ${fmt(f.currentRatio)}
+- Market Cap: ${fmtLarge(f.marketCap)} | Sector: ${f.sector || 'N/A'} | Beta: ${fmt(f.beta)}
 - Dividend Yield: ${fmtPct(f.dividendYield)}
+- Analyst Target: ${f.analystTargetPrice !== null ? `$${fmt(f.analystTargetPrice)}` : 'N/A'} | Consensus: ${f.analystConsensus || 'N/A'} | Analysts: ${f.analystCount !== null ? f.analystCount : 'N/A'}
+- Short Interest: ${fmtPct(f.shortInterestPct)} | Institutional Ownership: ${fmtPct(f.institutionalOwnershipPct)}
+- Industry: ${f.industry || 'N/A'}
+- Earnings Surprise (last Q): ${f.earningsSurprise !== null ? `${(f.earningsSurprise * 100).toFixed(2)}%` : 'N/A'}
+- ROE: ${fmtPct(f.roe)} | ROA: ${fmtPct(f.roa)}
+- Free Cash Flow: ${fmtLarge(f.freeCashflow)}
+- Analyst Buy/Sell: ${f.analystBuy !== null ? f.analystBuy : 'N/A'} buy / ${f.analystSell !== null ? f.analystSell : 'N/A'} sell
 
-${buildWebResearchSection(context)}NEWS SENTIMENT (Composite Score: ${s.score.toFixed(0)}/100):
+NEWS SENTIMENT (Composite Score: ${s.score.toFixed(0)}/100):
 Headlines:
 ${headlines || '  (no recent headlines)'}
 - Insider Net Buying: ${s.insiderNetBuying > 0 ? '+' : ''}${s.insiderNetBuying} transactions
-- Days to Earnings: ${s.daysToEarnings !== null ? s.daysToEarnings : 'N/A'}
+- Days to Earnings: ${s.daysToEarnings !== null ? s.daysToEarnings : 'N/A'}${s.epsEstimateNextQ !== null ? ` | EPS Est: $${fmt(s.epsEstimateNextQ)}` : ''}${s.revenueEstimateNextQ !== null ? ` | Rev Est: ${fmtLarge(s.revenueEstimateNextQ)}` : ''}
+${s.finraShortVolumePct !== null ? `- FINRA Short Volume: ${fmt(s.finraShortVolumePct)}% of today's volume` : ''}
+${s.sentimentBreakdown !== null ? `- Social Sentiment Breakdown: ${(s.sentimentBreakdown.positive * 100).toFixed(0)}% positive / ${(s.sentimentBreakdown.negative * 100).toFixed(0)}% negative / ${(s.sentimentBreakdown.neutral * 100).toFixed(0)}% neutral` : ''}
+${s.topKeywords.length > 0 ? `- Trending Keywords: ${s.topKeywords.slice(0, 8).join(', ')}` : ''}
 
 HISTORICAL CONTEXT (recent signals):
 ${historicalSignals || '  (no prior signals)'}

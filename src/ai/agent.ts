@@ -16,6 +16,10 @@ export interface AIContext {
   priceChange1d: number;
   priceChange5d: number;
   priceChange1m: number;
+  dayHigh: number | null;
+  dayLow: number | null;
+  volume: number | null;
+  avgVolume: number | null;
   technical: {
     rsi: number | null;
     macdValue: number | null;
@@ -42,6 +46,19 @@ export interface AIContext {
     roc: number | null;
     forceIndex: number | null;
     volumeRatio: number | null;
+    perfWeek: number | null;
+    perfMonth: number | null;
+    perfQuarter: number | null;
+    perfYear: number | null;
+    ichimoku: {
+      tenkanSen: number;
+      kijunSen: number;
+      senkouSpanA: number;
+      senkouSpanB: number;
+      chikouSpan: number;
+    } | null;
+    adl: number | null;
+    awesomeOscillator: number | null;
     support: number | null;
     resistance: number | null;
     candlestickBullish: string | null;
@@ -52,6 +69,7 @@ export interface AIContext {
   fundamental: {
     peRatio: number | null;
     forwardPE: number | null;
+    pegRatio: number | null;
     revenueGrowthYoY: number | null;
     profitMargin: number | null;
     operatingMargin: number | null;
@@ -61,12 +79,29 @@ export interface AIContext {
     sector: string | null;
     beta: number | null;
     dividendYield: number | null;
+    industry: string | null;
+    earningsSurprise: number | null;
+    roe: number | null;
+    roa: number | null;
+    freeCashflow: number | null;
+    analystBuy: number | null;
+    analystSell: number | null;
+    analystTargetPrice: number | null;
+    analystConsensus: string | null;
+    analystCount: number | null;
+    shortInterestPct: number | null;
+    institutionalOwnershipPct: number | null;
     score: number;
   };
   sentiment: {
-    headlines: Array<{ title: string; score: number; source: string }>;
+    headlines: Array<{ title: string; score: number; source: string; relevanceScore?: number }>;
     insiderNetBuying: number;
     daysToEarnings: number | null;
+    epsEstimateNextQ: number | null;
+    revenueEstimateNextQ: number | null;
+    sentimentBreakdown: { positive: number; negative: number; neutral: number } | null;
+    topKeywords: string[];
+    finraShortVolumePct: number | null;
     score: number;
   };
   historicalSignals: Array<{
@@ -118,22 +153,6 @@ export interface AIContext {
     symbol: string;
     correlation: number;
   }>;
-  webResearch?: {
-    pegRatio: number | null;
-    analystTargetPrice: number | null;
-    analystConsensus: string | null;
-    analystCount: number | null;
-    shortInterestPct: number | null;
-    institutionalOwnershipPct: number | null;
-    epsEstimateNextQ: number | null;
-    revenueEstimateNextQ: number | null;
-    perfWeek: number | null;
-    perfMonth: number | null;
-    perfQuarter: number | null;
-    perfYear: number | null;
-    relativeVolume: number | null;
-    averageVolume: number | null;
-  };
   regime?: {
     regime: string;
     confidence: number;
@@ -141,11 +160,20 @@ export interface AIContext {
     volatilityPctile: number;
     newEntriesAllowed: boolean;
     positionSizeMultiplier: number;
+    stopLossMultiplier: number;
+    entryThresholdAdjustment: number;
+    breadthScore: number;
   };
   multiTimeframe?: {
     compositeScore: number;
     alignment: string;
     timeframeScores: Record<string, number>;
+    timeframeDetails: Array<{
+      timeframe: string;
+      score: number;
+      signal: string;
+      candleCount: number;
+    }>;
   };
   socialSentiment?: {
     overallScore: number;

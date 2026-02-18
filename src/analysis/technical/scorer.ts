@@ -4,16 +4,21 @@ import { createLogger } from '../../utils/logger.js';
 import {
   type BollingerResult,
   type CandlestickPatterns,
+  type IchimokuResult,
+  calcADL,
   calcADX,
   calcATR,
+  calcAwesomeOscillator,
   calcBollingerBands,
   calcCCI,
   calcEMA,
   calcForceIndex,
+  calcIchimokuCloud,
   calcMACD,
   calcMFI,
   calcOBV,
   calcParabolicSAR,
+  calcPerfMetrics,
   calcROC,
   calcRSI,
   calcSMA,
@@ -45,6 +50,8 @@ const DEFAULT_TECHNICAL_WEIGHTS: Record<string, number> = {
   roc: 3,
   volumeRatio: 2,
   candlestick: 8,
+  ichimoku: 8,
+  awesomeOscillator: 4,
 };
 
 export interface TechnicalAnalysis {
@@ -68,8 +75,15 @@ export interface TechnicalAnalysis {
   roc: number | null;
   forceIndex: number | null;
   volumeRatio: number | null;
+  perfWeek: number | null;
+  perfMonth: number | null;
+  perfQuarter: number | null;
+  perfYear: number | null;
   supportResistance: SupportResistance | null;
   candlestickPatterns: CandlestickPatterns;
+  ichimoku: IchimokuResult | null;
+  adl: number | null;
+  awesomeOscillator: number | null;
   score: number;
 }
 
@@ -122,6 +136,10 @@ export function analyzeTechnicals(candles: OHLCVCandle[]): TechnicalAnalysis {
   const roc = calcROC(closes, rocPeriod);
   const forceIndex = calcForceIndex(closes, volumes);
   const volumeRatio = calcVolumeRatio(volumes);
+  const ichimoku = calcIchimokuCloud(highs, lows, closes);
+  const adl = calcADL(highs, lows, closes, volumes);
+  const awesomeOscillator = calcAwesomeOscillator(highs, lows);
+  const { perfWeek, perfMonth, perfQuarter, perfYear } = calcPerfMetrics(candles);
   const supportResistance = calcSupportResistance(highs, lows, srLookback);
   const candlestickPatterns = detectCandlestickPatterns(opens, highs, lows, closes);
 
@@ -145,6 +163,9 @@ export function analyzeTechnicals(candles: OHLCVCandle[]): TechnicalAnalysis {
     volumeRatio,
     supportResistance,
     candlestickPatterns,
+    ichimoku,
+    adl,
+    awesomeOscillator,
   });
 
   log.debug(
@@ -173,8 +194,15 @@ export function analyzeTechnicals(candles: OHLCVCandle[]): TechnicalAnalysis {
     roc,
     forceIndex,
     volumeRatio,
+    perfWeek,
+    perfMonth,
+    perfQuarter,
+    perfYear,
     supportResistance,
     candlestickPatterns,
+    ichimoku,
+    adl,
+    awesomeOscillator,
     score,
   };
 }
@@ -198,6 +226,9 @@ interface ScoreInputs {
   volumeRatio: number | null;
   supportResistance: SupportResistance | null;
   candlestickPatterns: CandlestickPatterns;
+  ichimoku: IchimokuResult | null;
+  adl: number | null;
+  awesomeOscillator: number | null;
 }
 
 function computeScore(price: number, inputs: ScoreInputs): number {
@@ -349,6 +380,35 @@ function computeScore(price: number, inputs: ScoreInputs): number {
       }
       add(cpSignal, weights.candlestick);
     }
+  }
+
+  // Ichimoku Cloud
+  if (inputs.ichimoku != null) {
+    const { tenkanSen, kijunSen, senkouSpanA, senkouSpanB } = inputs.ichimoku;
+    const cloudTop = Math.max(senkouSpanA, senkouSpanB);
+    const cloudBottom = Math.min(senkouSpanA, senkouSpanB);
+    let ichimokuSignal = 50;
+    if (price > cloudTop) {
+      // Price above cloud = strong bullish
+      ichimokuSignal = 80;
+    } else if (price < cloudBottom) {
+      // Price below cloud = strong bearish
+      ichimokuSignal = 20;
+    } else {
+      // Price inside cloud = neutral/uncertain
+      ichimokuSignal = 50;
+    }
+    // Tenkan/Kijun cross bonus
+    if (tenkanSen > kijunSen) ichimokuSignal = Math.min(ichimokuSignal + 5, 100);
+    else ichimokuSignal = Math.max(ichimokuSignal - 5, 0);
+    add(ichimokuSignal, weights.ichimoku);
+  }
+
+  // Awesome Oscillator — positive = bullish momentum, negative = bearish
+  if (inputs.awesomeOscillator != null) {
+    const ao = inputs.awesomeOscillator;
+    const aoSignal = ao > 0 ? Math.min(50 + ao * 5, 80) : Math.max(50 + ao * 5, 20);
+    add(aoSignal, weights.awesomeOscillator);
   }
 
   if (totalWeight === 0) return 50;

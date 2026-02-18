@@ -835,7 +835,7 @@ class TradingBot {
     let socialSentimentResult = null;
     try {
       const socialAnalyzer = getSocialSentimentAnalyzer();
-      socialSentimentResult = socialAnalyzer.analyzeSymbol(symbol, []);
+      socialSentimentResult = await socialAnalyzer.analyzeSymbolFull(symbol, []);
     } catch (err) {
       log.debug({ symbol, err }, 'Social sentiment failed, continuing without');
     }
@@ -2008,15 +2008,17 @@ class TradingBot {
       return sum + val; // positive = buy, negative = sell
     }, 0);
 
-    // Compute days to earnings (nearest future date only)
+    // Compute days to earnings and estimates (nearest future event only)
     const now = Date.now();
-    const nextEarningsTs = data.earnings
-      .map((e) => new Date(e.date).getTime())
-      .filter((t) => t > now)
-      .sort((a, b) => a - b)[0];
+    const nextEarnings = data.earnings
+      .filter((e) => new Date(e.date).getTime() > now)
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())[0];
+    const nextEarningsTs = nextEarnings ? new Date(nextEarnings.date).getTime() : undefined;
     const daysToEarnings = nextEarningsTs
       ? Math.ceil((nextEarningsTs - now) / (1000 * 60 * 60 * 24))
       : null;
+    const epsEstimateNextQ = nextEarnings?.epsEstimate ?? null;
+    const revenueEstimateNextQ = nextEarnings?.revenueEstimate ?? null;
 
     // Existing positions from DB
     const dbPositions = db.select().from(schema.positions).all();
@@ -2027,6 +2029,10 @@ class TradingBot {
       priceChange1d,
       priceChange5d,
       priceChange1m,
+      dayHigh: data.quote?.dayHigh ?? null,
+      dayLow: data.quote?.dayLow ?? null,
+      volume: data.quote?.volume ?? null,
+      avgVolume: data.quote?.avgVolume ?? null,
       technical: {
         rsi: techAnalysis.rsi,
         macdValue: techAnalysis.macd?.value ?? null,
@@ -2053,6 +2059,13 @@ class TradingBot {
         roc: techAnalysis.roc,
         forceIndex: techAnalysis.forceIndex,
         volumeRatio: techAnalysis.volumeRatio,
+        perfWeek: techAnalysis.perfWeek,
+        perfMonth: techAnalysis.perfMonth,
+        perfQuarter: techAnalysis.perfQuarter,
+        perfYear: techAnalysis.perfYear,
+        ichimoku: techAnalysis.ichimoku ?? null,
+        adl: techAnalysis.adl,
+        awesomeOscillator: techAnalysis.awesomeOscillator,
         support: techAnalysis.supportResistance?.support ?? null,
         resistance: techAnalysis.supportResistance?.resistance ?? null,
         candlestickBullish:
@@ -2072,6 +2085,7 @@ class TradingBot {
       fundamental: {
         peRatio: data.fundamentals?.peRatio ?? null,
         forwardPE: data.fundamentals?.forwardPE ?? null,
+        pegRatio: data.fundamentals?.pegRatio ?? null,
         revenueGrowthYoY: data.fundamentals?.revenueGrowthYoY ?? null,
         profitMargin: data.fundamentals?.profitMargin ?? null,
         operatingMargin: data.fundamentals?.operatingMargin ?? null,
@@ -2081,6 +2095,18 @@ class TradingBot {
         sector: data.fundamentals?.sector ?? null,
         beta: data.fundamentals?.beta ?? null,
         dividendYield: data.fundamentals?.dividendYield ?? null,
+        industry: data.fundamentals?.industry ?? null,
+        earningsSurprise: data.fundamentals?.earningsSurprise ?? null,
+        roe: data.fundamentals?.roe ?? null,
+        roa: data.fundamentals?.roa ?? null,
+        freeCashflow: data.fundamentals?.freeCashflow ?? null,
+        analystBuy: data.fundamentals?.analystBuy ?? null,
+        analystSell: data.fundamentals?.analystSell ?? null,
+        analystTargetPrice: data.fundamentals?.analystTargetPrice ?? null,
+        analystConsensus: data.fundamentals?.analystConsensus ?? null,
+        analystCount: data.fundamentals?.analystCount ?? null,
+        shortInterestPct: data.fundamentals?.shortInterestPct ?? null,
+        institutionalOwnershipPct: data.fundamentals?.institutionalOwnershipPct ?? null,
         score: fundamentalScore,
       },
       sentiment: {
@@ -2094,10 +2120,16 @@ class TradingBot {
             title: n.title,
             score: n.sentimentScore ?? 0,
             source: n.source,
+            relevanceScore: n.relevanceScore ?? undefined,
           })),
         ],
         insiderNetBuying,
         daysToEarnings,
+        epsEstimateNextQ,
+        revenueEstimateNextQ,
+        sentimentBreakdown: socialSentimentResult?.sentimentBreakdown ?? null,
+        topKeywords: socialSentimentResult?.keywords ?? [],
+        finraShortVolumePct: data.finraShortVolume?.shortVolumePct ?? null,
         score: sentimentScore,
       },
       historicalSignals: prevSignals.map((s) => ({
@@ -2156,6 +2188,9 @@ class TradingBot {
               volatilityPctile: regimeAnalysis.details.volatilityPctile,
               newEntriesAllowed: regimeAnalysis.details.adjustments.newEntriesAllowed,
               positionSizeMultiplier: regimeAnalysis.details.adjustments.positionSizeMultiplier,
+              stopLossMultiplier: regimeAnalysis.details.adjustments.stopLossMultiplier,
+              entryThresholdAdjustment: regimeAnalysis.details.adjustments.entryThresholdAdjustment,
+              breadthScore: regimeAnalysis.details.breadthScore,
             },
           }
         : {}),
@@ -2165,6 +2200,12 @@ class TradingBot {
               compositeScore: multiTimeframeResult.compositeScore,
               alignment: multiTimeframeResult.alignment,
               timeframeScores: multiTimeframeResult.timeframeScores,
+              timeframeDetails: multiTimeframeResult.timeframeDetails.map((td) => ({
+                timeframe: td.timeframe,
+                score: td.score,
+                signal: td.signal,
+                candleCount: td.candleCount,
+              })),
             },
           }
         : {}),

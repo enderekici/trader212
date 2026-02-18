@@ -21,6 +21,10 @@ function makeFullContext(): AIContext {
     priceChange1d: 0.015,
     priceChange5d: 0.032,
     priceChange1m: -0.045,
+    dayHigh: 152.30,
+    dayLow: 148.80,
+    volume: 45000000,
+    avgVolume: 38000000,
     technical: {
       rsi: 55.5,
       macdValue: 0.5432,
@@ -47,6 +51,19 @@ function makeFullContext(): AIContext {
       roc: 2.50,
       forceIndex: 5000,
       volumeRatio: 1.15,
+      perfWeek: 0.012,
+      perfMonth: 0.035,
+      perfQuarter: -0.045,
+      perfYear: 0.12,
+      ichimoku: {
+        tenkanSen: 149.50,
+        kijunSen: 147.20,
+        senkouSpanA: 148.10,
+        senkouSpanB: 144.60,
+        chikouSpan: 150.25,
+      },
+      adl: 12345678,
+      awesomeOscillator: 1.23,
       support: 145.50,
       resistance: 155.50,
       candlestickBullish: null,
@@ -57,6 +74,7 @@ function makeFullContext(): AIContext {
     fundamental: {
       peRatio: 25.5,
       forwardPE: 22.3,
+      pegRatio: 1.8,
       revenueGrowthYoY: 0.15,
       profitMargin: 0.255,
       operatingMargin: 0.30,
@@ -66,15 +84,32 @@ function makeFullContext(): AIContext {
       sector: 'Technology',
       beta: 1.1,
       dividendYield: 0.006,
+      industry: 'Consumer Electronics',
+      earningsSurprise: 0.082,
+      roe: 0.147,
+      roa: 0.058,
+      freeCashflow: 95000000000,
+      analystBuy: 28,
+      analystSell: 4,
+      analystTargetPrice: 180.0,
+      analystConsensus: 'Buy',
+      analystCount: 35,
+      shortInterestPct: 0.008,
+      institutionalOwnershipPct: 0.62,
       score: 70,
     },
     sentiment: {
       headlines: [
-        { title: 'AAPL beats earnings expectations', score: 0.8, source: 'Reuters' },
-        { title: 'Apple faces China headwinds', score: -0.3, source: 'Bloomberg' },
+        { title: 'AAPL beats earnings expectations', score: 0.8, source: 'Reuters', relevanceScore: 0.92 },
+        { title: 'Apple faces China headwinds', score: -0.3, source: 'Bloomberg', relevanceScore: 0.74 },
       ],
       insiderNetBuying: 5,
       daysToEarnings: 30,
+      epsEstimateNextQ: 1.95,
+      revenueEstimateNextQ: 94500000000,
+      sentimentBreakdown: { positive: 0.55, negative: 0.20, neutral: 0.25 },
+      topKeywords: ['earnings', 'AI', 'iPhone', 'China', 'buyback'],
+      finraShortVolumePct: 38.5,
       score: 60,
     },
     historicalSignals: [
@@ -497,261 +532,6 @@ describe('buildAnalysisPrompt', () => {
     });
   });
 
-  describe('web research section', () => {
-    it('renders ANALYST & WEB RESEARCH section when webResearch is present', () => {
-      const ctx = makeFullContext();
-      ctx.webResearch = {
-        pegRatio: 1.25,
-        analystTargetPrice: 185.00,
-        analystConsensus: 'Buy',
-        analystCount: 15,
-        shortInterestPct: 0.025,
-        institutionalOwnershipPct: 0.785,
-        epsEstimateNextQ: 1.82,
-        revenueEstimateNextQ: 24.5e9,
-        perfWeek: 0.023,
-        perfMonth: 0.051,
-        perfQuarter: 0.128,
-        perfYear: 0.285,
-      };
-      const { user } = buildAnalysisPrompt(ctx);
-      expect(user).toContain('ANALYST & WEB RESEARCH DATA:');
-      expect(user).toContain('PEG Ratio: 1.25');
-      expect(user).toContain('Analyst Target Price: $185.00');
-      expect(user).toContain('Analyst Consensus: Buy (15 analysts)');
-      expect(user).toContain('Short Interest: 2.5%');
-      expect(user).toContain('Institutional Ownership: 78.5%');
-      expect(user).toContain('EPS Estimate (next Q): $1.82');
-      expect(user).toContain('Revenue Estimate (next Q): $24.5B');
-      expect(user).toContain('Performance:');
-      expect(user).toContain('1W +2.3%');
-      expect(user).toContain('1M +5.1%');
-      expect(user).toContain('1Q +12.8%');
-      expect(user).toContain('1Y +28.5%');
-    });
-
-    it('renders relativeVolume and averageVolume when provided (lines 90-91)', () => {
-      const ctx = makeFullContext();
-      ctx.webResearch = {
-        pegRatio: null,
-        analystTargetPrice: null,
-        analystConsensus: null,
-        analystCount: null,
-        shortInterestPct: null,
-        institutionalOwnershipPct: null,
-        epsEstimateNextQ: null,
-        revenueEstimateNextQ: null,
-        perfWeek: 0.01, // non-null so hasAnyData is true and section renders
-        perfMonth: null,
-        perfQuarter: null,
-        perfYear: null,
-        relativeVolume: 1.85,
-        averageVolume: 35_000_000,
-      };
-      const { user } = buildAnalysisPrompt(ctx);
-      expect(user).toContain('Relative Volume: 1.85x');
-      expect(user).toContain('Average Volume: $35.00M');
-    });
-
-    it('renders negative perfQuarter and perfYear with minus sign (lines 83, 86 false branches)', () => {
-      const ctx = makeFullContext();
-      ctx.webResearch = {
-        pegRatio: null,
-        analystTargetPrice: null,
-        analystConsensus: null,
-        analystCount: null,
-        shortInterestPct: null,
-        institutionalOwnershipPct: null,
-        epsEstimateNextQ: null,
-        revenueEstimateNextQ: null,
-        perfWeek: null,
-        perfMonth: null,
-        perfQuarter: -0.05,
-        perfYear: -0.15,
-        relativeVolume: null,
-        averageVolume: null,
-      };
-      const { user } = buildAnalysisPrompt(ctx);
-      expect(user).toContain('1Q -5.0%');
-      expect(user).toContain('1Y -15.0%');
-    });
-
-    it('calculates upside percentage from target price', () => {
-      const ctx = makeFullContext();
-      ctx.currentPrice = 100;
-      ctx.webResearch = {
-        pegRatio: null,
-        analystTargetPrice: 120,
-        analystConsensus: null,
-        analystCount: null,
-        shortInterestPct: null,
-        institutionalOwnershipPct: null,
-        epsEstimateNextQ: null,
-        revenueEstimateNextQ: null,
-        perfWeek: null,
-        perfMonth: null,
-        perfQuarter: null,
-        perfYear: null,
-      };
-      const { user } = buildAnalysisPrompt(ctx);
-      expect(user).toContain('Analyst Target Price: $120.00 (+20.0%)');
-    });
-
-    it('shows negative upside when analyst target is below current price (line 52 false branch)', () => {
-      const ctx = makeFullContext();
-      ctx.currentPrice = 100;
-      ctx.webResearch = {
-        pegRatio: null,
-        analystTargetPrice: 80,
-        analystConsensus: null,
-        analystCount: null,
-        shortInterestPct: null,
-        institutionalOwnershipPct: null,
-        epsEstimateNextQ: null,
-        revenueEstimateNextQ: null,
-        perfWeek: null,
-        perfMonth: null,
-        perfQuarter: null,
-        perfYear: null,
-      } as any;
-      const { user } = buildAnalysisPrompt(ctx);
-      expect(user).toContain('Analyst Target Price: $80.00 (-20.0%)');
-      expect(user).not.toContain('Analyst Target Price: $80.00 (+-20.0%)');
-    });
-
-    it('omits section when webResearch is undefined', () => {
-      const ctx = makeFullContext();
-      const { user } = buildAnalysisPrompt(ctx);
-      expect(user).not.toContain('ANALYST & WEB RESEARCH DATA:');
-    });
-
-    it('omits section when all webResearch values are null', () => {
-      const ctx = makeFullContext();
-      ctx.webResearch = {
-        pegRatio: null,
-        analystTargetPrice: null,
-        analystConsensus: null,
-        analystCount: null,
-        shortInterestPct: null,
-        institutionalOwnershipPct: null,
-        epsEstimateNextQ: null,
-        revenueEstimateNextQ: null,
-        perfWeek: null,
-        perfMonth: null,
-        perfQuarter: null,
-        perfYear: null,
-      };
-      const { user } = buildAnalysisPrompt(ctx);
-      expect(user).not.toContain('ANALYST & WEB RESEARCH DATA:');
-    });
-
-    it('renders consensus without count when analystCount is null', () => {
-      const ctx = makeFullContext();
-      ctx.webResearch = {
-        pegRatio: null,
-        analystTargetPrice: null,
-        analystConsensus: 'Strong Buy',
-        analystCount: null,
-        shortInterestPct: null,
-        institutionalOwnershipPct: null,
-        epsEstimateNextQ: null,
-        revenueEstimateNextQ: null,
-        perfWeek: null,
-        perfMonth: null,
-        perfQuarter: null,
-        perfYear: null,
-      };
-      const { user } = buildAnalysisPrompt(ctx);
-      expect(user).toContain('Analyst Consensus: Strong Buy');
-      expect(user).not.toContain('analysts)');
-    });
-
-    it('handles negative performance values', () => {
-      const ctx = makeFullContext();
-      ctx.webResearch = {
-        pegRatio: null,
-        analystTargetPrice: null,
-        analystConsensus: null,
-        analystCount: null,
-        shortInterestPct: null,
-        institutionalOwnershipPct: null,
-        epsEstimateNextQ: null,
-        revenueEstimateNextQ: null,
-        perfWeek: -0.035,
-        perfMonth: -0.082,
-        perfQuarter: null,
-        perfYear: null,
-      };
-      const { user } = buildAnalysisPrompt(ctx);
-      expect(user).toContain('1W -3.5%');
-      expect(user).toContain('1M -8.2%');
-    });
-
-    it('formats revenue in millions when less than 1B', () => {
-      const ctx = makeFullContext();
-      ctx.webResearch = {
-        pegRatio: null,
-        analystTargetPrice: null,
-        analystConsensus: null,
-        analystCount: null,
-        shortInterestPct: null,
-        institutionalOwnershipPct: null,
-        epsEstimateNextQ: null,
-        revenueEstimateNextQ: 500e6,
-        perfWeek: null,
-        perfMonth: null,
-        perfQuarter: null,
-        perfYear: null,
-      };
-      const { user } = buildAnalysisPrompt(ctx);
-      expect(user).toContain('Revenue Estimate (next Q): $500.0M');
-    });
-
-    it('formats revenue in raw dollars when less than 1M (line 69 false branch)', () => {
-      const ctx = makeFullContext();
-      ctx.webResearch = {
-        pegRatio: null,
-        analystTargetPrice: null,
-        analystConsensus: null,
-        analystCount: null,
-        shortInterestPct: null,
-        institutionalOwnershipPct: null,
-        epsEstimateNextQ: null,
-        revenueEstimateNextQ: 500_000, // < 1e6 → raw $ format
-        perfWeek: null,
-        perfMonth: null,
-        perfQuarter: null,
-        perfYear: null,
-        relativeVolume: null,
-        averageVolume: null,
-      };
-      const { user } = buildAnalysisPrompt(ctx);
-      expect(user).toContain('Revenue Estimate (next Q): $500000');
-    });
-
-    it('shows upside as +0.0% when currentPrice is 0 (line 50 false branch)', () => {
-      const ctx = makeFullContext();
-      ctx.currentPrice = 0;
-      ctx.webResearch = {
-        pegRatio: null,
-        analystTargetPrice: 120,
-        analystConsensus: null,
-        analystCount: null,
-        shortInterestPct: null,
-        institutionalOwnershipPct: null,
-        epsEstimateNextQ: null,
-        revenueEstimateNextQ: null,
-        perfWeek: null,
-        perfMonth: null,
-        perfQuarter: null,
-        perfYear: null,
-        relativeVolume: null,
-        averageVolume: null,
-      };
-      const { user } = buildAnalysisPrompt(ctx);
-      expect(user).toContain('Analyst Target Price: $120.00 (+0.0%)');
-    });
-  });
 
   describe('historical signal rsi/macdHistogram null handling', () => {
     it('formats null RSI and MACD histogram as N/A in historical signals', () => {
@@ -783,6 +563,9 @@ describe('buildAnalysisPrompt', () => {
         volatilityPctile: 30,
         newEntriesAllowed: true,
         positionSizeMultiplier: 1.0,
+        stopLossMultiplier: 1.0,
+        entryThresholdAdjustment: 0,
+        breadthScore: 62,
       };
       const { user } = buildAnalysisPrompt(ctx);
       expect(user).toContain('MARKET REGIME:');
@@ -806,6 +589,10 @@ describe('buildAnalysisPrompt', () => {
         compositeScore: 72,
         alignment: 'bullish',
         timeframeScores: { weekly: 70, monthly: 75 },
+        timeframeDetails: [
+          { timeframe: 'weekly', score: 72, signal: 'bullish', candleCount: 52 },
+          { timeframe: 'monthly', score: 68, signal: 'bullish', candleCount: 12 },
+        ],
       };
       const { user } = buildAnalysisPrompt(ctx);
       expect(user).toContain('MULTI-TIMEFRAME ANALYSIS:');
@@ -819,6 +606,7 @@ describe('buildAnalysisPrompt', () => {
         compositeScore: 50,
         alignment: 'mixed',
         timeframeScores: { weekly: 60, monthly: 40 },
+        timeframeDetails: [],
       };
       const { user } = buildAnalysisPrompt(ctx);
       expect(user).toContain('Alignment: mixed — CAUTION: conflicting timeframe signals');
@@ -887,6 +675,9 @@ describe('buildAnalysisPrompt', () => {
         volatilityPctile: 95,
         newEntriesAllowed: false,
         positionSizeMultiplier: 0.25,
+        stopLossMultiplier: 1.5,
+        entryThresholdAdjustment: 10,
+        breadthScore: 20,
       };
       const { user } = buildAnalysisPrompt(ctx);
       expect(user).toContain('Market Crash (Risk-Off)');
@@ -902,6 +693,9 @@ describe('buildAnalysisPrompt', () => {
         volatilityPctile: 50,
         newEntriesAllowed: true,
         positionSizeMultiplier: 1.0,
+        stopLossMultiplier: 1.0,
+        entryThresholdAdjustment: 0,
+        breadthScore: 50,
       };
       const { user } = buildAnalysisPrompt(ctx);
       expect(user).toContain('MARKET REGIME:');
@@ -997,7 +791,12 @@ function makeResearchSymbol(overrides?: Partial<ResearchSymbolData>): ResearchSy
       roc: 2.50,
       forceIndex: 5000,
       volumeRatio: 1.15,
+      perfWeek: 0.012,
+      perfMonth: 0.035,
+      perfQuarter: -0.045,
+      perfYear: 0.12,
       supportResistance: { support: 145.50, resistance: 155.50 },
+      candlestickPatterns: { bullish: [], bearish: [], neutral: [] },
       score: 65,
     },
     fundamentals: {

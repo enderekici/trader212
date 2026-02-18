@@ -124,6 +124,7 @@ const aiSchemas = new Map<string, z.ZodType>([
   ['ai.rules.buySentMin', z.number().int().min(0).max(100)],
   ['ai.rules.sellTechMax', z.number().int().min(0).max(100)],
   ['ai.rules.sellFundMax', z.number().int().min(0).max(100)],
+  ['ai.rules.takeProfitPct', z.number().min(0.01).max(1)],
 ]);
 
 // ── Risk ─────────────────────────────────────────────────────────────────────
@@ -297,14 +298,6 @@ const reportsSchemas = new Map<string, z.ZodType>([
   ['reports.includeEquityCurve', z.boolean()],
 ]);
 
-// ── Web Research ─────────────────────────────────────────────────────────────
-const webResearchSchemas = new Map<string, z.ZodType>([
-  ['webResearch.enabled', z.boolean()],
-  ['webResearch.cacheTtlHours', z.number().int().min(1).max(168)],
-  ['webResearch.finvizEnabled', z.boolean()],
-  ['webResearch.stockAnalysisEnabled', z.boolean()],
-]);
-
 // ── Streaming ────────────────────────────────────────────────────────────────
 const streamingSchemas = new Map<string, z.ZodType>([
   ['streaming.enabled', z.boolean()],
@@ -354,7 +347,6 @@ export const configSchemas: Map<string, z.ZodType> = new Map([
   ...conditionalOrderSchemas,
   ...aiSelfImprovementSchemas,
   ...reportsSchemas,
-  ...webResearchSchemas,
   ...streamingSchemas,
   ...tradingSchemas,
   ...monitoringSchemas,

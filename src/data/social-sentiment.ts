@@ -1,5 +1,6 @@
 import { configManager } from '../config/manager.js';
 import { createLogger } from '../utils/logger.js';
+import { getStockTwitsClient } from './stocktwits.js';
 
 const logger = createLogger('social-sentiment');
 
@@ -304,6 +305,67 @@ export class SocialSentimentAnalyzer {
       keywords,
       fetchedAt: new Date().toISOString(),
     };
+  }
+
+  /**
+   * Async version of analyzeSymbol that internally fetches StockTwits data.
+   * Use this instead of analyzeSymbol() for richer real-world sentiment signals.
+   */
+  async analyzeSymbolFull(
+    symbol: string,
+    mentions: SocialMention[] = [],
+  ): Promise<SocialSentimentResult> {
+    try {
+      const stClient = getStockTwitsClient();
+      const stData = await stClient.getSymbolData(symbol);
+
+      if (stData && stData.totalMessages > 0) {
+        // Build synthetic mentions from StockTwits aggregated data
+        const syntheticMentions: SocialMention[] = [];
+
+        // Spread bullish count as positive mentions
+        for (let i = 0; i < Math.min(stData.bullishCount, 50); i++) {
+          syntheticMentions.push({
+            text: 'bullish buy long calls strong upside breakout momentum',
+            source: 'stocktwits',
+            timestamp: new Date().toISOString(),
+            score: 0.7,
+          });
+        }
+
+        // Spread bearish count as negative mentions
+        for (let i = 0; i < Math.min(stData.bearishCount, 50); i++) {
+          syntheticMentions.push({
+            text: 'bearish sell short puts weak downside breakdown dump',
+            source: 'stocktwits',
+            timestamp: new Date().toISOString(),
+            score: -0.7,
+          });
+        }
+
+        const result = this.analyzeSymbol(symbol, [...mentions, ...syntheticMentions]);
+
+        // Override buzzScore with StockTwits-native watchlist signal
+        const stBuzzScore = Math.min(100, Math.log10(stData.watchlistCount + 1) * 30);
+        result.buzzScore = Math.max(result.buzzScore, stBuzzScore);
+        result.mentionCount = result.mentionCount + stData.totalMessages;
+
+        // Add StockTwits source to sources breakdown
+        if (stData.totalMessages > 0) {
+          result.sources['stocktwits'] = {
+            count: stData.totalMessages,
+            avgScore: stData.sentimentRatio !== null ? stData.sentimentRatio * 2 - 1 : 0,
+          };
+        }
+
+        return result;
+      }
+    } catch (err) {
+      logger.warn({ symbol, err }, 'StockTwits fetch failed in analyzeSymbolFull, falling back');
+    }
+
+    // Fallback: plain analyzeSymbol
+    return this.analyzeSymbol(symbol, mentions);
   }
 
   /**

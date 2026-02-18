@@ -1,6 +1,7 @@
 import { getFundamentals, setFundamentals } from '../db/repositories/cache.js';
 import { createLogger } from '../utils/logger.js';
 import type { EarningsEvent, FinnhubClient, FinnhubNews, InsiderTx } from './finnhub.js';
+import { getFinraClient } from './finra.js';
 import type { MarketauxArticle, MarketauxClient } from './marketaux.js';
 import type {
   FundamentalData,
@@ -14,13 +15,27 @@ const log = createLogger('data-aggregator');
 export interface StockData {
   symbol: string;
   candles: OHLCVCandle[];
-  quote: { price: number; change: number; changePercent: number } | null;
+  quote: {
+    price: number;
+    change: number;
+    changePercent: number;
+    dayHigh: number | null;
+    dayLow: number | null;
+    volume: number | null;
+    avgVolume: number | null;
+  } | null;
   fundamentals: FundamentalData | null;
   finnhubNews: FinnhubNews[];
   marketauxNews: MarketauxArticle[];
   earnings: EarningsEvent[];
   insiderTransactions: InsiderTx[];
   marketContext: MarketContext;
+  finraShortVolume: {
+    shortVolumePct: number;
+    shortVolume: number;
+    totalVolume: number;
+    date: string;
+  } | null;
 }
 
 /** Lighter data bundle for research — skips Marketaux to conserve daily budget */
@@ -61,6 +76,7 @@ export class DataAggregator {
       earnings: [],
       insiderTransactions: [],
       marketContext: { spyPrice: null, spyChange1d: null, vixLevel: null, marketTrend: 'neutral' },
+      finraShortVolume: null,
     };
 
     const today = new Date().toISOString().split('T')[0];
@@ -80,6 +96,8 @@ export class DataAggregator {
       earningsResult,
       insiderResult,
       marketCtxResult,
+      yahooQuoteResult,
+      finraShortVolumeResult,
     ] = await Promise.allSettled([
       this.yahoo.getHistoricalData(symbol),
       this.finnhub.getQuote(symbol),
@@ -89,6 +107,8 @@ export class DataAggregator {
       this.finnhub.getEarningsCalendar(today, thirtyDaysAhead),
       this.finnhub.getInsiderTransactions(symbol),
       this.yahoo.getMarketContext(),
+      this.yahoo.getQuote(symbol),
+      getFinraClient().getShortData([symbol]),
     ]);
 
     // Historical candles
@@ -98,7 +118,21 @@ export class DataAggregator {
       log.warn({ symbol, err: candlesResult.reason }, 'Failed to get candles');
     }
 
-    // Quote: prefer Finnhub, fallback to Yahoo
+    // Build quote from both Finnhub and Yahoo
+    let dayHigh: number | null = null;
+    let dayLow: number | null = null;
+    let volume: number | null = null;
+    let avgVolume: number | null = null;
+
+    // Yahoo quote provides volume + day range (available even when Finnhub is primary)
+    const yahooQ = yahooQuoteResult.status === 'fulfilled' ? yahooQuoteResult.value : null;
+    if (yahooQ) {
+      dayHigh = yahooQ.dayHigh;
+      dayLow = yahooQ.dayLow;
+      volume = yahooQ.volume;
+      avgVolume = yahooQ.avgVolume;
+    }
+
     if (finnhubQuoteResult.status === 'fulfilled' && finnhubQuoteResult.value) {
       const fq = finnhubQuoteResult.value;
       const change = fq.c - fq.pc;
@@ -106,19 +140,36 @@ export class DataAggregator {
         price: fq.c,
         change,
         changePercent: fq.pc !== 0 ? (change / fq.pc) * 100 : 0,
+        dayHigh: fq.h || dayHigh,
+        dayLow: fq.l || dayLow,
+        volume,
+        avgVolume,
+      };
+    } else if (yahooQ) {
+      result.quote = {
+        price: yahooQ.price,
+        change: yahooQ.change,
+        changePercent: yahooQ.changePercent,
+        dayHigh,
+        dayLow,
+        volume,
+        avgVolume,
       };
     } else {
-      try {
-        const yahooQuote = await this.yahoo.getQuote(symbol);
-        if (yahooQuote) {
-          result.quote = {
-            price: yahooQuote.price,
-            change: yahooQuote.change,
-            changePercent: yahooQuote.changePercent,
-          };
-        }
-      } catch (err) {
-        log.warn({ symbol, err }, 'Yahoo quote fallback also failed');
+      log.warn({ symbol }, 'All quote sources failed');
+    }
+
+    // FINRA short volume
+    if (finraShortVolumeResult.status === 'fulfilled') {
+      const finraMap = finraShortVolumeResult.value;
+      const finraEntry = finraMap.get(symbol);
+      if (finraEntry) {
+        result.finraShortVolume = {
+          shortVolumePct: finraEntry.shortVolumePct,
+          shortVolume: finraEntry.shortVolume,
+          totalVolume: finraEntry.totalVolume,
+          date: finraEntry.date,
+        };
       }
     }
 
@@ -164,6 +215,7 @@ export class DataAggregator {
         marketauxNews: result.marketauxNews.length,
         earnings: result.earnings.length,
         insiders: result.insiderTransactions.length,
+        finraShortVolume: !!result.finraShortVolume,
       },
       'Stock data aggregated',
     );

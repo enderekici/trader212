@@ -39,34 +39,34 @@ function show_help() {
 }
 
 function run_logs() {
-  echo -e "${BLUE}📋 Viewing logs (Ctrl+C to exit)...${NC}"
-  ssh -i "$SSH_KEY" "$SERVER" "cd $DEPLOY_DIR && docker-compose -f docker-compose.prod.yml logs -f"
+  echo -e "${BLUE}Viewing logs (Ctrl+C to exit)...${NC}"
+  ssh -i "$SSH_KEY" "$SERVER" "cd $DEPLOY_DIR && docker compose -f docker-compose.prod.yml logs -f"
 }
 
 function run_status() {
-  echo -e "${BLUE}📊 Checking service status...${NC}"
-  ssh -i "$SSH_KEY" "$SERVER" "cd $DEPLOY_DIR && docker-compose -f docker-compose.prod.yml ps"
+  echo -e "${BLUE}Checking service status...${NC}"
+  ssh -i "$SSH_KEY" "$SERVER" "cd $DEPLOY_DIR && docker compose -f docker-compose.prod.yml ps"
   echo ""
-  echo -e "${BLUE}🔍 Health check...${NC}"
-  ssh -i "$SSH_KEY" "$SERVER" "curl -s http://localhost:3001/api/status | jq" || echo "API not responding"
+  echo -e "${BLUE}Health check...${NC}"
+  ssh -i "$SSH_KEY" "$SERVER" "node -e \"fetch('http://localhost:3001/api/status').then(r=>r.json()).then(d=>console.log(JSON.stringify(d,null,2))).catch(e=>console.error('API not responding:',e.message))\"" || echo "API not responding"
 }
 
 function run_restart() {
-  echo -e "${YELLOW}🔄 Restarting services...${NC}"
-  ssh -i "$SSH_KEY" "$SERVER" "cd $DEPLOY_DIR && docker-compose -f docker-compose.prod.yml restart"
-  echo -e "${GREEN}✅ Services restarted${NC}"
+  echo -e "${YELLOW}Restarting services...${NC}"
+  ssh -i "$SSH_KEY" "$SERVER" "cd $DEPLOY_DIR && docker compose -f docker-compose.prod.yml restart"
+  echo -e "${GREEN}Services restarted${NC}"
 }
 
 function run_stop() {
-  echo -e "${RED}⏹️  Stopping services...${NC}"
-  ssh -i "$SSH_KEY" "$SERVER" "cd $DEPLOY_DIR && docker-compose -f docker-compose.prod.yml stop"
-  echo -e "${GREEN}✅ Services stopped${NC}"
+  echo -e "${RED}Stopping services...${NC}"
+  ssh -i "$SSH_KEY" "$SERVER" "cd $DEPLOY_DIR && docker compose -f docker-compose.prod.yml stop"
+  echo -e "${GREEN}Services stopped${NC}"
 }
 
 function run_start() {
-  echo -e "${GREEN}▶️  Starting services...${NC}"
-  ssh -i "$SSH_KEY" "$SERVER" "cd $DEPLOY_DIR && docker-compose -f docker-compose.prod.yml up -d"
-  echo -e "${GREEN}✅ Services started${NC}"
+  echo -e "${GREEN}Starting services...${NC}"
+  ssh -i "$SSH_KEY" "$SERVER" "cd $DEPLOY_DIR && docker compose -f docker-compose.prod.yml up -d"
+  echo -e "${GREEN}Services started${NC}"
 }
 
 function run_ssh() {

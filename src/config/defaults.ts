@@ -353,7 +353,7 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
   { key: 'ai.temperature', value: '0', category: 'ai', description: 'AI temperature' },
 
   // Risk
-  { key: 'risk.maxPositions', value: '5', category: 'risk', description: 'Max open positions' },
+  { key: 'risk.maxPositions', value: '8', category: 'risk', description: 'Max open positions' },
   {
     key: 'risk.maxPositionSizePct',
     value: '0.15',
@@ -386,7 +386,7 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
   },
   {
     key: 'risk.maxDrawdownAlertPct',
-    value: '0.10',
+    value: '0.15',
     category: 'risk',
     description: 'Alert at drawdown (10%)',
   },
@@ -422,7 +422,7 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
   },
   {
     key: 'risk.defaultStopLossPct',
-    value: '0.05',
+    value: '0.07',
     category: 'risk',
     description: 'Default stop-loss % when ATR unavailable',
   },
@@ -514,7 +514,7 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
   },
   {
     key: 'execution.maxHoldDays',
-    value: '30',
+    value: '90',
     category: 'execution',
     description: 'Default max hold days for positions',
   },
@@ -654,7 +654,7 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
   },
   {
     key: 'protection.maxDrawdownLock.maxDrawdownPct',
-    value: '0.10',
+    value: '0.15',
     category: 'protection',
     description: 'Drawdown threshold to trigger lock (10%)',
   },
@@ -1035,32 +1035,6 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
     description: 'Include equity curve chart in reports',
   },
 
-  // Web Research (steer integration)
-  {
-    key: 'webResearch.enabled',
-    value: 'false',
-    category: 'webResearch',
-    description: 'Enable web research via steer headless browser',
-  },
-  {
-    key: 'webResearch.cacheTtlHours',
-    value: '4',
-    category: 'webResearch',
-    description: 'Cache TTL for web research data (hours)',
-  },
-  {
-    key: 'webResearch.finvizEnabled',
-    value: 'true',
-    category: 'webResearch',
-    description: 'Scrape Finviz for analyst data',
-  },
-  {
-    key: 'webResearch.stockAnalysisEnabled',
-    value: 'true',
-    category: 'webResearch',
-    description: 'Scrape StockAnalysis for estimates',
-  },
-
   // Streaming (price streamer)
   {
     key: 'streaming.enabled',
@@ -1204,7 +1178,7 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
   // AI — Conviction Gate
   {
     key: 'ai.minConvictionScore',
-    value: '65',
+    value: '45',
     category: 'ai',
     description: 'Min AI conviction to execute a BUY',
   },
@@ -1212,21 +1186,27 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
   // AI — Rules Engine
   {
     key: 'ai.rules.buyTechMin',
-    value: '65',
+    value: '45',
     category: 'ai',
     description: 'Rules engine: min technical score for BUY',
   },
   {
     key: 'ai.rules.buyFundMin',
-    value: '55',
+    value: '45',
     category: 'ai',
     description: 'Rules engine: min fundamental score for BUY',
   },
   {
     key: 'ai.rules.buySentMin',
-    value: '60',
+    value: '45',
     category: 'ai',
     description: 'Rules engine: min sentiment score for BUY',
+  },
+  {
+    key: 'ai.rules.takeProfitPct',
+    value: '0.25',
+    category: 'ai',
+    description: 'Rules engine: take-profit target (25% = backtest winner)',
   },
   {
     key: 'ai.rules.sellTechMax',

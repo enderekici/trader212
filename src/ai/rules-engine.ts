@@ -7,9 +7,9 @@ const log = createLogger('rules-engine');
 export class RulesEngine implements AIAgent {
   async analyze(context: AIContext): Promise<AIDecision | null> {
     // Read configurable thresholds
-    let buyTechMin = 65;
-    let buyFundMin = 55;
-    let buySentMin = 60;
+    let buyTechMin = 45;
+    let buyFundMin = 45;
+    let buySentMin = 45;
     let sellTechMax = 35;
     let sellFundMax = 30;
     try {
@@ -76,9 +76,9 @@ export class RulesEngine implements AIAgent {
     );
 
     // Use config defaults for stop/target/size
-    let stopLossPct = 0.05;
-    let positionSizePct = 0.1;
-    const takeProfitPct = 0.15;
+    let stopLossPct = 0.07;
+    let positionSizePct = 0.15;
+    let takeProfitPct = 0.25;
     try {
       stopLossPct = configManager.get<number>('risk.defaultStopLossPct');
     } catch {
@@ -86,6 +86,11 @@ export class RulesEngine implements AIAgent {
     }
     try {
       positionSizePct = configManager.get<number>('risk.maxPositionSizePct');
+    } catch {
+      /* use defaults */
+    }
+    try {
+      takeProfitPct = configManager.get<number>('ai.rules.takeProfitPct');
     } catch {
       /* use defaults */
     }

@@ -56,6 +56,10 @@ const mockCalcForceIndex = vi.fn();
 const mockCalcVolumeRatio = vi.fn();
 const mockCalcSupportResistance = vi.fn();
 const mockDetectCandlestickPatterns = vi.fn();
+const mockCalcPerfMetrics = vi.fn();
+const mockCalcIchimokuCloud = vi.fn();
+const mockCalcADL = vi.fn();
+const mockCalcAwesomeOscillator = vi.fn();
 
 vi.mock('../../src/analysis/technical/indicators.js', () => ({
   calcRSI: (...args: unknown[]) => mockCalcRSI(...args),
@@ -77,6 +81,10 @@ vi.mock('../../src/analysis/technical/indicators.js', () => ({
   calcVolumeRatio: (...args: unknown[]) => mockCalcVolumeRatio(...args),
   calcSupportResistance: (...args: unknown[]) => mockCalcSupportResistance(...args),
   detectCandlestickPatterns: (...args: unknown[]) => mockDetectCandlestickPatterns(...args),
+  calcPerfMetrics: (...args: unknown[]) => mockCalcPerfMetrics(...args),
+  calcIchimokuCloud: (...args: unknown[]) => mockCalcIchimokuCloud(...args),
+  calcADL: (...args: unknown[]) => mockCalcADL(...args),
+  calcAwesomeOscillator: (...args: unknown[]) => mockCalcAwesomeOscillator(...args),
   // Also export the types that are re-exported
 }));
 
@@ -122,6 +130,10 @@ function resetIndicatorMocks() {
   mockCalcVolumeRatio.mockReturnValue(null);
   mockCalcSupportResistance.mockReturnValue(null);
   mockDetectCandlestickPatterns.mockReturnValue({ bullish: [], bearish: [], neutral: [] });
+  mockCalcPerfMetrics.mockReturnValue({ perfWeek: null, perfMonth: null, perfQuarter: null, perfYear: null });
+  mockCalcIchimokuCloud.mockReturnValue(null);
+  mockCalcADL.mockReturnValue(null);
+  mockCalcAwesomeOscillator.mockReturnValue(null);
 }
 
 // ---------------------------------------------------------------------------

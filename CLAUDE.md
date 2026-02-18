@@ -35,7 +35,7 @@ Autonomous AI trading bot for Trading212. ESM TypeScript, Node.js 24+.
     - `strategy-profiles.ts` - Pre-configured strategy profiles (conservative, balanced, aggressive, scalper, swing)
   - `src/db/` - Database layer
     - `index.ts` - Database connection (better-sqlite3 + drizzle-orm)
-    - `schema.ts` - Drizzle schema (23 tables)
+    - `schema.ts` - Drizzle schema (25 tables)
     - `repositories/` - Data access layers
       - `cache.ts` - Price, news, earnings, insider, fundamental caching
       - `config.ts` - Configuration CRUD
@@ -46,6 +46,7 @@ Autonomous AI trading bot for Trading212. ESM TypeScript, Node.js 24+.
       - `orders.ts` - Order management and tracking
       - `conditional-orders.ts` - Conditional order logic (OCO, Trailing, etc.)
       - `journal.ts` - Trade journal entries with tags and notes
+      - `research-watchlist.ts` - Research watchlist CRUD (symbols tracked for AI research)
       - `strategy-profiles.ts` - Strategy profile management
       - `tax-lots.ts` - Tax lot tracking for FIFO/LIFO/HIFO
       - `webhooks.ts` - Webhook configuration and logs
@@ -59,8 +60,8 @@ Autonomous AI trading bot for Trading212. ESM TypeScript, Node.js 24+.
     - `finnhub.ts` - Finnhub adapter (quotes, news, earnings, insiders)
     - `marketaux.ts` - Marketaux adapter (news + sentiment)
     - `social-sentiment.ts` - Social media sentiment aggregation (Reddit, Twitter, StockTwits)
-    - `web-researcher.ts` - Web research via Steer headless browser (Finviz, StockAnalysis scraping; optional, requires external Steer instance)
-    - `steer-client.ts` - Steer headless browser HTTP client (scrape/extract; gracefully degrades if unavailable)
+    - `stocktwits.ts` - StockTwitsClient: fetches StockTwits symbol stream data directly
+    - `finra.ts` - FinraClient: fetches FINRA short interest/volume data from cdn.finra.org
     - `price-streamer.ts` - Real-time price streaming via WebSocket
     - `ticker-mapper.ts` - Symbol <-> Trading212 ticker mapping
   - `src/ai/` - AI decision engine
@@ -70,6 +71,7 @@ Autonomous AI trading bot for Trading212. ESM TypeScript, Node.js 24+.
     - `market-research.ts` - MarketResearcher: scheduled AI research for stock discovery
     - `self-improvement.ts` - AI self-improvement system: analyzes past decisions, identifies patterns, updates strategies
     - `rules-engine.ts` - RulesEngine: deterministic threshold-based decisions (zero-cost, backtest-reproducible)
+    - `consensus.ts` - ConsensusEngine: multi-model consensus voting (majority/weighted/unanimous modes) across multiple OpenAI-compat profiles
     - `adapters/` - Provider adapters
       - `anthropic.ts` - Anthropic Claude adapter (@anthropic-ai/sdk)
       - `ollama.ts` - Ollama adapter (HTTP client)
@@ -156,6 +158,10 @@ Autonomous AI trading bot for Trading212. ESM TypeScript, Node.js 24+.
     - `pnl-display.tsx` - P&L display with color coding
     - `stock-chart.tsx` - Price chart (lightweight-charts)
     - `config-editor.tsx` - Live config editor
+    - `HelpTooltip.tsx` - Contextual help tooltip component
+    - `SetupGuideButton.tsx` - Button to launch the setup wizard
+    - `WizardMount.tsx` - Setup wizard mount point
+    - `wizard/` - Setup wizard UI (multi-step onboarding flow for API keys and AI config)
   - `web/lib/` - Shared libraries
     - `utils.ts` - cn() (clsx + tailwind-merge)
     - `api.ts` - API client (fetch wrapper for REST endpoints)
@@ -206,10 +212,10 @@ Key flows:
 - **Web Research** (optional): Finviz/StockAnalysis scraping via Steer headless browser; requires external Steer instance at `STEER_URL`, gracefully skipped if unavailable
 
 ## Database
-SQLite via better-sqlite3 + drizzle-orm. 23 tables:
+SQLite via better-sqlite3 + drizzle-orm. 25 tables:
 - **Core**: `config`, `positions`, `trades`, `signals`, `orders`
 - **Caching**: `priceCache`, `newsCache`, `fundamentalCache`, `earningsCalendar`, `insiderTransactions`
-- **AI/Analysis**: `aiResearch`, `modelPerformance`, `auditLog`
+- **AI/Analysis**: `aiResearch`, `researchWatchlist`, `modelPerformance`, `auditLog`
 - **Execution**: `tradePlans`, `conditionalOrders`, `pairLocks`
 - **Monitoring**: `dailyMetrics`, `pairlistHistory`, `tradeJournal`, `taxLots`
 - **Webhooks**: `webhookConfigs`, `webhookLogs`
@@ -227,11 +233,12 @@ Finnhub and Marketaux support multiple API keys via single comma-separated env v
 NYSE hours with holiday awareness (2024-2028 calendar in `src/utils/holidays.ts`). Includes early close detection. `getMarketTimes()` returns full market status (open/pre/after/closed) with countdown timers, holiday flag, and early close flag. Used by scheduler to skip market-hours-only jobs.
 
 ## AI Providers
-Four options selected at runtime via `ai.provider` config key:
+Five options selected at runtime via `ai.provider` config key:
 - `anthropic` - Anthropic Claude adapter (default)
 - `ollama` - Ollama adapter for local inference
 - `openai-compatible` - OpenAI-compatible adapter (any OpenAI-compatible API)
 - `rules` - Deterministic threshold-based rules engine (zero cost, no LLM calls, backtest-reproducible)
+- `consensus` - Multi-model consensus engine: aggregates votes across multiple OpenAI-compatible model profiles (configured via `ai.models` config key as JSON array of profiles)
 
 Market research uses the same provider via `src/ai/market-research.ts` (except `rules` which doesn't support `rawChat`).
 
@@ -251,7 +258,7 @@ Market research uses the same provider via `src/ai/market-research.ts` (except `
 13. `conditionalOrders` - Monitor and trigger conditional orders (configurable interval, market hours only; conditional on `conditionalOrders.enabled`)
 14. `aiSelfImprovement` - AI self-improvement feedback loop (daily at 6:30 PM ET; conditional on `aiSelfImprovement.enabled`)
 
-## REST API Endpoints (60+)
+## REST API Endpoints (70+)
 
 ### Status & Health
 - GET `/api/status` - Bot status, uptime, market status, environment, account type
@@ -282,6 +289,7 @@ Market research uses the same provider via `src/ai/market-research.ts` (except `
 ### Pairlist
 - GET `/api/pairlist` - Current pairlist
 - GET `/api/pairlist/history` - Pairlist snapshot history
+- GET `/api/pairlist/static` - List static pairlist symbols
 - POST `/api/pairlist/static` - Add a symbol to static pairlist (body: { symbol })
 - DELETE `/api/pairlist/static/:symbol` - Remove a symbol from static pairlist
 
@@ -306,7 +314,15 @@ Market research uses the same provider via `src/ai/market-research.ts` (except `
 ### AI & Research
 - GET `/api/research` - List AI research reports
 - POST `/api/research/run` - Trigger manual AI research (body: { focus?, symbols? })
+- POST `/api/research/screen` - Run stock screening
+- GET `/api/research/watchlist` - Get research watchlist symbols
+- POST `/api/research/watchlist` - Add symbol to research watchlist
+- DELETE `/api/research/watchlist/:symbol` - Remove symbol from research watchlist
 - GET `/api/model-stats` - AI model performance statistics
+- GET `/ai/models` - List AI model profiles (for consensus engine)
+- POST `/ai/models` - Save AI model profiles
+- POST `/ai/test` - Test an AI model profile connection
+- GET `/setup/status` - Check if AI provider is configured (used by setup wizard)
 
 ### Protections & Locks
 - GET `/api/protections/locks` - List pair locks
@@ -377,15 +393,17 @@ Market research uses the same provider via `src/ai/market-research.ts` (except `
 - **Dashboard Auth**: Next.js server-side API proxy at `web/app/api/[...path]/route.ts` reads `API_SECRET_KEY` from server env and forwards it as Bearer token to the backend. No secrets are exposed to the client bundle.
 
 ## Docker
-- `docker compose up` — starts bot (port 3001) + web dashboard (port 3000)
-- `docker compose build` — builds both images
-- **Files**: `Dockerfile` (bot), `Dockerfile.web` (Next.js dashboard), `docker-compose.yml`, `.dockerignore`
+- `docker compose up` — starts all 3 services: bot (port 3001), web dashboard (port 3000), steer headless browser (port 3010 internal)
+- `docker compose build` — builds all images
+- **Files**: `Dockerfile` (bot), `Dockerfile.web` (Next.js dashboard), `docker-compose.yml` (dev, builds locally), `docker-compose.prod.yml` (production, pulls from GHCR), `.dockerignore`
+- **Three services**: `bot` (trading engine), `web` (Next.js dashboard), `steer` (headless browser for web research via `ghcr.io/enderekici/steer:main`)
+- **Startup order**: steer must be healthy → bot starts → bot must be healthy → web starts
 - **Bot image**: multi-stage build, `node:24-alpine`, `tsup` bundle, `NODE_ENV=production` set in Dockerfile. Builder stage uses `apk add python3 make g++` for `better-sqlite3` native compilation
 - **Web image**: multi-stage build, `node:24-alpine`, Next.js standalone output. `API_URL` and `API_SECRET_KEY` are runtime env vars (not build args) — the server-side proxy reads them at request time
 - **Healthcheck**: bot uses Node.js `fetch()` against `/api/status` (not curl — `node:24-alpine` has no curl)
 - **Volumes**: `./data:/app/data` for SQLite persistence
 - **Environment**: `.env` file is passed via `env_file:` for secrets/config. `NODE_ENV` is NOT in `.env` — Dockerfiles own it (set to `production`). For local dev, `NODE_ENV` is left unset (defaults to dev mode).
-- **Web depends on bot**: `depends_on: bot: condition: service_healthy` — web waits for bot healthcheck
+- **Prod compose**: uses pre-built GHCR images (`ghcr.io/enderekici/trader212:main` / `:main-web`), sets `HOSTNAME=0.0.0.0` on web, adds `extra_hosts: host.docker.internal:host-gateway` on bot
 - **API Proxy**: `web/app/api/[...path]/route.ts` proxies all `/api/*` requests to the backend, injecting Bearer token server-side. No build args needed for API config
 
 ## Audit Log

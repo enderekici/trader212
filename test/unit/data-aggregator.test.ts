@@ -136,6 +136,10 @@ describe('DataAggregator', () => {
         price: 150,
         change: 5,
         changePercent: (5 / 145) * 100,
+        dayHigh: 152,
+        dayLow: 147,
+        volume: null,
+        avgVolume: null,
       });
       expect(result.fundamentals).toEqual(fundamentals);
       expect(result.finnhubNews).toEqual(finnhubNews);
@@ -162,6 +166,10 @@ describe('DataAggregator', () => {
         price: 148,
         change: 2,
         changePercent: 1.37,
+        dayHigh: undefined,
+        dayLow: undefined,
+        volume: 50000000,
+        avgVolume: 60000000,
       });
     });
 
@@ -181,6 +189,10 @@ describe('DataAggregator', () => {
         price: 148,
         change: 2,
         changePercent: 1.37,
+        dayHigh: undefined,
+        dayLow: undefined,
+        volume: 50000000,
+        avgVolume: 60000000,
       });
     });
 

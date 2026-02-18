@@ -174,7 +174,7 @@ cd web && npm install && npm run dev
            +----------+   +-----------+   +------------+
            |  SQLite  |   |  Telegram |   | WebSocket  |
            | Database |   |   Bot     |   | + Express  |
-           | (23 tbl) |   |           |   | + Dashboard|
+           | (25 tbl) |   |           |   | + Dashboard|
            +----------+   +-----------+   +------------+
 ```
 
@@ -183,7 +183,7 @@ cd web && npm install && npm run dev
 | Layer | Technology |
 |-------|-----------|
 | Runtime | Node.js 24+, ESM TypeScript |
-| Database | SQLite via better-sqlite3, Drizzle ORM (23 tables) |
+| Database | SQLite via better-sqlite3, Drizzle ORM (25 tables) |
 | AI | Anthropic SDK, Ollama, OpenAI-compatible, Rules Engine |
 | Data | Yahoo Finance, Finnhub, Marketaux, Social Sentiment, Steer Web Research |
 | Indicators | technicalindicators (25+ indicators) |

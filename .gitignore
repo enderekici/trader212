@@ -12,3 +12,4 @@ coverage*/
 *.tsbuildinfo
 backups/
 deploy.config
+scripts/results/
