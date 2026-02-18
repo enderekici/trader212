@@ -55,6 +55,7 @@ const mockCalcROC = vi.fn();
 const mockCalcForceIndex = vi.fn();
 const mockCalcVolumeRatio = vi.fn();
 const mockCalcSupportResistance = vi.fn();
+const mockDetectCandlestickPatterns = vi.fn();
 
 vi.mock('../../src/analysis/technical/indicators.js', () => ({
   calcRSI: (...args: unknown[]) => mockCalcRSI(...args),
@@ -75,6 +76,7 @@ vi.mock('../../src/analysis/technical/indicators.js', () => ({
   calcForceIndex: (...args: unknown[]) => mockCalcForceIndex(...args),
   calcVolumeRatio: (...args: unknown[]) => mockCalcVolumeRatio(...args),
   calcSupportResistance: (...args: unknown[]) => mockCalcSupportResistance(...args),
+  detectCandlestickPatterns: (...args: unknown[]) => mockDetectCandlestickPatterns(...args),
   // Also export the types that are re-exported
 }));
 
@@ -119,6 +121,7 @@ function resetIndicatorMocks() {
   mockCalcForceIndex.mockReturnValue(null);
   mockCalcVolumeRatio.mockReturnValue(null);
   mockCalcSupportResistance.mockReturnValue(null);
+  mockDetectCandlestickPatterns.mockReturnValue({ bullish: [], bearish: [], neutral: [] });
 }
 
 // ---------------------------------------------------------------------------

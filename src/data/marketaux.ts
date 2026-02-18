@@ -43,6 +43,24 @@ export class MarketauxClient {
     });
 
     this.budgetResetDate = this.todayUTC();
+
+    // Load persisted budget state
+    const today = this.todayUTC();
+    try {
+      const savedDate = configManager.get<string>('_internal.marketaux.budgetDate') ?? '';
+      const savedCalls = configManager.get<number>('_internal.marketaux.callsToday') ?? 0;
+      if (savedDate === today) {
+        this.callsToday = savedCalls;
+        this.budgetResetDate = today;
+      } else {
+        this.callsToday = 0;
+        this.budgetResetDate = today;
+      }
+    } catch {
+      // Config keys may not exist yet on first run — defaults used
+      this.callsToday = 0;
+      this.budgetResetDate = today;
+    }
   }
 
   private todayUTC(): string {
@@ -54,6 +72,16 @@ export class MarketauxClient {
     if (today !== this.budgetResetDate) {
       this.callsToday = 0;
       this.budgetResetDate = today;
+      try {
+        void configManager.set('_internal.marketaux.callsToday', 0);
+      } catch {
+        /* ignore */
+      }
+      try {
+        void configManager.set('_internal.marketaux.budgetDate', today);
+      } catch {
+        /* ignore */
+      }
     }
 
     const maxCalls =
@@ -90,10 +118,15 @@ export class MarketauxClient {
       });
 
       this.callsToday++;
+      try {
+        void configManager.set('_internal.marketaux.callsToday', this.callsToday);
+      } catch {
+        /* ignore */
+      }
 
       if (!data?.data) return [];
 
-      return data.data.map((article: Record<string, unknown>) => {
+      let articles: MarketauxArticle[] = data.data.map((article: Record<string, unknown>) => {
         const entities = article.entities as Array<Record<string, unknown>> | undefined;
         let sentimentScore: number | null = null;
         let relevanceScore: number | null = null;
@@ -113,6 +146,11 @@ export class MarketauxClient {
           relevanceScore,
         };
       });
+
+      // Filter out low-relevance articles (pass through if relevanceScore is null)
+      articles = articles.filter((a) => a.relevanceScore == null || a.relevanceScore >= 0.3);
+
+      return articles;
     } catch (err) {
       log.error({ symbols, err }, 'Failed to fetch Marketaux news');
       return [];

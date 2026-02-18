@@ -6,10 +6,12 @@ import type {
   PerformanceResponse,
   PortfolioResponse,
   ResearchReport,
+  ScreenerResult,
   SignalsResponse,
   StatusResponse,
   TradePlan,
   TradesResponse,
+  WatchlistEntry,
 } from './types';
 
 async function fetchApi<T>(path: string, init?: RequestInit): Promise<T> {
@@ -80,6 +82,9 @@ export const api = {
 
   // Pairlist
   getPairlist: () => fetchApi<PairlistResponse>('/api/pairlist'),
+  getStaticSymbols: () => fetchApi<{ symbols: string[] }>('/api/pairlist/static'),
+  getPairlistHistory: () =>
+    fetchApi<{ history: Array<{ id: number; timestamp: string; symbols: string[]; filterStats: Record<string, number> | null }> }>('/api/pairlist/history'),
 
   // Config
   getConfig: () => fetchApi<ConfigResponse>('/api/config'),
@@ -112,6 +117,24 @@ export const api = {
     fetchApi<{ report: ResearchReport }>('/api/research/run', {
       method: 'POST',
       body: JSON.stringify(params ?? {}),
+    }),
+  getResearchWatchlist: () => fetchApi<WatchlistEntry[]>('/api/research/watchlist'),
+  addToWatchlist: (symbol: string, notes?: string) =>
+    fetchApi<WatchlistEntry>('/api/research/watchlist', {
+      method: 'POST',
+      body: JSON.stringify({ symbol, notes }),
+    }),
+  removeFromWatchlist: (symbol: string) =>
+    fetchApi<{ ok: boolean }>(`/api/research/watchlist/${symbol}`, { method: 'DELETE' }),
+  screenStocks: (params?: { sector?: string; symbols?: string[] }) =>
+    fetchApi<{ results: ScreenerResult[]; screenerUpdatedAt: string | null }>(
+      '/api/research/screen',
+      { method: 'POST', body: JSON.stringify(params ?? {}) },
+    ),
+  updateIdeaStatus: (id: number, status: string) =>
+    fetchApi<{ ok: boolean }>(`/api/research/ideas/${id}/status`, {
+      method: 'POST',
+      body: JSON.stringify({ status }),
     }),
 
   // Audit

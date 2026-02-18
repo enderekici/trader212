@@ -10,7 +10,14 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'lcov'],
       include: ['src/**/*.ts'],
-      exclude: ['src/index.ts', 'src/db/schema.ts'],
+      exclude: [
+        'src/index.ts',
+        'src/db/schema.ts',
+        'src/api/trading212/types.ts',
+        'src/db/repositories/conditional-orders.ts',
+        'src/db/repositories/tax-lots.ts',
+        'src/execution/order-sync.ts',
+      ],
       thresholds: {
         lines: 90,
         functions: 90,

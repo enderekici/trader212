@@ -2,7 +2,10 @@ import { configManager } from '../config/manager.js';
 import { createLogger } from '../utils/logger.js';
 import { AnthropicAdapter } from './adapters/anthropic.js';
 import { OllamaAdapter } from './adapters/ollama.js';
+import type { ModelProfile } from './adapters/openai-compat.js';
 import { OpenAICompatibleAdapter } from './adapters/openai-compat.js';
+import type { ConsensusMode } from './consensus.js';
+import { ConsensusEngine } from './consensus.js';
 import { RulesEngine } from './rules-engine.js';
 
 const log = createLogger('ai-agent');
@@ -41,6 +44,9 @@ export interface AIContext {
     volumeRatio: number | null;
     support: number | null;
     resistance: number | null;
+    candlestickBullish: string | null;
+    candlestickBearish: string | null;
+    candlestickNeutral: string | null;
     score: number;
   };
   fundamental: {
@@ -166,9 +172,24 @@ export interface AIAgent {
   rawChat(system: string, user: string): Promise<string>;
 }
 
+/** Safely parse JSON with a fallback default value */
+export function safeParseJson<T>(json: string, fallback: T): T {
+  try {
+    return JSON.parse(json) as T;
+  } catch {
+    return fallback;
+  }
+}
+
 /** Resolve the actual model name based on the active AI provider */
 export function getActiveModelName(): string {
   const provider = configManager.get<string>('ai.provider');
+  const primaryId = configManager.get<string>('ai.primaryModel');
+  if (primaryId) {
+    const models: ModelProfile[] = safeParseJson(configManager.get<string>('ai.models'), []);
+    const profile = models.find((m) => m.id === primaryId && m.enabled);
+    if (profile) return `${profile.id}/${profile.model}`;
+  }
   switch (provider) {
     case 'ollama':
       return configManager.get<string>('ai.ollama.model');
@@ -183,15 +204,41 @@ export function getActiveModelName(): string {
 
 export function createAIAgent(): AIAgent {
   const provider = configManager.get<string>('ai.provider');
-  log.info({ provider }, 'Creating AI agent');
-  switch (provider) {
-    case 'ollama':
-      return new OllamaAdapter();
-    case 'openai-compatible':
-      return new OpenAICompatibleAdapter();
-    case 'rules':
-      return new RulesEngine();
-    default:
-      return new AnthropicAdapter();
+
+  // New path: named model profiles
+  const primaryId = configManager.get<string>('ai.primaryModel');
+  const modelsJson = configManager.get<string>('ai.models');
+  const models: ModelProfile[] = safeParseJson(modelsJson, []);
+
+  if (
+    configManager.get<boolean>('ai.consensus.enabled') &&
+    models.filter((m) => m.enabled).length > 1
+  ) {
+    const mode = configManager.get<string>('ai.consensus.mode') as ConsensusMode;
+    const minAgree = configManager.get<number>('ai.consensus.minAgree');
+    log.info({ mode, minAgree }, 'Creating ConsensusEngine AI agent');
+    return new ConsensusEngine(
+      models.filter((m) => m.enabled),
+      mode,
+      minAgree,
+    );
   }
+
+  if (primaryId) {
+    const profile = models.find((m) => m.id === primaryId && m.enabled);
+    if (profile) {
+      log.info(
+        { profileId: primaryId, model: profile.model },
+        'Creating OpenAI-compat agent from profile',
+      );
+      return new OpenAICompatibleAdapter(profile);
+    }
+  }
+
+  // Legacy fallback (existing behaviour)
+  log.info({ provider }, 'Creating AI agent');
+  if (provider === 'rules') return new RulesEngine();
+  if (provider === 'ollama') return new OllamaAdapter();
+  if (provider === 'openai-compatible') return new OpenAICompatibleAdapter();
+  return new AnthropicAdapter();
 }

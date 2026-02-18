@@ -302,6 +302,36 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
     description: 'OpenAI-compatible API key',
   },
   {
+    key: 'ai.models',
+    value: '"[]"',
+    category: 'ai',
+    description: 'JSON array of ModelProfile objects for multi-model support',
+  },
+  {
+    key: 'ai.primaryModel',
+    value: '""',
+    category: 'ai',
+    description: 'ID of the primary model profile (empty = use legacy ai.provider)',
+  },
+  {
+    key: 'ai.consensus.enabled',
+    value: 'false',
+    category: 'ai',
+    description: 'Enable consensus mode (requires multiple enabled model profiles)',
+  },
+  {
+    key: 'ai.consensus.mode',
+    value: '"weighted"',
+    category: 'ai',
+    description: 'Consensus mode: majority | weighted | unanimous',
+  },
+  {
+    key: 'ai.consensus.minAgree',
+    value: '2',
+    category: 'ai',
+    description: 'Minimum number of models that must agree in consensus mode',
+  },
+  {
     key: 'ai.maxConcurrentCalls',
     value: '2',
     category: 'ai',

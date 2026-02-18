@@ -28,10 +28,9 @@ import { getStrategyProfileManager } from './config/strategy-profiles.js';
 import { DataAggregator, type StockData } from './data/data-aggregator.js';
 import { FinnhubClient } from './data/finnhub.js';
 import { MarketauxClient } from './data/marketaux.js';
+import { PriceStreamer } from './data/price-streamer.js';
 import { getSocialSentimentAnalyzer } from './data/social-sentiment.js';
-import { SteerClient } from './data/steer-client.js';
 import { TickerMapper } from './data/ticker-mapper.js';
-import { type WebResearchData, WebResearcher } from './data/web-researcher.js';
 import { YahooFinanceClient } from './data/yahoo-finance.js';
 import { getDb, initDatabase } from './db/index.js';
 import * as schema from './db/schema.js';
@@ -91,9 +90,7 @@ class TradingBot {
   private modelTracker!: ModelTracker;
   private correlationAnalyzer!: CorrelationAnalyzer;
   private orderReplacer!: OrderReplacer;
-  private steerClient!: SteerClient;
-  private webResearcher!: WebResearcher;
-
+  private priceStreamer!: PriceStreamer;
   private paused = false;
   private startedAt = '';
   private activeStocks: StockInfo[] = [];
@@ -287,12 +284,6 @@ class TradingBot {
     // 10h. Partial exit manager — needs T212 client for execution
     getPartialExitManager().setT212Client(this.t212Client);
 
-    // 10i. Web researcher (steer integration)
-    const steerUrl = process.env.STEER_URL || 'http://localhost:3010';
-    this.steerClient = new SteerClient({ baseUrl: steerUrl });
-    this.webResearcher = new WebResearcher(this.steerClient);
-    this.marketResearcher.setWebResearcher(this.webResearcher);
-
     // 11. Telegram with command handlers
     this.telegram = new TelegramNotifier();
     this.telegram.registerCommands({
@@ -309,6 +300,12 @@ class TradingBot {
     this.apiServer = new ApiServer();
     await this.apiServer.start();
     this.wsManager = this.apiServer.getWsManager();
+
+    // 12c. PriceStreamer → WebSocket forwarding
+    this.priceStreamer = new PriceStreamer();
+    this.priceStreamer.on('price_update', (update) => {
+      this.wsManager.broadcast('price_update', update);
+    });
 
     // 12b. Register bot callbacks for API control endpoints
     registerBotCallbacks({
@@ -813,16 +810,6 @@ class TradingBot {
       correlation: c.correlation,
     }));
 
-    // 3b. Web research (optional, requires steer)
-    let webResearchData: WebResearchData | null = null;
-    if (configManager.get<boolean>('webResearch.enabled')) {
-      try {
-        webResearchData = await this.webResearcher.getStockResearch(symbol);
-      } catch (err) {
-        log.debug({ symbol, err }, 'Web research failed, continuing without');
-      }
-    }
-
     // 3c. Regime detection (uses SPY candles fetched once per loop)
     let regimeAnalysis = null;
     try {
@@ -864,7 +851,6 @@ class TradingBot {
       sentimentInput,
       portfolio,
       portfolioCorrelations,
-      webResearchData,
       regimeAnalysis,
       multiTimeframeResult,
       socialSentimentResult,
@@ -1692,7 +1678,6 @@ class TradingBot {
           sentimentInput,
           portfolio,
           portfolioCorrelations,
-          null,
           regimeAnalysis,
           multiTimeframeResult,
         );
@@ -1986,7 +1971,6 @@ class TradingBot {
     _sentimentInput: SentimentInput,
     portfolio: PortfolioState,
     portfolioCorrelations?: Array<{ symbol: string; correlation: number }>,
-    webResearchData?: WebResearchData | null,
     regimeAnalysis?: import('./analysis/regime-detector.js').RegimeAnalysis | null,
     multiTimeframeResult?: import('./analysis/multi-timeframe.js').MultiTimeframeResult | null,
     socialSentimentResult?: import('./data/social-sentiment.js').SocialSentimentResult | null,
@@ -2071,6 +2055,18 @@ class TradingBot {
         volumeRatio: techAnalysis.volumeRatio,
         support: techAnalysis.supportResistance?.support ?? null,
         resistance: techAnalysis.supportResistance?.resistance ?? null,
+        candlestickBullish:
+          techAnalysis.candlestickPatterns.bullish.length > 0
+            ? techAnalysis.candlestickPatterns.bullish.join(', ')
+            : null,
+        candlestickBearish:
+          techAnalysis.candlestickPatterns.bearish.length > 0
+            ? techAnalysis.candlestickPatterns.bearish.join(', ')
+            : null,
+        candlestickNeutral:
+          techAnalysis.candlestickPatterns.neutral.length > 0
+            ? techAnalysis.candlestickPatterns.neutral.join(', ')
+            : null,
         score: technicalScore,
       },
       fundamental: {
@@ -2151,26 +2147,6 @@ class TradingBot {
         dailyLossLimitPct: configManager.get<number>('risk.dailyLossLimitPct'),
       },
       portfolioCorrelations: portfolioCorrelations ?? [],
-      ...(webResearchData
-        ? {
-            webResearch: {
-              pegRatio: webResearchData.pegRatio,
-              analystTargetPrice: webResearchData.analystTargetPrice,
-              analystConsensus: webResearchData.analystConsensus,
-              analystCount: webResearchData.analystCount,
-              shortInterestPct: webResearchData.shortInterestPct,
-              institutionalOwnershipPct: webResearchData.institutionalOwnershipPct,
-              epsEstimateNextQ: webResearchData.epsEstimateNextQ,
-              revenueEstimateNextQ: webResearchData.revenueEstimateNextQ,
-              perfWeek: webResearchData.perfWeek,
-              perfMonth: webResearchData.perfMonth,
-              perfQuarter: webResearchData.perfQuarter,
-              perfYear: webResearchData.perfYear,
-              relativeVolume: webResearchData.relativeVolume,
-              averageVolume: webResearchData.averageVolume,
-            },
-          }
-        : {}),
       ...(regimeAnalysis
         ? {
             regime: {

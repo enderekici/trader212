@@ -361,7 +361,21 @@ function createTables(sqlite: InstanceType<typeof Database>) {
       severity TEXT NOT NULL DEFAULT 'info'
     );
     CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(timestamp, eventType);
+
+    CREATE TABLE IF NOT EXISTS research_watchlist (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      symbol TEXT NOT NULL UNIQUE,
+      notes TEXT,
+      added_at TEXT NOT NULL
+    );
   `);
 
   log.debug('All tables created/verified');
+
+  // Idempotent column migrations
+  try {
+    sqlite.exec(`ALTER TABLE ai_research ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'`);
+  } catch {
+    // Column already exists — ignore
+  }
 }

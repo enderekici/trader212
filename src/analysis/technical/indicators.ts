@@ -3,22 +3,44 @@ import {
   ADX,
   ATR,
   AwesomeOscillator,
+  abandonedbaby,
   BollingerBands,
+  bearishengulfingpattern,
+  bearishharami,
+  bullishengulfingpattern,
+  bullishharami,
   CCI,
+  darkcloudcover,
+  doji,
+  dragonflydoji,
   EMA,
+  eveningdojistar,
+  eveningstar,
   ForceIndex,
+  gravestonedoji,
+  hammerpattern,
+  hangingman,
   IchimokuCloud,
   MACD,
   MFI,
+  morningdojistar,
+  morningstar,
   OBV,
   PSAR,
+  piercingline,
   ROC,
   RSI,
   SMA,
   Stochastic,
+  shootingstar,
+  threeblackcrows,
+  threewhitesoldiers,
+  tweezerbottom,
+  tweezertop,
   VWAP,
   WilliamsR,
 } from 'technicalindicators';
+import type { OHLCVCandle } from '../../data/yahoo-finance.js';
 
 // ─── RSI ─────────────────────────────────────────────────
 
@@ -200,7 +222,23 @@ export function calcVWAP(
   lows: number[],
   closes: number[],
   volumes: number[],
+  intradayCandles?: OHLCVCandle[],
 ): number | null {
+  // If intraday candles are provided and sufficient, use them for a proper session VWAP
+  if (intradayCandles && intradayCandles.length >= 5) {
+    const iHighs = intradayCandles.map((c) => c.high);
+    const iLows = intradayCandles.map((c) => c.low);
+    const iCloses = intradayCandles.map((c) => c.close);
+    const iVolumes = intradayCandles.map((c) => c.volume);
+    const result = VWAP.calculate({
+      high: iHighs,
+      low: iLows,
+      close: iCloses,
+      volume: iVolumes,
+    });
+    return result.length > 0 ? result[result.length - 1] : null;
+  }
+
   if (closes.length < 1) return null;
   const result = VWAP.calculate({ high: highs, low: lows, close: closes, volume: volumes });
   return result.length > 0 ? result[result.length - 1] : null;
@@ -326,4 +364,167 @@ export function calcVolumeRatio(volumes: number[], period = 20): number | null {
   const recentAvg = volumes.slice(-period).reduce((a, b) => a + b, 0) / period;
   const currentVol = volumes[volumes.length - 1];
   return recentAvg > 0 ? currentVol / recentAvg : null;
+}
+
+// ─── Performance Metrics ─────────────────────────────────
+
+export function calcPerfMetrics(candles: OHLCVCandle[]): {
+  perfWeek: number | null;
+  perfMonth: number | null;
+  perfQuarter: number | null;
+  perfYear: number | null;
+  relativeVolume: number | null;
+} {
+  const n = candles.length;
+  const last = candles[n - 1];
+
+  const pctChange = (from: OHLCVCandle): number => ((last.close - from.close) / from.close) * 100;
+
+  const perfWeek = n >= 6 ? pctChange(candles[n - 6]) : null;
+  const perfMonth = n >= 22 ? pctChange(candles[n - 22]) : null;
+  const perfQuarter = n >= 66 ? pctChange(candles[n - 66]) : null;
+  const perfYear = n >= 253 ? pctChange(candles[n - 253]) : null;
+
+  // relativeVolume: today volume / avg of last 20 candle volumes
+  const lookback = Math.min(20, n);
+  const slice = candles.slice(n - lookback);
+  const avgVol20 = lookback > 0 ? slice.reduce((s, c) => s + c.volume, 0) / lookback : 0;
+  const relativeVolume = avgVol20 > 0 && n > 0 ? last.volume / avgVol20 : null;
+
+  return { perfWeek, perfMonth, perfQuarter, perfYear, relativeVolume };
+}
+
+// ─── Compute All Indicators ───────────────────────────────
+
+export interface IndicatorSet {
+  vwap: number | null;
+  perfWeek: number | null;
+  perfMonth: number | null;
+  perfQuarter: number | null;
+  perfYear: number | null;
+  relativeVolume: number | null;
+}
+
+export function computeAllIndicators(
+  candles: OHLCVCandle[],
+  intradayCandles?: OHLCVCandle[],
+): IndicatorSet {
+  const highs = candles.map((c) => c.high);
+  const lows = candles.map((c) => c.low);
+  const closes = candles.map((c) => c.close);
+  const volumes = candles.map((c) => c.volume);
+
+  const vwap = calcVWAP(highs, lows, closes, volumes, intradayCandles);
+  const perf =
+    candles.length > 0
+      ? calcPerfMetrics(candles)
+      : {
+          perfWeek: null,
+          perfMonth: null,
+          perfQuarter: null,
+          perfYear: null,
+          relativeVolume: null,
+        };
+
+  return {
+    vwap,
+    ...perf,
+  };
+}
+
+// ─── Candlestick Pattern Detection ──────────────────────────────────
+
+export interface CandlestickPatterns {
+  bullish: string[];
+  bearish: string[];
+  neutral: string[];
+}
+
+/**
+ * Detect candlestick patterns on the last few candles using technicalindicators
+ * library functions plus manual NR7/InsideDay/OutsideDay detection.
+ * Each library function takes {open, high, low, close} arrays and returns boolean.
+ * We pass the last N candles needed for each pattern (most need 1-5).
+ */
+export function detectCandlestickPatterns(
+  opens: number[],
+  highs: number[],
+  lows: number[],
+  closes: number[],
+): CandlestickPatterns {
+  const result: CandlestickPatterns = { bullish: [], bearish: [], neutral: [] };
+
+  if (opens.length < 5) return result;
+
+  // Helper to slice last N candles for pattern detection
+  const last = (n: number) => ({
+    open: opens.slice(-n),
+    high: highs.slice(-n),
+    low: lows.slice(-n),
+    close: closes.slice(-n),
+  });
+
+  // ── Bullish patterns ──
+  if (bullishengulfingpattern(last(2))) result.bullish.push('Bullish Engulfing');
+  if (hammerpattern(last(5))) result.bullish.push('Hammer');
+  if (morningstar(last(3))) result.bullish.push('Morning Star');
+  if (morningdojistar(last(3))) result.bullish.push('Morning Doji Star');
+  if (threewhitesoldiers(last(3))) result.bullish.push('Three White Soldiers');
+  if (bullishharami(last(2))) result.bullish.push('Bullish Harami');
+  if (tweezerbottom(last(5))) result.bullish.push('Tweezer Bottom');
+  if (piercingline(last(2))) result.bullish.push('Piercing Line');
+  if (abandonedbaby(last(3))) result.bullish.push('Abandoned Baby');
+
+  // ── Bearish patterns ──
+  if (bearishengulfingpattern(last(2))) result.bearish.push('Bearish Engulfing');
+  if (shootingstar(last(5))) result.bearish.push('Shooting Star');
+  if (eveningstar(last(3))) result.bearish.push('Evening Star');
+  if (eveningdojistar(last(3))) result.bearish.push('Evening Doji Star');
+  if (threeblackcrows(last(3))) result.bearish.push('Three Black Crows');
+  if (bearishharami(last(2))) result.bearish.push('Bearish Harami');
+  if (tweezertop(last(5))) result.bearish.push('Tweezer Top');
+  if (darkcloudcover(last(2))) result.bearish.push('Dark Cloud Cover');
+  if (hangingman(last(5))) result.bearish.push('Hanging Man');
+
+  // ── Neutral / indecision patterns ──
+  if (doji(last(1))) result.neutral.push('Doji');
+  if (dragonflydoji(last(1))) result.neutral.push('Dragonfly Doji');
+  if (gravestonedoji(last(1))) result.neutral.push('Gravestone Doji');
+
+  // ── Manual patterns (simple math) ──
+
+  // NR7: today's range is the smallest of the last 7 bars
+  if (highs.length >= 7) {
+    const ranges = [];
+    for (let i = highs.length - 7; i < highs.length; i++) {
+      ranges.push(highs[i] - lows[i]);
+    }
+    const todayRange = ranges[ranges.length - 1];
+    const isNR7 = ranges.slice(0, -1).every((r) => todayRange <= r);
+    if (isNR7) result.neutral.push('NR7');
+  }
+
+  // Inside Day: today's range is within yesterday's range
+  if (highs.length >= 2) {
+    const todayHigh = highs[highs.length - 1];
+    const todayLow = lows[lows.length - 1];
+    const yesterdayHigh = highs[highs.length - 2];
+    const yesterdayLow = lows[lows.length - 2];
+    if (todayHigh < yesterdayHigh && todayLow > yesterdayLow) {
+      result.neutral.push('Inside Day');
+    }
+  }
+
+  // Outside Day: today's range engulfs yesterday's range
+  if (highs.length >= 2) {
+    const todayHigh = highs[highs.length - 1];
+    const todayLow = lows[lows.length - 1];
+    const yesterdayHigh = highs[highs.length - 2];
+    const yesterdayLow = lows[lows.length - 2];
+    if (todayHigh > yesterdayHigh && todayLow < yesterdayLow) {
+      result.neutral.push('Outside Day');
+    }
+  }
+
+  return result;
 }

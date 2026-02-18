@@ -279,6 +279,7 @@ TECHNICAL INDICATORS (Composite Score: ${t.score.toFixed(0)}/100):
 - Volume Ratio (vs 20d avg): ${fmt(t.volumeRatio)}
 - Support Level: ${fmt(t.support)}
 - Resistance Level: ${fmt(t.resistance)}
+${t.candlestickBullish || t.candlestickBearish || t.candlestickNeutral ? `- Candlestick Patterns:${t.candlestickBullish ? ` Bullish [${t.candlestickBullish}]` : ''}${t.candlestickBearish ? ` Bearish [${t.candlestickBearish}]` : ''}${t.candlestickNeutral ? ` Neutral [${t.candlestickNeutral}]` : ''}` : ''}
 
 FUNDAMENTAL METRICS (Composite Score: ${f.score.toFixed(0)}/100):
 - P/E Ratio: ${fmt(f.peRatio)}
@@ -401,6 +402,14 @@ function buildDetailedSymbol(sym: string, d: ResearchSymbolData): string {
     lines.push(
       `- Support: ${fmt(t.supportResistance?.support)} | Resistance: ${fmt(t.supportResistance?.resistance)}`,
     );
+    const cpBull = t.candlestickPatterns?.bullish ?? [];
+    const cpBear = t.candlestickPatterns?.bearish ?? [];
+    const cpNeut = t.candlestickPatterns?.neutral ?? [];
+    if (cpBull.length > 0 || cpBear.length > 0 || cpNeut.length > 0) {
+      lines.push(
+        `- Candlestick:${cpBull.length > 0 ? ` Bullish [${cpBull.join(', ')}]` : ''}${cpBear.length > 0 ? ` Bearish [${cpBear.join(', ')}]` : ''}${cpNeut.length > 0 ? ` Neutral [${cpNeut.join(', ')}]` : ''}`,
+      );
+    }
   }
 
   // Fundamental

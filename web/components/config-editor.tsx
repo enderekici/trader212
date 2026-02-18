@@ -1,16 +1,18 @@
 'use client';
 
 import { useState } from 'react';
-import { Check, Plus, X } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Plus, X } from 'lucide-react';
 import type { ConfigItem } from '@/lib/types';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/utils';
+import { HelpTooltip } from '@/components/HelpTooltip';
+import { HELP } from '@/lib/help-content';
 
 // Known enum options for select dropdowns
 const ENUM_OPTIONS: Record<string, string[]> = {
   't212.environment': ['demo', 'live'],
   't212.accountType': ['INVEST', 'ISA'],
-  'ai.provider': ['anthropic', 'ollama', 'openai-compatible'],
+  'ai.provider': ['anthropic', 'ollama', 'openai-compatible', 'rules'],
   'pairlist.mode': ['dynamic', 'static', 'hybrid'],
   'reports.schedule': ['daily', 'weekly', 'both'],
   'monitoring.weeklyReportDay': [
@@ -56,19 +58,72 @@ interface ConfigEditorProps {
   category: string;
   items: ConfigItem[];
   onUpdate?: () => void;
+  defaultOpen?: boolean;
+  onToggle?: () => void;
+  isQuick?: boolean;
 }
 
-export function ConfigEditor({ category, items, onUpdate }: ConfigEditorProps) {
+export function ConfigEditor({
+  category,
+  items,
+  onUpdate,
+  defaultOpen = false,
+  onToggle,
+  isQuick = false,
+}: ConfigEditorProps) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  function handleToggle() {
+    setOpen((v) => !v);
+    onToggle?.();
+  }
+
+  const isControlled = onToggle !== undefined;
+  const isOpen = isControlled ? defaultOpen : open;
+
   return (
-    <div className="rounded-lg border border-border bg-card">
-      <div className="border-b border-border px-4 py-3">
-        <h3 className="text-sm font-semibold">{category}</h3>
-      </div>
-      <div className="divide-y divide-border">
-        {items.map((item) => (
-          <ConfigRow key={item.key} item={item} onUpdate={onUpdate} />
-        ))}
-      </div>
+    <div
+      className={cn(
+        'rounded-lg border border-border bg-card',
+        isQuick && 'border-emerald-500/30 bg-emerald-500/5',
+      )}
+    >
+      {/* Header — always clickable to toggle */}
+      <button
+        type="button"
+        onClick={handleToggle}
+        className="flex w-full items-center justify-between px-4 py-3 text-left"
+      >
+        <div className="flex items-center gap-2">
+          {isOpen ? (
+            <ChevronDown className="h-4 w-4 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+          )}
+          <h3
+            className={cn(
+              'text-sm font-semibold',
+              isQuick && 'text-emerald-400',
+            )}
+          >
+            {category}
+          </h3>
+        </div>
+        {!isOpen && (
+          <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+            {items.length} {items.length === 1 ? 'setting' : 'settings'}
+          </span>
+        )}
+      </button>
+
+      {/* Items — only rendered when open */}
+      {isOpen && (
+        <div className="divide-y divide-border border-t border-border">
+          {items.map((item) => (
+            <ConfigRow key={item.key} item={item} onUpdate={onUpdate} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -108,6 +163,7 @@ function ConfigRow({ item, onUpdate }: { item: ConfigItem; onUpdate?: () => void
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium text-foreground">{shortKey}</span>
+            {HELP[item.key] && <HelpTooltip content={HELP[item.key]} />}
             {saved && (
               <span className="flex items-center gap-0.5 text-xs text-emerald-500">
                 <Check className="h-3 w-3" /> Saved

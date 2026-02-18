@@ -1,3 +1,4 @@
+import { getFundamentals, setFundamentals } from '../db/repositories/cache.js';
 import { createLogger } from '../utils/logger.js';
 import type { EarningsEvent, FinnhubClient, FinnhubNews, InsiderTx } from './finnhub.js';
 import type { MarketauxArticle, MarketauxClient } from './marketaux.js';
@@ -43,9 +44,6 @@ export interface ResearchDataOptions {
 }
 
 export class DataAggregator {
-  private fundamentalCache = new Map<string, { data: FundamentalData; expiresAt: number }>();
-  private fundamentalCacheTTL = 4 * 60 * 60 * 1000; // 4 hours
-
   constructor(
     private yahoo: YahooFinanceClient,
     private finnhub: FinnhubClient,
@@ -319,17 +317,21 @@ export class DataAggregator {
   }
 
   private async getCachedFundamentals(symbol: string): Promise<FundamentalData | null> {
-    const cached = this.fundamentalCache.get(symbol);
-    if (cached && cached.expiresAt > Date.now()) {
-      return cached.data;
+    // Check SQLite fundamental cache first (24h TTL)
+    try {
+      const cached = getFundamentals(symbol, 24);
+      if (cached) return cached;
+    } catch {
+      // DB may not be initialized yet on first run; fall through to live fetch
     }
 
     const data = await this.yahoo.getFundamentals(symbol);
     if (data) {
-      this.fundamentalCache.set(symbol, {
-        data,
-        expiresAt: Date.now() + this.fundamentalCacheTTL,
-      });
+      try {
+        setFundamentals(symbol, data, 24);
+      } catch {
+        // Non-fatal: cache write failure shouldn't block the trade loop
+      }
     }
 
     return data;

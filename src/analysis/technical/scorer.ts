@@ -3,6 +3,7 @@ import type { OHLCVCandle } from '../../data/yahoo-finance.js';
 import { createLogger } from '../../utils/logger.js';
 import {
   type BollingerResult,
+  type CandlestickPatterns,
   calcADX,
   calcATR,
   calcBollingerBands,
@@ -21,6 +22,7 @@ import {
   calcVolumeRatio,
   calcVWAP,
   calcWilliamsR,
+  detectCandlestickPatterns,
   type MACDResult,
   type StochasticResult,
   type SupportResistance,
@@ -42,6 +44,7 @@ const DEFAULT_TECHNICAL_WEIGHTS: Record<string, number> = {
   parabolicSar: 5,
   roc: 3,
   volumeRatio: 2,
+  candlestick: 8,
 };
 
 export interface TechnicalAnalysis {
@@ -66,6 +69,7 @@ export interface TechnicalAnalysis {
   forceIndex: number | null;
   volumeRatio: number | null;
   supportResistance: SupportResistance | null;
+  candlestickPatterns: CandlestickPatterns;
   score: number;
 }
 
@@ -75,6 +79,7 @@ export function scoreTechnicals(candles: OHLCVCandle[]): number {
 }
 
 export function analyzeTechnicals(candles: OHLCVCandle[]): TechnicalAnalysis {
+  const opens = candles.map((c) => c.open);
   const closes = candles.map((c) => c.close);
   const highs = candles.map((c) => c.high);
   const lows = candles.map((c) => c.low);
@@ -118,6 +123,7 @@ export function analyzeTechnicals(candles: OHLCVCandle[]): TechnicalAnalysis {
   const forceIndex = calcForceIndex(closes, volumes);
   const volumeRatio = calcVolumeRatio(volumes);
   const supportResistance = calcSupportResistance(highs, lows, srLookback);
+  const candlestickPatterns = detectCandlestickPatterns(opens, highs, lows, closes);
 
   const price = closes[closes.length - 1];
   const score = computeScore(price, {
@@ -138,9 +144,13 @@ export function analyzeTechnicals(candles: OHLCVCandle[]): TechnicalAnalysis {
     roc,
     volumeRatio,
     supportResistance,
+    candlestickPatterns,
   });
 
-  log.debug({ score, rsi, macdHist: macd?.histogram }, 'Technical analysis complete');
+  log.debug(
+    { score, rsi, macdHist: macd?.histogram, candlestickPatterns },
+    'Technical analysis complete',
+  );
 
   return {
     rsi,
@@ -164,6 +174,7 @@ export function analyzeTechnicals(candles: OHLCVCandle[]): TechnicalAnalysis {
     forceIndex,
     volumeRatio,
     supportResistance,
+    candlestickPatterns,
     score,
   };
 }
@@ -186,6 +197,7 @@ interface ScoreInputs {
   roc: number | null;
   volumeRatio: number | null;
   supportResistance: SupportResistance | null;
+  candlestickPatterns: CandlestickPatterns;
 }
 
 function computeScore(price: number, inputs: ScoreInputs): number {
@@ -315,6 +327,28 @@ function computeScore(price: number, inputs: ScoreInputs): number {
     // High volume = conviction signal (neutral direction)
     const volSignal = inputs.volumeRatio > 1.5 ? 60 : inputs.volumeRatio < 0.5 ? 40 : 50;
     add(volSignal, weights.volumeRatio);
+  }
+
+  // Candlestick patterns
+  {
+    const cp = inputs.candlestickPatterns;
+    const bullCount = cp.bullish.length;
+    const bearCount = cp.bearish.length;
+    const netBull = bullCount - bearCount;
+    if (bullCount > 0 || bearCount > 0) {
+      let cpSignal: number;
+      if (netBull > 0) {
+        // Net bullish: 70 base + 5 per extra bullish pattern, capped at 85
+        cpSignal = Math.min(70 + (netBull - 1) * 5, 85);
+      } else if (netBull < 0) {
+        // Net bearish: 30 base - 5 per extra bearish pattern, floored at 15
+        cpSignal = Math.max(30 + (netBull + 1) * 5, 15);
+      } else {
+        // Equal bullish and bearish = mixed
+        cpSignal = 50;
+      }
+      add(cpSignal, weights.candlestick);
+    }
   }
 
   if (totalWeight === 0) return 50;

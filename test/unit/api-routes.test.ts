@@ -32,6 +32,16 @@ vi.mock('../../src/db/index.js', () => ({
   getDb: () => mockDb,
 }));
 
+const mockWatchlistRepo = {
+  getAll: vi.fn((): unknown[] => []),
+  add: vi.fn((symbol: string, notes?: string) => ({ id: 1, symbol, notes: notes ?? null, addedAt: '2024-01-01T00:00:00.000Z' })),
+  remove: vi.fn(() => true),
+};
+
+vi.mock('../../src/db/repositories/research-watchlist.js', () => ({
+  getResearchWatchlistRepo: () => mockWatchlistRepo,
+}));
+
 vi.mock('../../src/db/schema.js', () => ({
   trades: { id: 'id', symbol: 'symbol', side: 'side', entryTime: 'entryTime', exitPrice: 'exitPrice' },
   signals: { id: 'id', symbol: 'symbol', timestamp: 'timestamp' },
@@ -40,6 +50,7 @@ vi.mock('../../src/db/schema.js', () => ({
   pairlistHistory: { timestamp: 'timestamp' },
   fundamentalCache: { symbol: 'symbol', fetchedAt: 'fetchedAt' },
   config: { key: 'key', category: 'category' },
+  aiResearch: { id: 'id', status: 'status' },
 }));
 
 vi.mock('../../src/utils/logger.js', () => ({
@@ -78,7 +89,7 @@ const mockConfigManager = {
   }),
   set: vi.fn(),
   getAll: vi.fn(),
-  getAllRaw: vi.fn(() => []),
+  getAllRaw: vi.fn((): Array<{ key: string; value: string; category: string; description: string | null }> => []),
   getByCategory: vi.fn(() => ({})),
   invalidateCache: vi.fn(),
 };
@@ -89,16 +100,16 @@ vi.mock('../../src/config/manager.js', () => ({
 
 const mockAuditLogger = {
   logControl: vi.fn(),
-  getRecent: vi.fn(() => []),
-  getEntriesForDate: vi.fn(() => []),
-  getByType: vi.fn(() => []),
+  getRecent: vi.fn((): unknown[] => []),
+  getEntriesForDate: vi.fn((): unknown[] => []),
+  getByType: vi.fn((): unknown[] => []),
 };
 
 vi.mock('../../src/monitoring/audit-log.js', () => ({
   getAuditLogger: () => mockAuditLogger,
 }));
 
-const mockPerformanceMetrics = {
+const mockPerformanceMetrics: Record<string, unknown> = {
   totalTrades: 0,
   winRate: 0,
   avgReturnPct: 0,
@@ -2013,6 +2024,246 @@ describe('api/routes', () => {
       const res = mockRes();
       handler(mockReq(), res);
       expect(res.json).toHaveBeenCalledWith({ stats: [] });
+    });
+  });
+
+  // ── Research Watchlist ──────────────────────────────────────────────────
+  describe('GET /api/research/watchlist', () => {
+    it('returns all watchlist entries', () => {
+      mockWatchlistRepo.getAll.mockReturnValue([
+        { id: 1, symbol: 'AAPL', notes: 'test', addedAt: '2024-01-01T00:00:00.000Z' },
+      ]);
+      const handler = findHandler(routes, 'get', '/api/research/watchlist');
+      const res = mockRes();
+      handler(mockReq(), res);
+      expect(res.json).toHaveBeenCalledWith([
+        { id: 1, symbol: 'AAPL', notes: 'test', addedAt: '2024-01-01T00:00:00.000Z' },
+      ]);
+    });
+
+    it('handles errors', () => {
+      mockWatchlistRepo.getAll.mockImplementation(() => { throw new Error('db error'); });
+      const handler = findHandler(routes, 'get', '/api/research/watchlist');
+      const res = mockRes();
+      handler(mockReq(), res);
+      expect(res.status).toHaveBeenCalledWith(500);
+    });
+  });
+
+  describe('POST /api/research/watchlist', () => {
+    it('adds a symbol to the watchlist', () => {
+      mockWatchlistRepo.add.mockReturnValue({ id: 2, symbol: 'MSFT', notes: null, addedAt: '2024-01-01T00:00:00.000Z' });
+      const handler = findHandler(routes, 'post', '/api/research/watchlist');
+      const res = mockRes();
+      handler(mockReq({ body: { symbol: 'MSFT' } }), res);
+      expect(res.status).toHaveBeenCalledWith(201);
+      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ symbol: 'MSFT' }));
+    });
+
+    it('returns 400 when symbol is missing', () => {
+      const handler = findHandler(routes, 'post', '/api/research/watchlist');
+      const res = mockRes();
+      handler(mockReq({ body: {} }), res);
+      expect(res.status).toHaveBeenCalledWith(400);
+    });
+
+    it('handles errors', () => {
+      mockWatchlistRepo.add.mockImplementation(() => { throw new Error('db error'); });
+      const handler = findHandler(routes, 'post', '/api/research/watchlist');
+      const res = mockRes();
+      handler(mockReq({ body: { symbol: 'AAPL' } }), res);
+      expect(res.status).toHaveBeenCalledWith(500);
+    });
+  });
+
+  describe('DELETE /api/research/watchlist/:symbol', () => {
+    it('removes a symbol from the watchlist', () => {
+      mockWatchlistRepo.remove.mockReturnValue(true);
+      const handler = findHandler(routes, 'delete', '/api/research/watchlist/:symbol');
+      const res = mockRes();
+      handler(mockReq({ params: { symbol: 'AAPL' } }), res);
+      expect(res.json).toHaveBeenCalledWith({ ok: true });
+    });
+
+    it('returns 404 when symbol not found', () => {
+      mockWatchlistRepo.remove.mockReturnValue(false);
+      const handler = findHandler(routes, 'delete', '/api/research/watchlist/:symbol');
+      const res = mockRes();
+      handler(mockReq({ params: { symbol: 'AAPL' } }), res);
+      expect(res.status).toHaveBeenCalledWith(404);
+    });
+
+    it('handles errors', () => {
+      mockWatchlistRepo.remove.mockImplementation(() => { throw new Error('db error'); });
+      const handler = findHandler(routes, 'delete', '/api/research/watchlist/:symbol');
+      const res = mockRes();
+      handler(mockReq({ params: { symbol: 'AAPL' } }), res);
+      expect(res.status).toHaveBeenCalledWith(500);
+    });
+  });
+
+  // ── Research Screener ───────────────────────────────────────────────────
+  describe('POST /api/research/screen', () => {
+    it('returns screener results from signals', () => {
+      const signalRow = { symbol: 'AAPL', technicalScore: 75, timestamp: '2024-01-15T10:00:00.000Z' };
+      mockDb.select.mockReturnValue(chain([signalRow]));
+      const handler = findHandler(routes, 'post', '/api/research/screen');
+      const res = mockRes();
+      handler(mockReq(), res);
+      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+        results: expect.any(Array),
+      }));
+    });
+
+    it('handles errors', () => {
+      mockDb.select.mockImplementation(() => { throw new Error('db err'); });
+      const handler = findHandler(routes, 'post', '/api/research/screen');
+      const res = mockRes();
+      handler(mockReq(), res);
+      expect(res.status).toHaveBeenCalledWith(500);
+    });
+  });
+
+  // ── Research Idea Status ────────────────────────────────────────────────
+  describe('POST /api/research/ideas/:id/status', () => {
+    it('updates status for valid value', () => {
+      mockDb.update.mockReturnValue(chain({ changes: 1 }));
+      const handler = findHandler(routes, 'post', '/api/research/ideas/:id/status');
+      const res = mockRes();
+      handler(mockReq({ params: { id: '1' }, body: { status: 'completed' } }), res);
+      expect(res.json).toHaveBeenCalledWith({ ok: true });
+    });
+
+    it('returns 400 for invalid status', () => {
+      const handler = findHandler(routes, 'post', '/api/research/ideas/:id/status');
+      const res = mockRes();
+      handler(mockReq({ params: { id: '1' }, body: { status: 'invalid' } }), res);
+      expect(res.status).toHaveBeenCalledWith(400);
+    });
+
+    it('handles errors', () => {
+      mockDb.update.mockImplementation(() => { throw new Error('db error'); });
+      const handler = findHandler(routes, 'post', '/api/research/ideas/:id/status');
+      const res = mockRes();
+      handler(mockReq({ params: { id: '1' }, body: { status: 'watching' } }), res);
+      expect(res.status).toHaveBeenCalledWith(500);
+    });
+  });
+
+  // ── AI Models ───────────────────────────────────────────────────────────
+  describe('GET /ai/models', () => {
+    it('returns parsed models list', () => {
+      mockConfigManager.get.mockImplementation((key: string) => {
+        if (key === 'ai.models') return JSON.stringify([{ id: 'gpt4', enabled: true }]);
+        return null;
+      });
+      const handler = findHandler(routes, 'get', '/ai/models');
+      const res = mockRes();
+      handler(mockReq(), res);
+      expect(res.json).toHaveBeenCalledWith([{ id: 'gpt4', enabled: true }]);
+    });
+
+    it('returns empty array when models not configured', () => {
+      mockConfigManager.get.mockReturnValue(null);
+      const handler = findHandler(routes, 'get', '/ai/models');
+      const res = mockRes();
+      handler(mockReq(), res);
+      expect(res.json).toHaveBeenCalledWith([]);
+    });
+
+    it('handles errors', () => {
+      mockConfigManager.get.mockImplementation(() => { throw new Error('cfg err'); });
+      const handler = findHandler(routes, 'get', '/ai/models');
+      const res = mockRes();
+      handler(mockReq(), res);
+      expect(res.status).toHaveBeenCalledWith(500);
+    });
+  });
+
+  describe('POST /ai/models', () => {
+    it('saves models list', async () => {
+      mockConfigManager.set.mockResolvedValue(undefined);
+      const handler = findHandler(routes, 'post', '/ai/models');
+      const res = mockRes();
+      await handler(mockReq({ body: [{ id: 'gpt4', enabled: true }] }), res);
+      expect(mockConfigManager.set).toHaveBeenCalledWith('ai.models', expect.any(String));
+      expect(res.json).toHaveBeenCalledWith({ ok: true, count: 1 });
+    });
+
+    it('returns 400 when body is not an array', async () => {
+      const handler = findHandler(routes, 'post', '/ai/models');
+      const res = mockRes();
+      await handler(mockReq({ body: { id: 'gpt4' } }), res);
+      expect(res.status).toHaveBeenCalledWith(400);
+    });
+
+    it('handles errors', async () => {
+      mockConfigManager.set.mockRejectedValue(new Error('fail'));
+      const handler = findHandler(routes, 'post', '/ai/models');
+      const res = mockRes();
+      await handler(mockReq({ body: [{ id: 'gpt4' }] }), res);
+      expect(res.status).toHaveBeenCalledWith(500);
+    });
+  });
+
+  describe('POST /ai/test', () => {
+    it('returns 404 when profileId not found', async () => {
+      mockConfigManager.get.mockReturnValue(JSON.stringify([{ id: 'other', enabled: true }]));
+      const handler = findHandler(routes, 'post', '/ai/test');
+      const res = mockRes();
+      await handler(mockReq({ body: { profileId: 'notexist' } }), res);
+      expect(res.status).toHaveBeenCalledWith(404);
+    });
+
+    it('handles outer errors', async () => {
+      mockConfigManager.get.mockImplementation(() => { throw new Error('fail'); });
+      const handler = findHandler(routes, 'post', '/ai/test');
+      const res = mockRes();
+      await handler(mockReq({ body: { profileId: 'gpt4' } }), res);
+      expect(res.status).toHaveBeenCalledWith(500);
+    });
+  });
+
+  // ── Setup Status ────────────────────────────────────────────────────────
+  describe('GET /setup/status', () => {
+    it('returns configured: true when there is an enabled model', () => {
+      mockConfigManager.get.mockImplementation((key: string) => {
+        if (key === 'ai.models') return JSON.stringify([{ enabled: true }]);
+        if (key === 'ai.provider') return 'anthropic';
+        return null;
+      });
+      const handler = findHandler(routes, 'get', '/setup/status');
+      const res = mockRes();
+      handler(mockReq(), res);
+      expect(res.json).toHaveBeenCalledWith({ configured: true });
+    });
+
+    it('returns configured: true when legacy provider is non-default', () => {
+      mockConfigManager.get.mockImplementation((key: string) => {
+        if (key === 'ai.models') return JSON.stringify([{ enabled: false }]);
+        if (key === 'ai.provider') return 'ollama';
+        return null;
+      });
+      const handler = findHandler(routes, 'get', '/setup/status');
+      const res = mockRes();
+      handler(mockReq(), res);
+      expect(res.json).toHaveBeenCalledWith({ configured: true });
+    });
+
+    it('returns configured: false when nothing is set up', () => {
+      mockConfigManager.get.mockReturnValue(null);
+      const handler = findHandler(routes, 'get', '/setup/status');
+      const res = mockRes();
+      handler(mockReq(), res);
+      expect(res.json).toHaveBeenCalledWith({ configured: false });
+    });
+
+    it('handles errors', () => {
+      mockConfigManager.get.mockImplementation(() => { throw new Error('fail'); });
+      const handler = findHandler(routes, 'get', '/setup/status');
+      const res = mockRes();
+      handler(mockReq(), res);
+      expect(res.status).toHaveBeenCalledWith(500);
     });
   });
 });

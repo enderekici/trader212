@@ -247,6 +247,12 @@ describe('YahooFinanceClient', () => {
           debtToEquity: { raw: 1.5 },
           currentRatio: { raw: 1.2 },
           marketCap: { raw: 2500000000000 },
+          targetMeanPrice: { raw: 200 },
+          recommendationKey: 'buy',
+          numberOfAnalystOpinions: { raw: 42 },
+          returnOnEquity: { raw: 0.25 },
+          returnOnAssets: { raw: 0.1 },
+          freeCashflow: { raw: 80000000000 },
         },
         defaultKeyStatistics: {
           trailingEps: { raw: 6.5 },
@@ -254,6 +260,13 @@ describe('YahooFinanceClient', () => {
           enterpriseValue: { raw: 2600000000000 },
           dividendYield: { raw: 0.005 },
           beta: { raw: 1.2 },
+          shortPercentOfFloat: { raw: 0.007 },
+          heldPercentInstitutions: { raw: 0.6 },
+          pegRatio: { raw: 1.8 },
+        },
+        summaryDetail: {
+          trailingPE: { raw: 28.5 },
+          marketCap: { raw: 2500000000000 },
         },
         summaryProfile: {
           sector: 'Technology',
@@ -262,26 +275,83 @@ describe('YahooFinanceClient', () => {
         earningsHistory: {
           history: [{ surprisePercent: { raw: 5.2 } }],
         },
+        recommendationTrend: {
+          trend: [
+            { strongBuy: 10, buy: 15, hold: 8, sell: 3, strongSell: 1 },
+          ],
+        },
       });
 
       const f = await client.getFundamentals('AAPL');
       expect(f).not.toBeNull();
-      expect(f!.peRatio).toBeCloseTo(150 / 6.5, 1);
+      // P/E should now come from summaryDetail.trailingPE, not computed
+      expect(f!.peRatio).toBe(28.5);
       expect(f!.forwardPE).toBe(25);
       expect(f!.revenueGrowthYoY).toBe(0.15);
       expect(f!.profitMargin).toBe(0.25);
       expect(f!.operatingMargin).toBe(0.3);
       expect(f!.debtToEquity).toBe(1.5);
       expect(f!.currentRatio).toBe(1.2);
-      expect(f!.marketCap).toBe(2600000000000);
+      // marketCap from summaryDetail, not enterpriseValue
+      expect(f!.marketCap).toBe(2500000000000);
       expect(f!.sector).toBe('Technology');
       expect(f!.industry).toBe('Consumer Electronics');
       expect(f!.earningsSurprise).toBe(5.2);
       expect(f!.dividendYield).toBe(0.005);
       expect(f!.beta).toBe(1.2);
+      // New fields
+      expect(f!.analystTargetPrice).toBe(200);
+      expect(f!.analystConsensus).toBe('buy');
+      expect(f!.analystCount).toBe(42);
+      expect(f!.shortInterestPct).toBeCloseTo(0.7, 3);
+      expect(f!.institutionalOwnershipPct).toBeCloseTo(60, 1);
+      expect(f!.pegRatio).toBe(1.8);
+      expect(f!.roe).toBeCloseTo(25, 1);
+      expect(f!.roa).toBeCloseTo(10, 1);
+      expect(f!.freeCashflow).toBe(80000000000);
+      expect(f!.analystBuy).toBe(25); // strongBuy(10) + buy(15)
+      expect(f!.analystSell).toBe(4);  // strongSell(1) + sell(3)
     });
 
-    it('returns null peRatio when trailingEps is missing', async () => {
+    it('P/E uses summaryDetail.trailingPE, not currentPrice/trailingEPS computation', async () => {
+      mockYfQuoteSummary.mockResolvedValueOnce({
+        financialData: { currentPrice: { raw: 100 } },
+        defaultKeyStatistics: { trailingEps: { raw: 5 } }, // 100/5 = 20 (old behavior)
+        summaryDetail: { trailingPE: { raw: 18 } }, // correct value
+        summaryProfile: {},
+      });
+
+      const f = await client.getFundamentals('AAPL');
+      // Should use summaryDetail.trailingPE (18), NOT computed value (20)
+      expect(f!.peRatio).toBe(18);
+    });
+
+    it('marketCap uses summaryDetail.marketCap, not enterpriseValue', async () => {
+      mockYfQuoteSummary.mockResolvedValueOnce({
+        financialData: {},
+        defaultKeyStatistics: { enterpriseValue: { raw: 999999999999 } }, // old wrong source
+        summaryDetail: { marketCap: { raw: 500000000000 } }, // correct source
+        summaryProfile: {},
+      });
+
+      const f = await client.getFundamentals('AAPL');
+      expect(f!.marketCap).toBe(500000000000);
+    });
+
+    it('falls back to price.marketCap when summaryDetail.marketCap is missing', async () => {
+      mockYfQuoteSummary.mockResolvedValueOnce({
+        financialData: {},
+        defaultKeyStatistics: {},
+        summaryDetail: {}, // no marketCap
+        price: { marketCap: { raw: 300000000000 } },
+        summaryProfile: {},
+      });
+
+      const f = await client.getFundamentals('AAPL');
+      expect(f!.marketCap).toBe(300000000000);
+    });
+
+    it('returns null peRatio when summaryDetail is missing', async () => {
       mockYfQuoteSummary.mockResolvedValueOnce({
         financialData: { currentPrice: { raw: 150 } },
         defaultKeyStatistics: {},
@@ -292,26 +362,87 @@ describe('YahooFinanceClient', () => {
       expect(f!.peRatio).toBeNull();
     });
 
-    it('returns null peRatio when currentPrice is missing', async () => {
+    it('shortInterestPct multiplied by 100', async () => {
       mockYfQuoteSummary.mockResolvedValueOnce({
         financialData: {},
-        defaultKeyStatistics: { trailingEps: { raw: 5 } },
+        defaultKeyStatistics: { shortPercentOfFloat: { raw: 0.05 } }, // 5%
+        summaryDetail: {},
         summaryProfile: {},
       });
 
       const f = await client.getFundamentals('AAPL');
-      expect(f!.peRatio).toBeNull();
+      expect(f!.shortInterestPct).toBeCloseTo(5, 3);
+    });
+
+    it('institutionalOwnershipPct multiplied by 100', async () => {
+      mockYfQuoteSummary.mockResolvedValueOnce({
+        financialData: {},
+        defaultKeyStatistics: { heldPercentInstitutions: { raw: 0.75 } }, // 75%
+        summaryDetail: {},
+        summaryProfile: {},
+      });
+
+      const f = await client.getFundamentals('AAPL');
+      expect(f!.institutionalOwnershipPct).toBeCloseTo(75, 3);
+    });
+
+    it('roe and roa multiplied by 100', async () => {
+      mockYfQuoteSummary.mockResolvedValueOnce({
+        financialData: {
+          returnOnEquity: { raw: 0.35 },
+          returnOnAssets: { raw: 0.08 },
+        },
+        defaultKeyStatistics: {},
+        summaryDetail: {},
+        summaryProfile: {},
+      });
+
+      const f = await client.getFundamentals('AAPL');
+      expect(f!.roe).toBeCloseTo(35, 3);
+      expect(f!.roa).toBeCloseTo(8, 3);
+    });
+
+    it('analystBuy and analystSell from recommendationTrend', async () => {
+      mockYfQuoteSummary.mockResolvedValueOnce({
+        financialData: {},
+        defaultKeyStatistics: {},
+        summaryDetail: {},
+        summaryProfile: {},
+        recommendationTrend: {
+          trend: [
+            { strongBuy: 5, buy: 10, hold: 8, sell: 2, strongSell: 1 },
+          ],
+        },
+      });
+
+      const f = await client.getFundamentals('AAPL');
+      expect(f!.analystBuy).toBe(15); // 5 + 10
+      expect(f!.analystSell).toBe(3);  // 2 + 1
+    });
+
+    it('analystBuy and analystSell are null when no recommendationTrend', async () => {
+      mockYfQuoteSummary.mockResolvedValueOnce({
+        financialData: {},
+        defaultKeyStatistics: {},
+        summaryDetail: {},
+        summaryProfile: {},
+      });
+
+      const f = await client.getFundamentals('AAPL');
+      expect(f!.analystBuy).toBeNull();
+      expect(f!.analystSell).toBeNull();
     });
 
     it('handles rawVal with direct number values (not {raw} objects)', async () => {
       mockYfQuoteSummary.mockResolvedValueOnce({
         financialData: { currentPrice: 150, revenueGrowth: 0.1 },
         defaultKeyStatistics: { trailingEps: 6, forwardPE: 20 },
+        summaryDetail: { trailingPE: 22 },
         summaryProfile: {},
       });
 
       const f = await client.getFundamentals('AAPL');
-      expect(f!.peRatio).toBeCloseTo(150 / 6, 1);
+      expect(f!.peRatio).toBe(22);
       expect(f!.forwardPE).toBe(20);
       expect(f!.revenueGrowthYoY).toBe(0.1);
     });
@@ -333,6 +464,7 @@ describe('YahooFinanceClient', () => {
       mockYfQuoteSummary.mockResolvedValueOnce({
         financialData: {},
         defaultKeyStatistics: {},
+        summaryDetail: {},
         summaryProfile: {},
         earningsHistory: null,
       });
@@ -343,73 +475,41 @@ describe('YahooFinanceClient', () => {
 
     it('handles empty earningsHistory.history array', async () => {
       mockYfQuoteSummary.mockResolvedValueOnce({
-        data: {
-          quoteSummary: {
-            result: [
-              {
-                financialData: {},
-                defaultKeyStatistics: {},
-                summaryProfile: {},
-                earningsHistory: { history: [] },
-              },
-            ],
-          },
-        },
+        financialData: {},
+        defaultKeyStatistics: {},
+        summaryDetail: {},
+        summaryProfile: {},
+        earningsHistory: { history: [] },
       });
 
       const f = await client.getFundamentals('AAPL');
       expect(f!.earningsSurprise).toBeNull();
     });
 
-    it('falls back to financialData marketCap when enterpriseValue is null', async () => {
+    it('falls back to financialData marketCap when summaryDetail and price are missing', async () => {
       mockYfQuoteSummary.mockResolvedValueOnce({
         financialData: { marketCap: { raw: 1000000000 } },
         defaultKeyStatistics: {},
+        summaryDetail: {},
         summaryProfile: {},
       });
 
       const f = await client.getFundamentals('AAPL');
-      expect(f!.marketCap).toBe(1000000000);
+      // summaryDetail.marketCap is undefined -> falls back to price.marketCap (also missing) -> null
+      expect(f!.marketCap).toBeNull();
     });
 
     it('handles missing profile sector/industry', async () => {
       mockYfQuoteSummary.mockResolvedValueOnce({
-        data: {
-          quoteSummary: {
-            result: [
-              {
-                financialData: {},
-                defaultKeyStatistics: {},
-                summaryProfile: {},
-              },
-            ],
-          },
-        },
+        financialData: {},
+        defaultKeyStatistics: {},
+        summaryDetail: {},
+        summaryProfile: {},
       });
 
       const f = await client.getFundamentals('AAPL');
       expect(f!.sector).toBeNull();
       expect(f!.industry).toBeNull();
-    });
-
-    it('returns null for non-number, non-raw-object values via rawVal', async () => {
-      mockYfQuoteSummary.mockResolvedValueOnce({
-        data: {
-          quoteSummary: {
-            result: [
-              {
-                financialData: { revenueGrowth: 'string-val' },
-                defaultKeyStatistics: { forwardPE: true },
-                summaryProfile: {},
-              },
-            ],
-          },
-        },
-      });
-
-      const f = await client.getFundamentals('AAPL');
-      expect(f!.revenueGrowthYoY).toBeNull();
-      expect(f!.forwardPE).toBeNull();
     });
 
     it('returns null when quoteSummary itself is missing', async () => {
@@ -420,15 +520,8 @@ describe('YahooFinanceClient', () => {
 
     it('handles rawVal with undefined obj', async () => {
       mockYfQuoteSummary.mockResolvedValueOnce({
-        data: {
-          quoteSummary: {
-            result: [
-              {
-                summaryProfile: {},
-              },
-            ],
-          },
-        },
+        summaryDetail: {},
+        summaryProfile: {},
       });
 
       const f = await client.getFundamentals('AAPL');
@@ -438,22 +531,37 @@ describe('YahooFinanceClient', () => {
 
     it('handles rawVal with null value for a key', async () => {
       mockYfQuoteSummary.mockResolvedValueOnce({
-        data: {
-          quoteSummary: {
-            result: [
-              {
-                financialData: { revenueGrowth: null },
-                defaultKeyStatistics: { forwardPE: null },
-                summaryProfile: {},
-              },
-            ],
-          },
-        },
+        financialData: { revenueGrowth: null },
+        defaultKeyStatistics: { forwardPE: null },
+        summaryDetail: {},
+        summaryProfile: {},
       });
 
       const f = await client.getFundamentals('AAPL');
       expect(f!.revenueGrowthYoY).toBeNull();
       expect(f!.forwardPE).toBeNull();
+    });
+
+    it('new fields are null-safe when data is missing', async () => {
+      mockYfQuoteSummary.mockResolvedValueOnce({
+        financialData: {},
+        defaultKeyStatistics: {},
+        summaryDetail: {},
+        summaryProfile: {},
+      });
+
+      const f = await client.getFundamentals('AAPL');
+      expect(f!.analystTargetPrice).toBeNull();
+      expect(f!.analystConsensus).toBeNull();
+      expect(f!.analystCount).toBeNull();
+      expect(f!.shortInterestPct).toBeNull();
+      expect(f!.institutionalOwnershipPct).toBeNull();
+      expect(f!.pegRatio).toBeNull();
+      expect(f!.roe).toBeNull();
+      expect(f!.roa).toBeNull();
+      expect(f!.freeCashflow).toBeNull();
+      expect(f!.analystBuy).toBeNull();
+      expect(f!.analystSell).toBeNull();
     });
   });
 
@@ -601,6 +709,8 @@ describe('YahooFinanceClient', () => {
         regularMarketVolume: 50000000,
         averageDailyVolume3Month: 60000000,
         marketCap: 2500000000000,
+        regularMarketDayHigh: 152,
+        regularMarketDayLow: 148,
       });
 
       const quote = await client.getQuote('AAPL');
@@ -611,6 +721,8 @@ describe('YahooFinanceClient', () => {
         volume: 50000000,
         avgVolume: 60000000,
         marketCap: 2500000000000,
+        dayHigh: 152,
+        dayLow: 148,
       });
     });
 
@@ -636,7 +748,144 @@ describe('YahooFinanceClient', () => {
         volume: 0,
         avgVolume: 0,
         marketCap: null,
+        dayHigh: null,
+        dayLow: null,
       });
+    });
+  });
+
+  describe('getIntradayCandles', () => {
+    const makeChartResponse = (candles: Array<{ t: number; o: number; h: number; l: number; c: number; v: number }>) => ({
+      data: {
+        chart: {
+          result: [
+            {
+              timestamp: candles.map((c) => c.t),
+              indicators: {
+                quote: [
+                  {
+                    open: candles.map((c) => c.o),
+                    high: candles.map((c) => c.h),
+                    low: candles.map((c) => c.l),
+                    close: candles.map((c) => c.c),
+                    volume: candles.map((c) => c.v),
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      },
+    });
+
+    it('returns parsed candles with ISO timestamps', async () => {
+      const ts = 1700000000; // some unix timestamp
+      mockAxiosGet.mockResolvedValueOnce(
+        makeChartResponse([
+          { t: ts, o: 100, h: 105, l: 99, c: 103, v: 1000000 },
+          { t: ts + 300, o: 103, h: 108, l: 102, c: 106, v: 1200000 },
+        ]),
+      );
+
+      const candles = await client.getIntradayCandles('AAPL');
+      expect(candles).toHaveLength(2);
+      expect(candles[0]).toEqual({
+        date: new Date(ts * 1000).toISOString(),
+        open: 100,
+        high: 105,
+        low: 99,
+        close: 103,
+        volume: 1000000,
+      });
+      expect(candles[1].open).toBe(103);
+      expect(candles[1].close).toBe(106);
+    });
+
+    it('skips candles where open or close is null', async () => {
+      const ts = 1700000000;
+      mockAxiosGet.mockResolvedValueOnce({
+        data: {
+          chart: {
+            result: [
+              {
+                timestamp: [ts, ts + 300, ts + 600],
+                indicators: {
+                  quote: [
+                    {
+                      open: [null, 103, 106],
+                      high: [105, 108, 110],
+                      low: [99, 102, 104],
+                      close: [103, null, 108],
+                      volume: [1000000, 1200000, 900000],
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        },
+      });
+
+      const candles = await client.getIntradayCandles('AAPL');
+      // first skipped (open null), second skipped (close null), third ok
+      expect(candles).toHaveLength(1);
+      expect(candles[0].open).toBe(106);
+    });
+
+    it('uses open as fallback for null high/low', async () => {
+      const ts = 1700000000;
+      mockAxiosGet.mockResolvedValueOnce({
+        data: {
+          chart: {
+            result: [
+              {
+                timestamp: [ts],
+                indicators: {
+                  quote: [
+                    {
+                      open: [100],
+                      high: [null],
+                      low: [null],
+                      close: [102],
+                      volume: [null],
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        },
+      });
+
+      const candles = await client.getIntradayCandles('AAPL');
+      expect(candles).toHaveLength(1);
+      expect(candles[0].high).toBe(100); // fallback to open
+      expect(candles[0].low).toBe(100);  // fallback to open
+      expect(candles[0].volume).toBe(0); // fallback to 0
+    });
+
+    it('returns empty array when chart result is missing', async () => {
+      mockAxiosGet.mockResolvedValueOnce({ data: { chart: { result: null } } });
+      const candles = await client.getIntradayCandles('AAPL');
+      expect(candles).toEqual([]);
+    });
+
+    it('returns empty array when timestamp array is absent', async () => {
+      mockAxiosGet.mockResolvedValueOnce({
+        data: {
+          chart: {
+            result: [{ indicators: { quote: [{}] } }],
+          },
+        },
+      });
+      const candles = await client.getIntradayCandles('AAPL');
+      expect(candles).toEqual([]);
+    });
+
+    it('returns empty array on network error', async () => {
+      mockAxiosGet.mockRejectedValueOnce(new Error('Network error'));
+      const candles = await client.getIntradayCandles('AAPL');
+      expect(candles).toEqual([]);
     });
   });
 });

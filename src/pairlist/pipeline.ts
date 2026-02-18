@@ -57,7 +57,16 @@ export class PairlistPipeline {
 
     const { YahooFinanceClient } = await import('../data/yahoo-finance.js');
     const yahoo = new YahooFinanceClient();
-    const quoteMap = new Map<string, { price: number; volume: number; marketCap: number | null }>();
+    const quoteMap = new Map<
+      string,
+      {
+        price: number;
+        volume: number;
+        marketCap: number | null;
+        dayHigh: number | null;
+        dayLow: number | null;
+      }
+    >();
 
     // Batch-fetch quotes with concurrency limiting
     const concurrency = 20;
@@ -74,6 +83,8 @@ export class PairlistPipeline {
             price: result.value.price,
             volume: result.value.avgVolume,
             marketCap: result.value.marketCap,
+            dayHigh: result.value.dayHigh,
+            dayLow: result.value.dayLow,
           });
         }
       }
@@ -106,6 +117,10 @@ export class PairlistPipeline {
         stock.price = quote.price;
         stock.volume = quote.volume;
         stock.marketCap = quote.marketCap ?? undefined;
+        // Compute daily volatility as percentage range: ((dayHigh - dayLow) / price) * 100
+        if (quote.dayHigh != null && quote.dayLow != null && quote.price > 0) {
+          stock.volatility = ((quote.dayHigh - quote.dayLow) / quote.price) * 100;
+        }
         enriched++;
       }
 

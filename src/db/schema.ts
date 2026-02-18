@@ -280,9 +280,19 @@ export const aiResearch = sqliteTable(
     aiModel: text('aiModel'),
     marketContext: text('marketContext'), // JSON: SPY, VIX, sector performance
     createdAt: text('createdAt').notNull(),
+    status: text('status').notNull().default('pending'),
+    // possible values: 'pending' | 'completed' | 'rejected' | 'watching'
   },
   (table) => [index('idx_research_ts').on(table.timestamp)],
 );
+
+// ── Research Watchlist ──────────────────────────────────────────────────
+export const researchWatchlist = sqliteTable('research_watchlist', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  symbol: text('symbol').notNull().unique(),
+  notes: text('notes'),
+  addedAt: text('added_at').notNull(),
+});
 
 // ── AI Model Performance Tracking ───────────────────────────────────────
 export const modelPerformance = sqliteTable(

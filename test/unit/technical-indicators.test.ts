@@ -13,6 +13,7 @@ import {
   calcMFI,
   calcOBV,
   calcParabolicSAR,
+  calcPerfMetrics,
   calcROC,
   calcRSI,
   calcSMA,
@@ -21,7 +22,9 @@ import {
   calcVWAP,
   calcVolumeRatio,
   calcWilliamsR,
+  computeAllIndicators,
 } from '../../src/analysis/technical/indicators.js';
+import type { OHLCVCandle } from '../../src/data/yahoo-finance.js';
 
 // ---------------------------------------------------------------------------
 // Helpers to generate realistic OHLCV data
@@ -504,6 +507,194 @@ describe('Technical Indicators', () => {
       const constant = Array(25).fill(1000);
       const vr = calcVolumeRatio(constant, 20);
       expect(vr).toBeCloseTo(1, 5);
+    });
+  });
+
+  // ── VWAP with intraday candles ───────────────────────────────────────────
+
+  describe('calcVWAP (intraday path)', () => {
+    function makeCandles(n: number, price = 100): OHLCVCandle[] {
+      return Array.from({ length: n }, (_, i) => ({
+        date: new Date(Date.now() + i * 300_000).toISOString(),
+        open: price,
+        high: price + 1,
+        low: price - 1,
+        close: price,
+        volume: 1_000_000,
+      }));
+    }
+
+    it('uses intraday candles when >= 5 bars provided', () => {
+      const intraday = makeCandles(10, 150);
+      const vwap = calcVWAP(large.highs, large.lows, large.closes, large.volumes, intraday);
+      expect(vwap).not.toBeNull();
+      // All candles have same price so VWAP should equal that price
+      expect(vwap).toBeCloseTo(150, 1);
+    });
+
+    it('falls back to daily when fewer than 5 intraday candles', () => {
+      const intraday = makeCandles(3, 999); // only 3 bars — should be ignored
+      const vwapWithFewIntraday = calcVWAP(large.highs, large.lows, large.closes, large.volumes, intraday);
+      const vwapDaily = calcVWAP(large.highs, large.lows, large.closes, large.volumes);
+      expect(vwapWithFewIntraday).toBeCloseTo(vwapDaily!, 5);
+    });
+
+    it('falls back to daily when intradayCandles is undefined', () => {
+      const vwapUndefined = calcVWAP(large.highs, large.lows, large.closes, large.volumes, undefined);
+      const vwapDaily = calcVWAP(large.highs, large.lows, large.closes, large.volumes);
+      expect(vwapUndefined).toBeCloseTo(vwapDaily!, 5);
+    });
+  });
+
+  // ── calcPerfMetrics ──────────────────────────────────────────────────────
+
+  describe('calcPerfMetrics', () => {
+    function makeCandles(n: number, startPrice = 100): OHLCVCandle[] {
+      return Array.from({ length: n }, (_, i) => ({
+        date: new Date(Date.now() + i * 86_400_000).toISOString(),
+        open: startPrice + i,
+        high: startPrice + i + 1,
+        low: startPrice + i - 1,
+        close: startPrice + i,
+        volume: 1_000_000,
+      }));
+    }
+
+    it('returns all nulls when candles array is empty', () => {
+      // calcPerfMetrics is called with non-empty array (guard is in computeAllIndicators)
+      // but if n<6 we still get nulls for most fields
+      const result = calcPerfMetrics(makeCandles(1));
+      expect(result.perfWeek).toBeNull();
+      expect(result.perfMonth).toBeNull();
+      expect(result.perfQuarter).toBeNull();
+      expect(result.perfYear).toBeNull();
+    });
+
+    it('computes perfWeek when >= 6 candles', () => {
+      const candles = makeCandles(10, 100);
+      const result = calcPerfMetrics(candles);
+      expect(result.perfWeek).not.toBeNull();
+      // close[9] = 109, close[4] = 104 → pct = (109-104)/104 * 100 ≈ 4.81
+      expect(result.perfWeek).toBeCloseTo(((109 - 104) / 104) * 100, 1);
+    });
+
+    it('computes perfMonth when >= 22 candles', () => {
+      const candles = makeCandles(25, 100);
+      const result = calcPerfMetrics(candles);
+      expect(result.perfMonth).not.toBeNull();
+    });
+
+    it('perfMonth is null when < 22 candles', () => {
+      const candles = makeCandles(21, 100);
+      const result = calcPerfMetrics(candles);
+      expect(result.perfMonth).toBeNull();
+    });
+
+    it('perfQuarter is null when < 66 candles', () => {
+      const candles = makeCandles(65, 100);
+      const result = calcPerfMetrics(candles);
+      expect(result.perfQuarter).toBeNull();
+    });
+
+    it('computes perfQuarter when >= 66 candles', () => {
+      const candles = makeCandles(70, 100);
+      const result = calcPerfMetrics(candles);
+      expect(result.perfQuarter).not.toBeNull();
+    });
+
+    it('perfYear is null when < 253 candles', () => {
+      const candles = makeCandles(252, 100);
+      const result = calcPerfMetrics(candles);
+      expect(result.perfYear).toBeNull();
+    });
+
+    it('computes perfYear when >= 253 candles', () => {
+      const candles = makeCandles(260, 100);
+      const result = calcPerfMetrics(candles);
+      expect(result.perfYear).not.toBeNull();
+    });
+
+    it('computes relativeVolume correctly', () => {
+      // Last candle has 2x the volume of the preceding 19
+      const candles = makeCandles(25, 100).map((c, i) => ({
+        ...c,
+        volume: i === 24 ? 2_000_000 : 1_000_000,
+      }));
+      const result = calcPerfMetrics(candles);
+      // avg of last 20 candles includes the 2M candle: (19 * 1M + 1 * 2M) / 20 = 1.05M
+      // relVol = 2M / 1.05M ≈ 1.905
+      expect(result.relativeVolume).not.toBeNull();
+      expect(result.relativeVolume).toBeCloseTo(2_000_000 / ((19 * 1_000_000 + 2_000_000) / 20), 3);
+    });
+
+    it('relativeVolume is null when all volumes are zero', () => {
+      const candles = makeCandles(10, 100).map((c) => ({ ...c, volume: 0 }));
+      const result = calcPerfMetrics(candles);
+      expect(result.relativeVolume).toBeNull();
+    });
+  });
+
+  // ── computeAllIndicators ─────────────────────────────────────────────────
+
+  describe('computeAllIndicators', () => {
+    function makeOHLCVCandles(n: number, startPrice = 100): OHLCVCandle[] {
+      return Array.from({ length: n }, (_, i) => ({
+        date: new Date(Date.now() + i * 86_400_000).toISOString(),
+        open: startPrice + i,
+        high: startPrice + i + 1,
+        low: startPrice + i - 1,
+        close: startPrice + i,
+        volume: 1_000_000,
+      }));
+    }
+
+    it('returns an object with all IndicatorSet keys', () => {
+      const candles = makeOHLCVCandles(30);
+      const result = computeAllIndicators(candles);
+      expect(result).toHaveProperty('vwap');
+      expect(result).toHaveProperty('perfWeek');
+      expect(result).toHaveProperty('perfMonth');
+      expect(result).toHaveProperty('perfQuarter');
+      expect(result).toHaveProperty('perfYear');
+      expect(result).toHaveProperty('relativeVolume');
+    });
+
+    it('returns all nulls when candles array is empty', () => {
+      const result = computeAllIndicators([]);
+      expect(result.vwap).toBeNull();
+      expect(result.perfWeek).toBeNull();
+      expect(result.perfMonth).toBeNull();
+      expect(result.perfQuarter).toBeNull();
+      expect(result.perfYear).toBeNull();
+      expect(result.relativeVolume).toBeNull();
+    });
+
+    it('passes intraday candles through to VWAP when provided', () => {
+      const candles = makeOHLCVCandles(30, 100);
+      // 10 intraday bars all at price 200 → intraday VWAP should be ~200
+      const intraday = Array.from({ length: 10 }, (_, i) => ({
+        date: new Date(Date.now() + i * 300_000).toISOString(),
+        open: 200,
+        high: 201,
+        low: 199,
+        close: 200,
+        volume: 500_000,
+      }));
+      const result = computeAllIndicators(candles, intraday);
+      expect(result.vwap).not.toBeNull();
+      expect(result.vwap).toBeCloseTo(200, 1);
+    });
+
+    it('computes vwap from daily candles when no intraday provided', () => {
+      const candles = makeOHLCVCandles(30, 100);
+      const result = computeAllIndicators(candles);
+      const expectedVwap = calcVWAP(
+        candles.map((c) => c.high),
+        candles.map((c) => c.low),
+        candles.map((c) => c.close),
+        candles.map((c) => c.volume),
+      );
+      expect(result.vwap).toBeCloseTo(expectedVwap!, 5);
     });
   });
 });

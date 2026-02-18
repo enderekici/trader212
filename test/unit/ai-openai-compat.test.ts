@@ -47,6 +47,7 @@ vi.mock('../../src/ai/decision-processor.js', () => ({
 }));
 
 import { OpenAICompatibleAdapter } from '../../src/ai/adapters/openai-compat.js';
+import type { ModelProfile } from '../../src/ai/adapters/openai-compat.js';
 import { configManager } from '../../src/config/manager.js';
 import { processAIDecision } from '../../src/ai/decision-processor.js';
 import type { AIContext } from '../../src/ai/agent.js';
@@ -67,6 +68,7 @@ function makeContext(): AIContext {
       williamsR: -80, mfi: 30, cci: -100, obv: 500000, vwap: 252,
       parabolicSar: 265, roc: -5, forceIndex: -3000, volumeRatio: 1.5,
       support: 240, resistance: 270, score: 30,
+      candlestickBullish: null, candlestickBearish: null, candlestickNeutral: null,
     },
     fundamental: {
       peRatio: 60, forwardPE: 45, revenueGrowthYoY: 0.2,
@@ -145,7 +147,7 @@ describe('OpenAICompatibleAdapter', () => {
         },
       );
       expect(processAIDecision).toHaveBeenCalledWith('{"decision":"SELL"}');
-      expect(result.decision).toBe('SELL');
+      expect(result?.decision).toBe('SELL');
     });
 
     it('omits Authorization header when apiKey is empty', async () => {
@@ -235,6 +237,36 @@ describe('OpenAICompatibleAdapter', () => {
 
       const adapter = new OpenAICompatibleAdapter();
       await expect(adapter.rawChat('sys', 'usr')).rejects.toThrow('Service unavailable');
+    });
+  });
+
+  describe('ModelProfile constructor', () => {
+    it('uses profile values instead of config when profile is provided', async () => {
+      const profile: ModelProfile = {
+        id: 'my-profile',
+        baseUrl: 'https://api.example.com/v1',
+        model: 'claude-3',
+        apiKey: 'profile-key',
+        weight: 5,
+        enabled: true,
+        timeoutSeconds: 30,
+      };
+
+      mockPost.mockResolvedValue({
+        data: { choices: [{ message: { content: '{"decision":"BUY"}' } }] },
+      });
+
+      const adapter = new OpenAICompatibleAdapter(profile);
+      await adapter.analyze(makeContext());
+
+      expect(mockPost).toHaveBeenCalledWith(
+        'https://api.example.com/v1/chat/completions',
+        expect.objectContaining({ model: 'claude-3' }),
+        expect.objectContaining({
+          headers: expect.objectContaining({ Authorization: 'Bearer profile-key' }),
+          timeout: 30000,
+        }),
+      );
     });
   });
 });

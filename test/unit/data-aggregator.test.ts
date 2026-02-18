@@ -1,5 +1,13 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
+// Mock DB cache repo so fundamental caching tests work without SQLite
+const mockGetFundamentals = vi.fn().mockReturnValue(null);
+const mockSetFundamentals = vi.fn();
+vi.mock('../../src/db/repositories/cache.js', () => ({
+  getFundamentals: (...args: unknown[]) => mockGetFundamentals(...args),
+  setFundamentals: (...args: unknown[]) => mockSetFundamentals(...args),
+}));
+
 vi.mock('../../src/config/manager.js', () => ({
   configManager: {
     get: vi.fn(),
@@ -90,6 +98,9 @@ describe('DataAggregator', () => {
         profitMargin: 0.25, operatingMargin: 0.3, debtToEquity: 1.2,
         currentRatio: 1.5, marketCap: 2500000000000, sector: 'Tech',
         industry: 'Electronics', earningsSurprise: 3.0, dividendYield: 0.005, beta: 1.1,
+        analystTargetPrice: null, analystConsensus: null, analystCount: null,
+        shortInterestPct: null, institutionalOwnershipPct: null, pegRatio: null,
+        roe: null, roa: null, freeCashflow: null, analystBuy: null, analystSell: null,
       };
       const finnhubNews: FinnhubNews[] = [
         { id: 1, category: 'company', datetime: 1700000000, headline: 'News', image: '', related: 'AAPL', source: 'Reuters', summary: 'Sum', url: 'http://example.com' },
@@ -324,6 +335,9 @@ describe('DataAggregator', () => {
         profitMargin: 0.25, operatingMargin: 0.3, debtToEquity: 1.2,
         currentRatio: 1.5, marketCap: 2500000000000, sector: 'Tech',
         industry: 'Electronics', earningsSurprise: 3.0, dividendYield: 0.005, beta: 1.1,
+        analystTargetPrice: null, analystConsensus: null, analystCount: null,
+        shortInterestPct: null, institutionalOwnershipPct: null, pegRatio: null,
+        roe: null, roa: null, freeCashflow: null, analystBuy: null, analystSell: null,
       };
       const finnhubNews: FinnhubNews[] = [
         { id: 1, category: 'company', datetime: 1700000000, headline: 'News', image: '', related: 'AAPL', source: 'Reuters', summary: 'Sum', url: 'http://example.com' },
@@ -445,14 +459,18 @@ describe('DataAggregator', () => {
         profitMargin: 0.25, operatingMargin: 0.3, debtToEquity: 1.2,
         currentRatio: 1.5, marketCap: 2500000000000, sector: 'Tech',
         industry: 'Electronics', earningsSurprise: 3.0, dividendYield: 0.005, beta: 1.1,
+        analystTargetPrice: null, analystConsensus: null, analystCount: null,
+        shortInterestPct: null, institutionalOwnershipPct: null, pegRatio: null,
+        roe: null, roa: null, freeCashflow: null, analystBuy: null, analystSell: null,
       };
       mockYahoo.getFundamentals.mockResolvedValue(fundamentals);
-
-      // First call
+      // First call: cache miss → fetch from yahoo
+      mockGetFundamentals.mockReturnValueOnce(null);
       await aggregator.getStockData('AAPL');
       expect(mockYahoo.getFundamentals).toHaveBeenCalledTimes(1);
 
-      // Second call - should use cache
+      // Second call: cache hit → return cached, don't call yahoo again
+      mockGetFundamentals.mockReturnValueOnce(fundamentals);
       await aggregator.getStockData('AAPL');
       expect(mockYahoo.getFundamentals).toHaveBeenCalledTimes(1);
     });
@@ -471,19 +489,19 @@ describe('DataAggregator', () => {
         profitMargin: 0.25, operatingMargin: 0.3, debtToEquity: 1.2,
         currentRatio: 1.5, marketCap: 2500000000000, sector: 'Tech',
         industry: 'Electronics', earningsSurprise: 3.0, dividendYield: 0.005, beta: 1.1,
+        analystTargetPrice: null, analystConsensus: null, analystCount: null,
+        shortInterestPct: null, institutionalOwnershipPct: null, pegRatio: null,
+        roe: null, roa: null, freeCashflow: null, analystBuy: null, analystSell: null,
       };
       mockYahoo.getFundamentals.mockResolvedValue(fundamentals);
 
-      // First call
+      // First call - cache miss → fetch
+      mockGetFundamentals.mockReturnValueOnce(null);
       await aggregator.getStockData('AAPL');
       expect(mockYahoo.getFundamentals).toHaveBeenCalledTimes(1);
 
-      // Manipulate cache to be expired
-      const cache = (aggregator as unknown as { fundamentalCache: Map<string, { data: FundamentalData; expiresAt: number }> }).fundamentalCache;
-      const entry = cache.get('AAPL');
-      if (entry) {
-        entry.expiresAt = Date.now() - 1;
-      }
+      // Simulate cache expiry by making getFundamentals return null again (cache miss)
+      mockGetFundamentals.mockReturnValueOnce(null);
 
       // Second call - cache expired, should fetch again
       await aggregator.getStockData('AAPL');

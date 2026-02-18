@@ -63,7 +63,7 @@ describe('db/index', () => {
   it('initDatabase calls exec to create tables', async () => {
     const mod = await import('../../src/db/index.js');
     mod.initDatabase('/tmp/test.db');
-    expect(mockExec).toHaveBeenCalledTimes(1);
+    expect(mockExec).toHaveBeenCalled();
     const sql = mockExec.mock.calls[0][0] as string;
     expect(sql).toContain('CREATE TABLE IF NOT EXISTS trades');
     expect(sql).toContain('CREATE TABLE IF NOT EXISTS signals');

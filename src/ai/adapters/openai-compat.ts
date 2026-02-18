@@ -7,7 +7,41 @@ import { buildAnalysisPrompt } from '../prompt-builder.js';
 
 const log = createLogger('ai-openai-compat');
 
+export interface ModelProfile {
+  id: string;
+  baseUrl: string;
+  model: string;
+  apiKey: string;
+  weight: number;
+  enabled: boolean;
+  timeoutSeconds?: number;
+}
+
 export class OpenAICompatibleAdapter implements AIAgent {
+  private profile: ModelProfile | null;
+
+  constructor(profile?: ModelProfile) {
+    this.profile = profile ?? null;
+  }
+
+  private getConfig(): { baseUrl: string; model: string; apiKey: string | null; timeout: number } {
+    if (this.profile) {
+      return {
+        baseUrl: this.profile.baseUrl,
+        model: this.profile.model,
+        apiKey: this.profile.apiKey || null,
+        timeout:
+          (this.profile.timeoutSeconds ?? configManager.get<number>('ai.timeoutSeconds')) * 1000,
+      };
+    }
+    return {
+      baseUrl: configManager.get<string>('ai.openaiCompat.baseUrl'),
+      model: configManager.get<string>('ai.openaiCompat.model'),
+      apiKey: configManager.get<string>('ai.openaiCompat.apiKey') || null,
+      timeout: configManager.get<number>('ai.timeoutSeconds') * 1000,
+    };
+  }
+
   private async postChat(
     baseUrl: string,
     payload: Record<string, unknown>,
@@ -62,11 +96,8 @@ export class OpenAICompatibleAdapter implements AIAgent {
   }
 
   async analyze(context: AIContext): Promise<AIDecision | null> {
-    const baseUrl = configManager.get<string>('ai.openaiCompat.baseUrl');
-    const model = configManager.get<string>('ai.openaiCompat.model');
-    const apiKey = configManager.get<string>('ai.openaiCompat.apiKey');
+    const { baseUrl, model, apiKey, timeout } = this.getConfig();
     const temperature = configManager.get<number>('ai.temperature');
-    const timeout = configManager.get<number>('ai.timeoutSeconds') * 1000;
 
     const { system, user } = buildAnalysisPrompt(context);
 
@@ -115,10 +146,7 @@ export class OpenAICompatibleAdapter implements AIAgent {
   }
 
   async rawChat(system: string, user: string): Promise<string> {
-    const baseUrl = configManager.get<string>('ai.openaiCompat.baseUrl');
-    const model = configManager.get<string>('ai.openaiCompat.model');
-    const apiKey = configManager.get<string>('ai.openaiCompat.apiKey');
-    const timeout = configManager.get<number>('ai.timeoutSeconds') * 1000;
+    const { baseUrl, model, apiKey, timeout } = this.getConfig();
 
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (apiKey) headers.Authorization = `Bearer ${apiKey}`;

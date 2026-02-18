@@ -2,7 +2,6 @@ import { desc, eq } from 'drizzle-orm';
 import type { RegimeAnalysis } from '../analysis/regime-detector.js';
 import type { TechnicalAnalysis } from '../analysis/technical/scorer.js';
 import { configManager } from '../config/manager.js';
-import type { WebResearcher } from '../data/web-researcher.js';
 import type { MarketContext } from '../data/yahoo-finance.js';
 import { getDb } from '../db/index.js';
 import { aiResearch } from '../db/schema.js';
@@ -69,13 +68,7 @@ export interface ResearchSymbolData {
 }
 
 /** @deprecated Use ResearchSymbolData instead */
-export interface SymbolSnapshot {
-  price: number;
-  change1dPct: number;
-  marketCap: number | null;
-  peRatio: number | null;
-  sector: string | null;
-}
+// SymbolSnapshot removed (was unused)
 
 /** Callback to fetch rich data for symbols */
 export type SymbolDataFetcher = (symbols: string[]) => Promise<Map<string, ResearchSymbolData>>;
@@ -83,7 +76,6 @@ export type SymbolDataFetcher = (symbols: string[]) => Promise<Map<string, Resea
 export class MarketResearcher {
   private aiAgent: AIAgent;
   private dataFetcher: SymbolDataFetcher | null = null;
-  private webResearcher: WebResearcher | null = null;
   private marketContext: MarketContext | null = null;
   private regimeAnalysis: RegimeAnalysis | null = null;
 
@@ -94,11 +86,6 @@ export class MarketResearcher {
   /** Set a data fetcher so research prompts include live market data */
   setDataFetcher(fetcher: SymbolDataFetcher): void {
     this.dataFetcher = fetcher;
-  }
-
-  /** Set a web researcher for thematic stock discovery via web search */
-  setWebResearcher(researcher: WebResearcher): void {
-    this.webResearcher = researcher;
   }
 
   /** Inject shared market context (SPY/VIX) fetched once before research */
@@ -134,23 +121,6 @@ export class MarketResearcher {
 
     const query = `Market Research: ${focus}`;
 
-    // Web search for thematic discovery when no specific symbols given
-    let webSearchContext = '';
-    if (!options?.symbols?.length && this.webResearcher) {
-      try {
-        const searchResults = await this.webResearcher.searchNews(
-          `${focus} stocks to buy ${new Date().getFullYear()}`,
-          5,
-        );
-        if (searchResults.length > 0) {
-          webSearchContext = `\nRecent web research findings:\n${searchResults.map((r) => `  - ${r}`).join('\n')}\n`;
-          log.info({ resultCount: searchResults.length }, 'Web search context added to research');
-        }
-      } catch (err) {
-        log.warn({ err }, 'Web search for research context failed');
-      }
-    }
-
     // Fetch enriched data for requested symbols
     let enrichedDataPrompt = '';
     if (options?.symbols?.length && this.dataFetcher) {
@@ -174,7 +144,7 @@ export class MarketResearcher {
       sectorFilter,
       symbolFilter,
       topCount,
-      enrichedDataPrompt + webSearchContext,
+      enrichedDataPrompt,
     );
 
     try {
@@ -185,6 +155,7 @@ export class MarketResearcher {
 
       // Parse AI response
       const results = this.parseResearchResponse(rawResponse, options?.symbols);
+      const parsedContext = this.parseResearchContext(rawResponse);
 
       // Store in DB with market context if available
       const db = getDb();
@@ -194,8 +165,8 @@ export class MarketResearcher {
         ? JSON.stringify({
             spyTrend: mc.marketTrend,
             vixLevel: mc.vixLevel ?? 0,
-            sectorRotation: '',
-            keyThemes: [],
+            sectorRotation: parsedContext.sectorRotation,
+            keyThemes: parsedContext.keyThemes,
           })
         : null;
 
@@ -393,5 +364,23 @@ Return ONLY the JSON, no other text.`;
       timeHorizon: String(r.timeHorizon ?? 'medium') as ResearchResult['timeHorizon'],
       sector: String(r.sector ?? 'Unknown'),
     }));
+  }
+
+  /** Extract sectorRotation and keyThemes from the raw AI research response JSON */
+  private parseResearchContext(rawText: string): { sectorRotation: string; keyThemes: string[] } {
+    let text = rawText.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+    const codeBlockMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
+    if (codeBlockMatch) text = codeBlockMatch[1].trim();
+    try {
+      const parsed = JSON.parse(text);
+      return {
+        sectorRotation: typeof parsed.sectorRotation === 'string' ? parsed.sectorRotation : '',
+        keyThemes: Array.isArray(parsed.keyThemes)
+          ? (parsed.keyThemes as string[]).map(String)
+          : [],
+      };
+    } catch {
+      return { sectorRotation: '', keyThemes: [] };
+    }
   }
 }

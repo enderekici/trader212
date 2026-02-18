@@ -15,6 +15,7 @@ import {
   Settings,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { SetupGuideButton } from '@/components/SetupGuideButton';
 
 const navItems = [
   { href: '/', label: 'Overview', icon: LayoutDashboard },
@@ -60,7 +61,8 @@ export function Sidebar() {
         })}
       </nav>
 
-      <div className="border-t border-border p-3">
+      <div className="border-t border-border p-3 space-y-1">
+        <SetupGuideButton />
         <div className="rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
           AI Trading Bot v1.0
         </div>

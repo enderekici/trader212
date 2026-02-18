@@ -30,6 +30,17 @@ export interface FundamentalData {
   earningsSurprise: number | null;
   dividendYield: number | null;
   beta: number | null;
+  analystTargetPrice: number | null;
+  analystConsensus: string | null;
+  analystCount: number | null;
+  shortInterestPct: number | null;
+  institutionalOwnershipPct: number | null;
+  pegRatio: number | null;
+  roe: number | null;
+  roa: number | null;
+  freeCashflow: number | null;
+  analystBuy: number | null;
+  analystSell: number | null;
 }
 
 export interface MarketContext {
@@ -46,6 +57,8 @@ export interface QuoteData {
   volume: number;
   avgVolume: number;
   marketCap: number | null;
+  dayHigh: number | null;
+  dayLow: number | null;
 }
 
 // Common headers for Yahoo Finance REST calls
@@ -112,7 +125,14 @@ export class YahooFinanceClient {
   async getFundamentals(symbol: string): Promise<FundamentalData | null> {
     try {
       const result = await yf.quoteSummary(symbol, {
-        modules: ['summaryProfile', 'financialData', 'defaultKeyStatistics', 'earningsHistory'],
+        modules: [
+          'summaryProfile',
+          'financialData',
+          'defaultKeyStatistics',
+          'earningsHistory',
+          'summaryDetail',
+          'recommendationTrend',
+        ],
       });
 
       if (!result) {
@@ -124,6 +144,8 @@ export class YahooFinanceClient {
       const stats = result.defaultKeyStatistics;
       const profile = result.summaryProfile;
       const earnings = result.earningsHistory;
+      const summary = result.summaryDetail;
+      const recTrend = result.recommendationTrend;
 
       const rawVal = (obj: Record<string, unknown> | undefined, key: string): number | null => {
         if (!obj) return null;
@@ -140,24 +162,67 @@ export class YahooFinanceClient {
         earningsSurprise = rawVal(latest, 'surprisePercent');
       }
 
+      // Analyst buy/sell counts from recommendation trend (most recent period)
+      let analystBuy: number | null = null;
+      let analystSell: number | null = null;
+      const trendArr = (recTrend as { trend?: Array<Record<string, unknown>> } | undefined)?.trend;
+      if (Array.isArray(trendArr) && trendArr.length > 0) {
+        const latest = trendArr[0];
+        const strongBuy = (latest.strongBuy as number) ?? 0;
+        const buy = (latest.buy as number) ?? 0;
+        const strongSell = (latest.strongSell as number) ?? 0;
+        const sell = (latest.sell as number) ?? 0;
+        analystBuy = strongBuy + buy;
+        analystSell = strongSell + sell;
+      }
+
+      const shortPct = rawVal(stats as Record<string, unknown> | undefined, 'shortPercentOfFloat');
+      const instPct = rawVal(
+        stats as Record<string, unknown> | undefined,
+        'heldPercentInstitutions',
+      );
+      const roe = rawVal(financial as Record<string, unknown> | undefined, 'returnOnEquity');
+      const roa = rawVal(financial as Record<string, unknown> | undefined, 'returnOnAssets');
+
       return {
-        peRatio:
-          rawVal(stats, 'trailingEps') && rawVal(financial, 'currentPrice')
-            ? (rawVal(financial, 'currentPrice') as number) /
-              (rawVal(stats, 'trailingEps') as number)
-            : null,
-        forwardPE: rawVal(stats, 'forwardPE'),
-        revenueGrowthYoY: rawVal(financial, 'revenueGrowth'),
-        profitMargin: rawVal(financial, 'profitMargins'),
-        operatingMargin: rawVal(financial, 'operatingMargins'),
-        debtToEquity: rawVal(financial, 'debtToEquity'),
-        currentRatio: rawVal(financial, 'currentRatio'),
-        marketCap: rawVal(stats, 'enterpriseValue') ?? rawVal(financial, 'marketCap'),
+        peRatio: rawVal(summary as Record<string, unknown> | undefined, 'trailingPE'),
+        forwardPE: rawVal(stats as Record<string, unknown> | undefined, 'forwardPE'),
+        revenueGrowthYoY: rawVal(financial as Record<string, unknown> | undefined, 'revenueGrowth'),
+        profitMargin: rawVal(financial as Record<string, unknown> | undefined, 'profitMargins'),
+        operatingMargin: rawVal(
+          financial as Record<string, unknown> | undefined,
+          'operatingMargins',
+        ),
+        debtToEquity: rawVal(financial as Record<string, unknown> | undefined, 'debtToEquity'),
+        currentRatio: rawVal(financial as Record<string, unknown> | undefined, 'currentRatio'),
+        marketCap:
+          rawVal(summary as Record<string, unknown> | undefined, 'marketCap') ??
+          rawVal(result.price as Record<string, unknown> | undefined, 'marketCap'),
         sector: profile?.sector ?? null,
         industry: profile?.industry ?? null,
         earningsSurprise,
-        dividendYield: rawVal(stats, 'dividendYield'),
-        beta: rawVal(stats, 'beta'),
+        dividendYield: rawVal(stats as Record<string, unknown> | undefined, 'dividendYield'),
+        beta: rawVal(stats as Record<string, unknown> | undefined, 'beta'),
+        analystTargetPrice: rawVal(
+          financial as Record<string, unknown> | undefined,
+          'targetMeanPrice',
+        ),
+        analystConsensus:
+          ((financial as Record<string, unknown> | undefined)?.recommendationKey as
+            | string
+            | null) ?? null,
+        analystCount: rawVal(
+          financial as Record<string, unknown> | undefined,
+          'numberOfAnalystOpinions',
+        ),
+        shortInterestPct: shortPct != null ? shortPct * 100 : null,
+        institutionalOwnershipPct: instPct != null ? instPct * 100 : null,
+        pegRatio: rawVal(stats as Record<string, unknown> | undefined, 'pegRatio'),
+        roe: roe != null ? roe * 100 : null,
+        roa: roa != null ? roa * 100 : null,
+        freeCashflow: rawVal(financial as Record<string, unknown> | undefined, 'freeCashflow'),
+        analystBuy,
+        analystSell,
       };
     } catch (err) {
       log.error({ symbol, err }, 'Failed to fetch fundamentals');
@@ -213,10 +278,64 @@ export class YahooFinanceClient {
         volume: result.regularMarketVolume ?? 0,
         avgVolume: result.averageDailyVolume3Month ?? 0,
         marketCap: result.marketCap ?? null,
+        dayHigh: result.regularMarketDayHigh ?? null,
+        dayLow: result.regularMarketDayLow ?? null,
       };
     } catch (err) {
       log.error({ symbol, err }, 'Failed to fetch quote');
       return null;
+    }
+  }
+
+  async getIntradayCandles(
+    symbol: string,
+    _intervalMinutes = 5,
+    _hours = 6.5,
+  ): Promise<OHLCVCandle[]> {
+    try {
+      const { data } = await axios.get(`${YAHOO_CHART_URL}/${encodeURIComponent(symbol)}`, {
+        params: {
+          interval: '5m',
+          range: '1d',
+          includePrePost: false,
+        },
+        headers: YF_HEADERS,
+        timeout: 15_000,
+      });
+
+      const result = data?.chart?.result?.[0];
+      if (!result?.timestamp || !result?.indicators?.quote?.[0]) {
+        log.warn({ symbol }, 'No intraday data returned');
+        return [];
+      }
+
+      const timestamps: number[] = result.timestamp;
+      const quote = result.indicators.quote[0];
+      const candles: OHLCVCandle[] = [];
+
+      for (let i = 0; i < timestamps.length; i++) {
+        const o = quote.open?.[i];
+        const h = quote.high?.[i];
+        const l = quote.low?.[i];
+        const c = quote.close?.[i];
+        const v = quote.volume?.[i];
+
+        if (o == null || c == null) continue;
+
+        candles.push({
+          date: new Date(timestamps[i] * 1000).toISOString(),
+          open: o,
+          high: h ?? o,
+          low: l ?? o,
+          close: c,
+          volume: v ?? 0,
+        });
+      }
+
+      return candles;
+    } catch (err) {
+      log.error({ symbol, err }, 'Failed to fetch intraday candles');
+      return [];
     }
   }
 }

@@ -210,6 +210,7 @@ export interface ResearchReport {
   results: ResearchResult[];
   marketContext: Record<string, unknown> | null;
   aiModel: string | null;
+  status?: string;
 }
 
 export interface AuditEntry {
@@ -238,4 +239,32 @@ export interface WSMessage {
   event: string;
   data: unknown;
   timestamp: string;
+}
+
+export interface WatchlistEntry {
+  id: number;
+  symbol: string;
+  notes: string | null;
+  addedAt: string;
+}
+
+export interface ScreenerResult {
+  symbol: string;
+  price: number | null;
+  sector: string | null;
+  marketCap: number | null;
+  peRatio: number | null;
+  score: number | null;
+  updatedAt: string;
+}
+
+export interface ResearchIdea {
+  id: number;
+  title: string;
+  symbols: string[];
+  content: string;
+  status: string;
+  createdAt: string;
+  sectorRotation?: string[];
+  keyThemes?: string[];
 }

@@ -9,6 +9,9 @@ const log = createLogger('finnhub');
 const BASE_URL = 'https://finnhub.io/api/v1';
 const RATE_LIMIT_PER_MINUTE = 60;
 
+// Shared across all FinnhubClient instances so multiple instances don't each allow 60/min
+const sharedCallTimestamps: number[] = [];
+
 export interface FinnhubQuote {
   c: number; // current price
   h: number; // high
@@ -55,7 +58,6 @@ export interface InsiderTx {
 
 export class FinnhubClient {
   private client: AxiosInstance;
-  private callTimestamps: number[] = [];
   private keyRotator: KeyRotator;
 
   constructor() {
@@ -81,16 +83,20 @@ export class FinnhubClient {
   private async rateLimit(): Promise<string | null> {
     const now = Date.now();
     const effectiveLimit = this.keyRotator.getEffectiveRateLimit() || RATE_LIMIT_PER_MINUTE;
-    this.callTimestamps = this.callTimestamps.filter((ts) => now - ts < 60_000);
+    // Filter in place using the shared array
+    const cutoff = now - 60_000;
+    while (sharedCallTimestamps.length > 0 && sharedCallTimestamps[0] < cutoff) {
+      sharedCallTimestamps.shift();
+    }
 
-    if (this.callTimestamps.length >= effectiveLimit) {
-      const oldest = this.callTimestamps[0];
+    if (sharedCallTimestamps.length >= effectiveLimit) {
+      const oldest = sharedCallTimestamps[0];
       const waitMs = 60_000 - (now - oldest) + 100;
       log.debug({ waitMs }, 'Rate limit reached, waiting');
       await sleep(waitMs);
     }
 
-    this.callTimestamps.push(Date.now());
+    sharedCallTimestamps.push(Date.now());
     return this.keyRotator.getKey();
   }
 
