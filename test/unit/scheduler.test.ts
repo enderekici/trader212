@@ -176,6 +176,30 @@ describe('Scheduler', () => {
       const jobs = scheduler.getScheduledJobs();
       expect(jobs[0].marketHoursOnly).toBe(false);
     });
+
+    it('skips job when previous run is still in progress', async () => {
+      let resolveHandler: () => void;
+      const handlerFinished = new Promise<void>((resolve) => {
+        resolveHandler = resolve;
+      });
+      // handler that hangs until we resolve it
+      const handler = vi.fn().mockReturnValue(new Promise<void>((resolve) => {
+        handlerFinished.then(resolve);
+      }));
+      scheduler.registerJob('mutex-job', '*/5 * * * *', handler, false);
+
+      const wrappedHandler = mockSchedule.mock.calls[0][1] as () => Promise<void>;
+
+      // First invocation starts but doesn't finish yet
+      const firstRun = wrappedHandler();
+      // Second invocation should be skipped
+      await wrappedHandler();
+      expect(handler).toHaveBeenCalledTimes(1);
+
+      // Let the first run finish
+      resolveHandler!();
+      await firstRun;
+    });
   });
 
   describe('start', () => {

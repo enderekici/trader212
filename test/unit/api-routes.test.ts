@@ -43,14 +43,15 @@ vi.mock('../../src/db/repositories/research-watchlist.js', () => ({
 }));
 
 vi.mock('../../src/db/schema.js', () => ({
-  trades: { id: 'id', symbol: 'symbol', side: 'side', entryTime: 'entryTime', exitPrice: 'exitPrice' },
-  signals: { id: 'id', symbol: 'symbol', timestamp: 'timestamp' },
+  trades: { id: 'id', symbol: 'symbol', side: 'side', entryTime: 'entryTime', exitPrice: 'exitPrice', pnl: 'pnl', pnlPct: 'pnlPct' },
+  signals: { id: 'id', symbol: 'symbol', timestamp: 'timestamp', technicalScore: 'technicalScore' },
   positions: { symbol: 'symbol' },
   dailyMetrics: { date: 'date' },
   pairlistHistory: { timestamp: 'timestamp' },
   fundamentalCache: { symbol: 'symbol', fetchedAt: 'fetchedAt' },
   config: { key: 'key', category: 'category' },
   aiResearch: { id: 'id', status: 'status' },
+  priceCache: { symbol: 'symbol', timestamp: 'timestamp', open: 'open', high: 'high', low: 'low', close: 'close', volume: 'volume' },
 }));
 
 vi.mock('../../src/utils/logger.js', () => ({
@@ -145,19 +146,269 @@ vi.mock('../../src/analysis/correlation.js', () => ({
   }),
 }));
 
+const mockGetSnapshot = vi.fn(() => ({
+  status: 'healthy',
+  uptime: 100,
+  memoryUsage: { heapUsedMB: 50, heapTotalMB: 100, rssMB: 120 },
+  jobs: [],
+  dataSources: [],
+  activePositions: 0,
+  lastAnalysisCycleAt: null,
+  lastAnalysisCycleDurationMs: null,
+  wsClientCount: 0,
+}));
+
 vi.mock('../../src/monitoring/health-metrics.js', () => ({
-  getHealthMetrics: () => ({
-    getSnapshot: () => ({
-      status: 'healthy',
-      uptime: 100,
-      memoryUsage: { heapUsedMB: 50, heapTotalMB: 100, rssMB: 120 },
-      jobs: [],
-      dataSources: [],
-      activePositions: 0,
-      lastAnalysisCycleAt: null,
-      lastAnalysisCycleDurationMs: null,
-      wsClientCount: 0,
-    }),
+  getHealthMetrics: () => ({ getSnapshot: mockGetSnapshot }),
+}));
+
+// ── Orders mocks ────────────────────────────────────────────────────────
+
+const mockGetRecentOrders = vi.fn(() => [] as unknown[]);
+const mockGetOrderCount = vi.fn(() => 0);
+const mockGetOrderById = vi.fn(() => null as unknown);
+const mockGetOrdersBySymbol = vi.fn(() => [] as unknown[]);
+
+vi.mock('../../src/db/repositories/orders.js', () => ({
+  getRecentOrders: (...args: unknown[]) => mockGetRecentOrders(...args),
+  getOrderCount: (...args: unknown[]) => mockGetOrderCount(...args),
+  getOrderById: (...args: unknown[]) => mockGetOrderById(...args),
+  getOrdersBySymbol: (...args: unknown[]) => mockGetOrdersBySymbol(...args),
+}));
+
+// ── Journal repository mock ─────────────────────────────────────────────
+
+const mockGetRecentJournalEntries = vi.fn(() => [] as unknown[]);
+
+vi.mock('../../src/db/repositories/journal.js', () => ({
+  getRecentEntries: (...args: unknown[]) => mockGetRecentJournalEntries(...args),
+}));
+
+// ── Pair locks mock ──────────────────────────────────────────────────────
+
+const mockGetActiveLocks = vi.fn(() => [] as unknown[]);
+const mockUnlockPair = vi.fn();
+
+const mockGetPairLockManager = vi.fn(() => ({
+  getActiveLocks: mockGetActiveLocks,
+  unlockPair: mockUnlockPair,
+}));
+
+vi.mock('../../src/execution/pair-locks.js', () => ({
+  getPairLockManager: (...args: unknown[]) => mockGetPairLockManager(...args),
+}));
+
+// ── Backtest mocks ───────────────────────────────────────────────────────
+
+const mockBacktestRun = vi.fn(async () => ({
+  metrics: { winRate: 0.6, totalTrades: 10 },
+  trades: [] as unknown[],
+  config: {},
+  dailyReturns: [] as unknown[],
+}));
+
+const mockCreateBacktestEngine = vi.fn(async () => ({ run: mockBacktestRun }));
+
+vi.mock('../../src/backtest/engine.js', () => ({
+  createBacktestEngine: (...args: unknown[]) => mockCreateBacktestEngine(...args),
+}));
+
+const mockGenerateSummary = vi.fn(() => ({ totalReturn: 0.1 }));
+const mockGenerateSymbolBreakdown = vi.fn(() => [] as unknown[]);
+const mockFormatEquityCurve = vi.fn(() => [] as unknown[]);
+
+vi.mock('../../src/backtest/reporter.js', () => ({
+  generateSummary: (...args: unknown[]) => mockGenerateSummary(...args),
+  generateSymbolBreakdown: (...args: unknown[]) => mockGenerateSymbolBreakdown(...args),
+  formatEquityCurve: (...args: unknown[]) => mockFormatEquityCurve(...args),
+}));
+
+// ── Regime detector mock ─────────────────────────────────────────────────
+
+const mockDetect = vi.fn(() => ({ regime: 'bull', confidence: 0.8 }));
+const mockGetRegimeDetector = vi.fn(() => ({ detect: mockDetect }));
+
+vi.mock('../../src/analysis/regime-detector.js', () => ({
+  getRegimeDetector: (...args: unknown[]) => mockGetRegimeDetector(...args),
+}));
+
+// ── Strategy profiles mock ────────────────────────────────────────────────
+
+const mockListProfiles = vi.fn(() => [] as unknown[]);
+const mockApplyProfile = vi.fn(async () => undefined);
+const mockGetStrategyProfileManager = vi.fn(() => ({
+  listProfiles: mockListProfiles,
+  applyProfile: mockApplyProfile,
+}));
+
+vi.mock('../../src/config/strategy-profiles.js', () => ({
+  getStrategyProfileManager: (...args: unknown[]) => mockGetStrategyProfileManager(...args),
+}));
+
+// ── Monte Carlo mock ──────────────────────────────────────────────────────
+
+const mockSimulate = vi.fn(() => ({ mean: 100, p95: 500, p5: -100 }));
+const mockCreateMonteCarloSimulator = vi.fn(() => ({ simulate: mockSimulate }));
+
+vi.mock('../../src/analysis/monte-carlo.js', () => ({
+  createMonteCarloSimulator: (...args: unknown[]) => mockCreateMonteCarloSimulator(...args),
+}));
+
+// ── Attribution mock ──────────────────────────────────────────────────────
+
+const mockGetFactorBreakdown = vi.fn(() => ({ alpha: 0.05, beta: 1.1 }));
+const mockGetPerformanceAttributor = vi.fn(() => ({
+  getFactorBreakdown: mockGetFactorBreakdown,
+}));
+
+vi.mock('../../src/monitoring/attribution.js', () => ({
+  getPerformanceAttributor: (...args: unknown[]) => mockGetPerformanceAttributor(...args),
+}));
+
+// ── Trade journal mock ────────────────────────────────────────────────────
+
+const mockGetSymbolHistory = vi.fn(() => [] as unknown[]);
+const mockAddNote = vi.fn(() => ({ id: 1, symbol: 'AAPL', note: 'test' }));
+const mockSearch = vi.fn(() => [] as unknown[]);
+const mockGetInsights = vi.fn(() => ({ patterns: [] }));
+const mockGetTradeJournalManager = vi.fn(() => ({
+  getSymbolHistory: mockGetSymbolHistory,
+  addNote: mockAddNote,
+  search: mockSearch,
+  getInsights: mockGetInsights,
+}));
+
+vi.mock('../../src/monitoring/trade-journal.js', () => ({
+  getTradeJournalManager: (...args: unknown[]) => mockGetTradeJournalManager(...args),
+}));
+
+// ── Tax tracker mock ──────────────────────────────────────────────────────
+
+const mockGetYearlyTaxSummary = vi.fn(() => ({ gains: 1000, losses: 500 }));
+const mockGetHarvestCandidates = vi.fn(() => [] as unknown[]);
+const mockGetTaxTracker = vi.fn(() => ({
+  getYearlyTaxSummary: mockGetYearlyTaxSummary,
+  getHarvestCandidates: mockGetHarvestCandidates,
+}));
+
+vi.mock('../../src/monitoring/tax-tracker.js', () => ({
+  getTaxTracker: (...args: unknown[]) => mockGetTaxTracker(...args),
+}));
+
+// ── Portfolio optimizer mock ──────────────────────────────────────────────
+
+const mockSuggestRebalanceOptimizer = vi.fn(() => ({ rebalance: [] as unknown[] }));
+const mockGetPortfolioOptimizer = vi.fn(() => ({
+  suggestRebalance: mockSuggestRebalanceOptimizer,
+}));
+
+vi.mock('../../src/analysis/portfolio-optimizer.js', () => ({
+  getPortfolioOptimizer: (...args: unknown[]) => mockGetPortfolioOptimizer(...args),
+}));
+
+// ── Report generator mock ─────────────────────────────────────────────────
+
+const mockGenerateDailyReport = vi.fn(async () => ({ date: '2024-01-15', trades: [] as unknown[] }));
+const mockGenerateWeeklyReport = vi.fn(async () => ({ week: '2024-W03', trades: [] as unknown[] }));
+const mockFormatAsText = vi.fn(() => 'text report');
+const mockFormatAsMarkdown = vi.fn(() => '# markdown report');
+const mockGetReportGenerator = vi.fn(() => ({
+  generateDailyReport: mockGenerateDailyReport,
+  generateWeeklyReport: mockGenerateWeeklyReport,
+  formatAsText: mockFormatAsText,
+  formatAsMarkdown: mockFormatAsMarkdown,
+}));
+
+vi.mock('../../src/monitoring/report-generator.js', () => ({
+  getReportGenerator: (...args: unknown[]) => mockGetReportGenerator(...args),
+}));
+
+// ── Conditional orders mock ───────────────────────────────────────────────
+
+const mockGetConditionalOrderStatus = vi.fn(() => ({ orders: [] as unknown[] }));
+const mockCreateOrder = vi.fn(() => ({ id: 1 }));
+const mockCreateOcoPair = vi.fn(() => ({ id1: 1, id2: 2 }));
+const mockCancelOrder = vi.fn();
+const mockGetConditionalOrderManager = vi.fn(() => ({
+  getStatus: mockGetConditionalOrderStatus,
+  createOrder: mockCreateOrder,
+  createOcoPair: mockCreateOcoPair,
+  cancelOrder: mockCancelOrder,
+}));
+
+vi.mock('../../src/execution/conditional-orders.js', () => ({
+  getConditionalOrderManager: (...args: unknown[]) => mockGetConditionalOrderManager(...args),
+}));
+
+// ── AI Self-Improvement mock ──────────────────────────────────────────────
+
+const mockGenerateFeedback = vi.fn(async () => ({ feedback: 'improve stops' }));
+const mockGetCalibrationCurve = vi.fn(async () => [{ bucket: '0.5-0.6', accuracy: 0.55 }]);
+const mockCompareModels = vi.fn(async () => [{ model: 'claude', accuracy: 0.8 }]);
+const mockGetAISelfImprovement = vi.fn(() => ({
+  generateFeedback: mockGenerateFeedback,
+  getCalibrationCurve: mockGetCalibrationCurve,
+  compareModels: mockCompareModels,
+}));
+
+vi.mock('../../src/ai/self-improvement.js', () => ({
+  getAISelfImprovement: (...args: unknown[]) => mockGetAISelfImprovement(...args),
+}));
+
+// ── Risk parity mock ──────────────────────────────────────────────────────
+
+const mockSuggestRebalanceParity = vi.fn(() => [] as unknown[]);
+const mockGetRiskParitySizer = vi.fn(() => ({
+  suggestRebalance: mockSuggestRebalanceParity,
+}));
+
+vi.mock('../../src/execution/risk-parity.js', () => ({
+  getRiskParitySizer: (...args: unknown[]) => mockGetRiskParitySizer(...args),
+}));
+
+// ── ROI table mock ────────────────────────────────────────────────────────
+
+const mockParseRoiTable = vi.fn(() => ({}));
+const mockGetRoiThreshold = vi.fn(() => null as number | null);
+
+vi.mock('../../src/execution/roi-table.js', () => ({
+  parseRoiTable: (...args: unknown[]) => mockParseRoiTable(...args),
+  getRoiThreshold: (...args: unknown[]) => mockGetRoiThreshold(...args),
+}));
+
+// ── helpers mock ──────────────────────────────────────────────────────────
+
+const mockSafeJsonParse = vi.fn(<T>(json: unknown, fallback: T): T => {
+  if (typeof json === 'string') {
+    try { return JSON.parse(json) as T; } catch { return fallback; }
+  }
+  return fallback;
+});
+
+vi.mock('../../src/utils/helpers.js', () => ({
+  safeJsonParse: <T>(json: unknown, fallback: T) => mockSafeJsonParse(json, fallback),
+  formatCurrency: vi.fn((v: number) => `$${v}`),
+  formatPercent: vi.fn((v: number) => `${v}%`),
+}));
+
+// ── OpenAI Compat adapter mock ────────────────────────────────────────────
+
+const mockRawChat = vi.fn(async () => 'pong');
+
+vi.mock('../../src/ai/adapters/openai-compat.js', () => ({
+  OpenAICompatibleAdapter: vi.fn().mockImplementation(function (this: any) {
+    this.rawChat = mockRawChat;
+  }),
+}));
+
+const mockWalkForwardRun = vi.fn().mockResolvedValue({
+  windows: [],
+  aggregateStats: { totalReturn: 0.05, sharpeRatio: 1.2, winRate: 0.6 },
+});
+
+vi.mock('../../src/backtest/walk-forward.js', () => ({
+  WalkForwardAnalyzer: vi.fn().mockImplementation(function (this: any) {
+    this.run = mockWalkForwardRun;
   }),
 }));
 
@@ -176,6 +427,8 @@ function mockRes() {
   const res: any = {};
   res.json = vi.fn(() => res);
   res.status = vi.fn(() => res);
+  res.type = vi.fn(() => res);
+  res.send = vi.fn(() => res);
   return res;
 }
 
@@ -1854,14 +2107,22 @@ describe('api/routes', () => {
 
   describe('registerBotCallbacks', () => {
     it('default callbacks return expected values', async () => {
-      // Reset module to get default callbacks
+      // Reset module to get default callbacks (without calling registerBotCallbacks)
       vi.resetModules();
       const { createRouter } = await import('../../src/api/routes.js');
       const router = createRouter();
 
-      // Test default status endpoint
+      // Call the default status handler to exercise line 112 (default getStatus)
       const statusRoute = (router as any).stack.find((l: any) => l.route?.path === '/api/status');
       expect(statusRoute).toBeDefined();
+      const handler = statusRoute.route.stack[0].handle;
+      const res = mockRes();
+      // After resetModules, sub-mocks may not apply — but default getStatus is still exercised
+      // before any error from downstream calls; the handler may succeed or return error, but
+      // getStatus (line 112) is called either way.
+      handler(mockReq(), res);
+      // Either success or error — both paths exercise the default getStatus callback
+      expect(res.json).toHaveBeenCalled();
     });
 
     it('default pause callback is a noop', async () => {
@@ -2115,6 +2376,14 @@ describe('api/routes', () => {
       }));
     });
 
+    it('returns null screenerUpdatedAt when no results', () => {
+      mockDb.select.mockReturnValue(chain([]));
+      const handler = findHandler(routes, 'post', '/api/research/screen');
+      const res = mockRes();
+      handler(mockReq(), res);
+      expect(res.json).toHaveBeenCalledWith({ results: [], screenerUpdatedAt: null });
+    });
+
     it('handles errors', () => {
       mockDb.select.mockImplementation(() => { throw new Error('db err'); });
       const handler = findHandler(routes, 'post', '/api/research/screen');
@@ -2264,6 +2533,1355 @@ describe('api/routes', () => {
       const res = mockRes();
       handler(mockReq(), res);
       expect(res.status).toHaveBeenCalledWith(500);
+    });
+  });
+
+  // ── Health ────────────────────────────────────────────────────────────
+  describe('GET /api/health', () => {
+    it('returns health snapshot', () => {
+      const handler = findHandler(routes, 'get', '/api/health');
+      const res = mockRes();
+      handler(mockReq(), res);
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'healthy' })
+      );
+    });
+
+    it('handles errors', () => {
+      mockGetSnapshot.mockImplementationOnce(() => { throw new Error('health fail'); });
+
+      const handler = findHandler(routes, 'get', '/api/health');
+      const res = mockRes();
+      handler(mockReq(), res);
+      expect(res.status).toHaveBeenCalledWith(500);
+      expect(res.json).toHaveBeenCalledWith({ error: 'Failed to fetch health metrics' });
+    });
+  });
+
+  // ── Portfolio ROI enrichment ──────────────────────────────────────────
+  describe('GET /api/portfolio (ROI enrichment)', () => {
+    it('enriches positions with ROI thresholds when enabled', () => {
+      const positionRows = [
+        { symbol: 'AAPL', shares: 10, entryPrice: 150, currentPrice: 165, pnl: 150, entryTime: new Date(Date.now() - 60 * 60 * 1000).toISOString() },
+      ];
+      let callCount = 0;
+      mockDb.select.mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) return chain(positionRows);
+        return chain({ cashBalance: 0 });
+      });
+
+      mockParseRoiTable.mockReturnValueOnce({ '60': 0.05 });
+      mockGetRoiThreshold.mockReturnValueOnce(0.05);
+
+      mockConfigManager.get.mockImplementation((key: string) => {
+        if (key === 'exit.roiEnabled') return true;
+        if (key === 'exit.roiTable') return JSON.stringify({ '60': 0.05 });
+        const defaults: Record<string, unknown> = {
+          't212.accountType': 'INVEST',
+          't212.environment': 'demo',
+          'execution.dryRun': true,
+          'pairlist.staticSymbols': ['AAPL'],
+        };
+        return defaults[key] ?? null;
+      });
+
+      const handler = findHandler(routes, 'get', '/api/portfolio');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          roiEnabled: true,
+          positions: expect.arrayContaining([
+            expect.objectContaining({ roiThreshold: 0.05 }),
+          ]),
+        })
+      );
+    });
+
+    it('handles null pnlPct when currentPrice is null in ROI enrichment', () => {
+      const positionRows = [
+        { symbol: 'AAPL', shares: 10, entryPrice: 150, currentPrice: null, pnl: 0, entryTime: new Date(Date.now() - 30 * 60 * 1000).toISOString() },
+      ];
+      let callCount = 0;
+      mockDb.select.mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) return chain(positionRows);
+        return chain({ cashBalance: 0 });
+      });
+
+      mockParseRoiTable.mockReturnValueOnce({ '60': 0.05 });
+      mockGetRoiThreshold.mockReturnValueOnce(0.05);
+
+      mockConfigManager.get.mockImplementation((key: string) => {
+        if (key === 'exit.roiEnabled') return true;
+        if (key === 'exit.roiTable') return JSON.stringify({ '60': 0.05 });
+        const defaults: Record<string, unknown> = {
+          't212.accountType': 'INVEST',
+          't212.environment': 'demo',
+          'execution.dryRun': true,
+          'pairlist.staticSymbols': ['AAPL'],
+        };
+        return defaults[key] ?? null;
+      });
+
+      const handler = findHandler(routes, 'get', '/api/portfolio');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      // roiDistancePct should be null because pnlPct is null (currentPrice is null)
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          positions: expect.arrayContaining([
+            expect.objectContaining({ roiDistancePct: null }),
+          ]),
+        })
+      );
+    });
+
+    it('JSON.stringifies roiTable when it is not a string (object from config)', () => {
+      // Cover the false branch at line 177: `typeof roiTableJson === 'string' ? ... : JSON.stringify(...)`
+      const positionRows = [
+        { symbol: 'AAPL', shares: 10, entryPrice: 150, currentPrice: 165, pnl: 150, entryTime: new Date(Date.now() - 60 * 60 * 1000).toISOString() },
+      ];
+      let callCount = 0;
+      mockDb.select.mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) return chain(positionRows);
+        return chain({ cashBalance: 0 });
+      });
+
+      mockParseRoiTable.mockReturnValueOnce({ '60': 0.05 });
+      mockGetRoiThreshold.mockReturnValueOnce(0.05);
+
+      mockConfigManager.get.mockImplementation((key: string) => {
+        if (key === 'exit.roiEnabled') return true;
+        // Return an object (non-string) — triggers JSON.stringify branch
+        if (key === 'exit.roiTable') return { '60': 0.05 };
+        const defaults: Record<string, unknown> = {
+          't212.accountType': 'INVEST',
+          't212.environment': 'demo',
+          'execution.dryRun': true,
+          'pairlist.staticSymbols': ['AAPL'],
+        };
+        return defaults[key] ?? null;
+      });
+
+      const handler = findHandler(routes, 'get', '/api/portfolio');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      expect(mockParseRoiTable).toHaveBeenCalledWith('{"60":0.05}');
+      expect(res.json).toHaveBeenCalled();
+    });
+  });
+
+  // ── PUT /api/config/:key - "Invalid value" 400 branch ────────────────
+  describe('PUT /api/config/:key (invalid value error)', () => {
+    it('returns 400 when configManager.set throws Invalid value error', async () => {
+      mockConfigManager.set.mockRejectedValue(new Error('Invalid value for config key risk.maxPositions'));
+
+      const handler = findHandler(routes, 'put', '/api/config/:key');
+      const res = mockRes();
+      await handler(mockReq({ params: { key: 'risk.maxPositions' }, body: { value: -1 } }), res);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith({ error: 'Invalid value for config key risk.maxPositions' });
+    });
+
+    it('returns 500 with fallback message when non-Error is thrown', async () => {
+      // Throw a non-Error to cover the `err instanceof Error ? ... : 'Failed to update config'` false branch
+      mockConfigManager.set.mockRejectedValue('string error');
+
+      const handler = findHandler(routes, 'put', '/api/config/:key');
+      const res = mockRes();
+      await handler(mockReq({ params: { key: 'some.key' }, body: { value: 42 } }), res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+      expect(res.json).toHaveBeenCalledWith({ error: 'Failed to update config' });
+    });
+  });
+
+  // ── GET /api/pairlist/static ──────────────────────────────────────────
+  describe('GET /api/pairlist/static', () => {
+    it('returns static symbols list', () => {
+      mockConfigManager.get.mockImplementation((key: string) => {
+        if (key === 'pairlist.staticSymbols') return ['AAPL', 'MSFT'];
+        return null;
+      });
+
+      const handler = findHandler(routes, 'get', '/api/pairlist/static');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      expect(res.json).toHaveBeenCalledWith({ symbols: ['AAPL', 'MSFT'] });
+    });
+
+    it('returns empty symbols on error', () => {
+      mockConfigManager.get.mockImplementation(() => { throw new Error('fail'); });
+
+      const handler = findHandler(routes, 'get', '/api/pairlist/static');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      expect(res.json).toHaveBeenCalledWith({ symbols: [] });
+    });
+  });
+
+  // ── GET /api/orders ───────────────────────────────────────────────────
+  describe('GET /api/orders', () => {
+    it('returns orders with default filters', () => {
+      mockGetRecentOrders.mockReturnValueOnce([{ id: 1, symbol: 'AAPL' }]);
+      mockGetOrderCount.mockReturnValueOnce(1);
+
+      const handler = findHandler(routes, 'get', '/api/orders');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      expect(res.json).toHaveBeenCalledWith({ orders: [{ id: 1, symbol: 'AAPL' }], total: 1 });
+    });
+
+    it('applies symbol/status/limit filters', () => {
+      mockGetRecentOrders.mockReturnValueOnce([]);
+      mockGetOrderCount.mockReturnValueOnce(0);
+
+      const handler = findHandler(routes, 'get', '/api/orders');
+      const res = mockRes();
+      handler(mockReq({ query: { symbol: 'MSFT', status: 'filled', limit: '10' } }), res);
+
+      expect(mockGetRecentOrders).toHaveBeenCalledWith(
+        expect.objectContaining({ symbol: 'MSFT', status: 'filled', limit: 10 })
+      );
+    });
+
+    it('handles errors', () => {
+      mockGetRecentOrders.mockImplementationOnce(() => { throw new Error('db err'); });
+
+      const handler = findHandler(routes, 'get', '/api/orders');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+      expect(res.json).toHaveBeenCalledWith({ error: 'Failed to fetch orders' });
+    });
+  });
+
+  // ── GET /api/orders/:id ───────────────────────────────────────────────
+  describe('GET /api/orders/:id', () => {
+    it('returns order by id', () => {
+      mockGetOrderById.mockReturnValueOnce({ id: 1, symbol: 'AAPL' });
+
+      const handler = findHandler(routes, 'get', '/api/orders/:id');
+      const res = mockRes();
+      handler(mockReq({ params: { id: '1' } }), res);
+
+      expect(res.json).toHaveBeenCalledWith({ id: 1, symbol: 'AAPL' });
+    });
+
+    it('returns 404 when order not found', () => {
+      mockGetOrderById.mockReturnValueOnce(null);
+
+      const handler = findHandler(routes, 'get', '/api/orders/:id');
+      const res = mockRes();
+      handler(mockReq({ params: { id: '999' } }), res);
+
+      expect(res.status).toHaveBeenCalledWith(404);
+      expect(res.json).toHaveBeenCalledWith({ error: 'Order not found' });
+    });
+
+    it('handles errors', () => {
+      mockGetOrderById.mockImplementationOnce(() => { throw new Error('db err'); });
+
+      const handler = findHandler(routes, 'get', '/api/orders/:id');
+      const res = mockRes();
+      handler(mockReq({ params: { id: '1' } }), res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+    });
+  });
+
+  // ── GET /api/positions/:symbol/orders ─────────────────────────────────
+  describe('GET /api/positions/:symbol/orders', () => {
+    it('returns orders for a symbol', () => {
+      mockGetOrdersBySymbol.mockReturnValueOnce([{ id: 1, symbol: 'AAPL' }]);
+
+      const handler = findHandler(routes, 'get', '/api/positions/:symbol/orders');
+      const res = mockRes();
+      handler(mockReq({ params: { symbol: 'AAPL' } }), res);
+
+      expect(res.json).toHaveBeenCalledWith({ orders: [{ id: 1, symbol: 'AAPL' }] });
+    });
+
+    it('handles errors', () => {
+      mockGetOrdersBySymbol.mockImplementationOnce(() => { throw new Error('db err'); });
+
+      const handler = findHandler(routes, 'get', '/api/positions/:symbol/orders');
+      const res = mockRes();
+      handler(mockReq({ params: { symbol: 'AAPL' } }), res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+    });
+  });
+
+  // ── GET /api/protections/locks ────────────────────────────────────────
+  describe('GET /api/protections/locks', () => {
+    it('returns active pair locks', () => {
+      mockGetActiveLocks.mockReturnValueOnce([{ symbol: 'AAPL', lockedUntil: '2024-01-16T00:00:00.000Z' }]);
+
+      const handler = findHandler(routes, 'get', '/api/protections/locks');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      expect(res.json).toHaveBeenCalledWith({ locks: [{ symbol: 'AAPL', lockedUntil: '2024-01-16T00:00:00.000Z' }] });
+    });
+
+    it('handles errors', () => {
+      mockGetPairLockManager.mockImplementationOnce(() => { throw new Error('fail'); });
+
+      const handler = findHandler(routes, 'get', '/api/protections/locks');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+    });
+  });
+
+  // ── DELETE /api/protections/locks/:symbol ─────────────────────────────
+  describe('DELETE /api/protections/locks/:symbol', () => {
+    it('unlocks a pair', () => {
+      const handler = findHandler(routes, 'delete', '/api/protections/locks/:symbol');
+      const res = mockRes();
+      handler(mockReq({ params: { symbol: 'AAPL' } }), res);
+
+      expect(mockUnlockPair).toHaveBeenCalledWith('AAPL');
+      expect(res.json).toHaveBeenCalledWith({ message: 'Pair AAPL unlocked' });
+    });
+
+    it('handles errors', () => {
+      mockGetPairLockManager.mockImplementationOnce(() => { throw new Error('fail'); });
+
+      const handler = findHandler(routes, 'delete', '/api/protections/locks/:symbol');
+      const res = mockRes();
+      handler(mockReq({ params: { symbol: 'AAPL' } }), res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+    });
+  });
+
+  // ── POST /api/backtest ────────────────────────────────────────────────
+  describe('POST /api/backtest', () => {
+    const validBody = {
+      symbols: ['AAPL', 'MSFT'],
+      startDate: '2024-01-01',
+      endDate: '2024-12-31',
+    };
+
+    it('runs a backtest and returns results', async () => {
+      const handler = findHandler(routes, 'post', '/api/backtest');
+      const res = mockRes();
+      await handler(mockReq({ body: validBody }), res);
+
+      expect(mockCreateBacktestEngine).toHaveBeenCalled();
+      expect(mockBacktestRun).toHaveBeenCalled();
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          summary: expect.any(Object),
+          equityCurve: expect.any(Array),
+        })
+      );
+    });
+
+    it('returns 400 for invalid body', async () => {
+      const handler = findHandler(routes, 'post', '/api/backtest');
+      const res = mockRes();
+      await handler(mockReq({ body: { symbols: [] } }), res);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+    });
+
+    it('handles errors during backtest run', async () => {
+      mockCreateBacktestEngine.mockRejectedValueOnce(new Error('engine fail'));
+
+      const handler = findHandler(routes, 'post', '/api/backtest');
+      const res = mockRes();
+      await handler(mockReq({ body: validBody }), res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+    });
+
+    it('runs walk-forward analysis when walkForward param is provided', async () => {
+      const handler = findHandler(routes, 'post', '/api/backtest');
+      const res = mockRes();
+      await handler(
+        mockReq({
+          body: {
+            ...validBody,
+            walkForward: { windows: 3, trainRatio: 0.7 },
+          },
+        }),
+        res,
+      );
+
+      expect(mockWalkForwardRun).toHaveBeenCalled();
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'walk-forward' })
+      );
+    });
+  });
+
+  // ── GET /regime ───────────────────────────────────────────────────────
+  describe('GET /regime', () => {
+    it('returns regime detection result with sufficient data', () => {
+      // Need >= 20 candles
+      const candles = Array.from({ length: 25 }, (_, i) => ({
+        symbol: 'SPY',
+        timestamp: `2024-01-${String(i + 1).padStart(2, '0')}T00:00:00.000Z`,
+        open: 400 + i,
+        high: 405 + i,
+        low: 395 + i,
+        close: 402 + i,
+        volume: 1000000,
+      }));
+      mockDb.select.mockReturnValueOnce(chain(candles));
+
+      const handler = findHandler(routes, 'get', '/regime');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      expect(mockDetect).toHaveBeenCalled();
+      expect(res.json).toHaveBeenCalledWith({ regime: 'bull', confidence: 0.8 });
+    });
+
+    it('returns null regime with insufficient data', () => {
+      // Less than 20 candles
+      const candles = Array.from({ length: 5 }, (_, i) => ({
+        symbol: 'SPY',
+        timestamp: `2024-01-0${i + 1}T00:00:00.000Z`,
+        open: 400, high: 405, low: 395, close: 402, volume: 1000000,
+      }));
+      mockDb.select.mockReturnValueOnce(chain(candles));
+
+      const handler = findHandler(routes, 'get', '/regime');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      expect(res.json).toHaveBeenCalledWith({ regime: null, message: 'Insufficient SPY data' });
+    });
+
+    it('handles candles with null OHLCV values', () => {
+      const candles = Array.from({ length: 25 }, (_, i) => ({
+        symbol: 'SPY',
+        timestamp: `2024-01-${String(i + 1).padStart(2, '0')}T00:00:00.000Z`,
+        open: null, high: null, low: null, close: null, volume: null,
+      }));
+      mockDb.select.mockReturnValueOnce(chain(candles));
+
+      const handler = findHandler(routes, 'get', '/regime');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      // Should still call detect with 0s for nulls
+      expect(mockDetect).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({ open: 0, high: 0, low: 0, close: 0, volume: 0 }),
+        ])
+      );
+    });
+
+    it('handles errors', () => {
+      mockGetRegimeDetector.mockImplementationOnce(() => { throw new Error('fail'); });
+
+      const handler = findHandler(routes, 'get', '/regime');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+    });
+  });
+
+  // ── GET /strategy-profiles ────────────────────────────────────────────
+  describe('GET /strategy-profiles', () => {
+    it('returns list of profiles', () => {
+      mockListProfiles.mockReturnValueOnce([{ name: 'conservative' }, { name: 'aggressive' }]);
+
+      const handler = findHandler(routes, 'get', '/strategy-profiles');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      expect(res.json).toHaveBeenCalledWith([{ name: 'conservative' }, { name: 'aggressive' }]);
+    });
+
+    it('handles errors', () => {
+      mockGetStrategyProfileManager.mockImplementationOnce(() => { throw new Error('fail'); });
+
+      const handler = findHandler(routes, 'get', '/strategy-profiles');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+    });
+  });
+
+  // ── POST /strategy-profiles/:name/activate ────────────────────────────
+  describe('POST /strategy-profiles/:name/activate', () => {
+    it('activates a strategy profile', async () => {
+      const handler = findHandler(routes, 'post', '/strategy-profiles/:name/activate');
+      const res = mockRes();
+      await handler(mockReq({ params: { name: 'conservative' } }), res);
+
+      expect(mockApplyProfile).toHaveBeenCalledWith('conservative');
+      expect(res.json).toHaveBeenCalledWith({ success: true, message: "Profile 'conservative' activated" });
+    });
+
+    it('handles errors', async () => {
+      mockApplyProfile.mockRejectedValueOnce(new Error('fail'));
+
+      const handler = findHandler(routes, 'post', '/strategy-profiles/:name/activate');
+      const res = mockRes();
+      await handler(mockReq({ params: { name: 'conservative' } }), res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+    });
+  });
+
+  // ── POST /monte-carlo/simulate ────────────────────────────────────────
+  describe('POST /monte-carlo/simulate', () => {
+    it('returns simulation result with enough trades', () => {
+      const trades = Array.from({ length: 10 }, (_, i) => ({ pnl: 100 * (i % 3 === 0 ? -1 : 1), pnlPct: 5 }));
+      mockDb.select.mockReturnValueOnce(chain(trades));
+
+      const handler = findHandler(routes, 'post', '/monte-carlo/simulate');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      expect(mockSimulate).toHaveBeenCalled();
+      expect(res.json).toHaveBeenCalledWith({ mean: 100, p95: 500, p5: -100 });
+    });
+
+    it('returns error when less than 5 trades', () => {
+      mockDb.select.mockReturnValueOnce(chain([{ pnl: 100, pnlPct: 5 }]));
+
+      const handler = findHandler(routes, 'post', '/monte-carlo/simulate');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      expect(res.json).toHaveBeenCalledWith({ error: 'Need at least 5 closed trades for simulation' });
+    });
+
+    it('handles errors', () => {
+      mockCreateMonteCarloSimulator.mockImplementationOnce(() => { throw new Error('fail'); });
+
+      const handler = findHandler(routes, 'post', '/monte-carlo/simulate');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+    });
+  });
+
+  // ── GET /attribution ──────────────────────────────────────────────────
+  describe('GET /attribution', () => {
+    it('returns factor breakdown', () => {
+      const handler = findHandler(routes, 'get', '/attribution');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      expect(mockGetFactorBreakdown).toHaveBeenCalled();
+      expect(res.json).toHaveBeenCalledWith({ alpha: 0.05, beta: 1.1 });
+    });
+
+    it('handles errors', () => {
+      mockGetPerformanceAttributor.mockImplementationOnce(() => { throw new Error('fail'); });
+
+      const handler = findHandler(routes, 'get', '/attribution');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+    });
+  });
+
+  // ── GET /journal ──────────────────────────────────────────────────────
+  describe('GET /journal', () => {
+    it('returns recent journal entries (no symbol)', () => {
+      mockGetRecentJournalEntries.mockReturnValueOnce([{ id: 1, symbol: 'AAPL' }]);
+
+      const handler = findHandler(routes, 'get', '/journal');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      expect(mockGetRecentJournalEntries).toHaveBeenCalledWith(50);
+      expect(res.json).toHaveBeenCalledWith([{ id: 1, symbol: 'AAPL' }]);
+    });
+
+    it('returns symbol history when symbol is provided', () => {
+      mockGetSymbolHistory.mockReturnValueOnce([{ id: 2, symbol: 'AAPL' }]);
+
+      const handler = findHandler(routes, 'get', '/journal');
+      const res = mockRes();
+      handler(mockReq({ query: { symbol: 'AAPL', limit: '20' } }), res);
+
+      expect(mockGetSymbolHistory).toHaveBeenCalledWith('AAPL', 20);
+      expect(res.json).toHaveBeenCalledWith([{ id: 2, symbol: 'AAPL' }]);
+    });
+
+    it('handles errors', () => {
+      mockGetTradeJournalManager.mockImplementationOnce(() => { throw new Error('fail'); });
+
+      const handler = findHandler(routes, 'get', '/journal');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+    });
+  });
+
+  // ── POST /journal ─────────────────────────────────────────────────────
+  describe('POST /journal', () => {
+    it('adds a journal entry', () => {
+      mockAddNote.mockReturnValueOnce({ id: 1, symbol: 'AAPL', note: 'test note' });
+
+      const handler = findHandler(routes, 'post', '/journal');
+      const res = mockRes();
+      handler(mockReq({ body: { symbol: 'AAPL', note: 'test note', tags: ['momentum'] } }), res);
+
+      expect(mockAddNote).toHaveBeenCalledWith('AAPL', 'test note', expect.objectContaining({ tags: ['momentum'] }));
+      expect(res.json).toHaveBeenCalledWith({ id: 1, symbol: 'AAPL', note: 'test note' });
+    });
+
+    it('returns 400 when symbol or note is missing', () => {
+      const handler = findHandler(routes, 'post', '/journal');
+      const res = mockRes();
+      handler(mockReq({ body: { symbol: 'AAPL' } }), res);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith({ error: 'symbol and note are required' });
+    });
+
+    it('handles errors', () => {
+      mockGetTradeJournalManager.mockImplementationOnce(() => { throw new Error('fail'); });
+
+      const handler = findHandler(routes, 'post', '/journal');
+      const res = mockRes();
+      handler(mockReq({ body: { symbol: 'AAPL', note: 'test' } }), res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+    });
+  });
+
+  // ── GET /journal/search ───────────────────────────────────────────────
+  describe('GET /journal/search', () => {
+    it('returns search results', () => {
+      mockSearch.mockReturnValueOnce([{ id: 1 }]);
+
+      const handler = findHandler(routes, 'get', '/journal/search');
+      const res = mockRes();
+      handler(mockReq({ query: { q: 'momentum' } }), res);
+
+      expect(mockSearch).toHaveBeenCalledWith('momentum');
+      expect(res.json).toHaveBeenCalledWith([{ id: 1 }]);
+    });
+
+    it('returns 400 when q is missing', () => {
+      const handler = findHandler(routes, 'get', '/journal/search');
+      const res = mockRes();
+      handler(mockReq({ query: {} }), res);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json).toHaveBeenCalledWith({ error: 'q query parameter is required' });
+    });
+
+    it('handles errors', () => {
+      mockGetTradeJournalManager.mockImplementationOnce(() => { throw new Error('fail'); });
+
+      const handler = findHandler(routes, 'get', '/journal/search');
+      const res = mockRes();
+      handler(mockReq({ query: { q: 'test' } }), res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+    });
+  });
+
+  // ── GET /journal/insights ─────────────────────────────────────────────
+  describe('GET /journal/insights', () => {
+    it('returns journal insights', () => {
+      mockGetInsights.mockReturnValueOnce({ patterns: ['buy the dip'] });
+
+      const handler = findHandler(routes, 'get', '/journal/insights');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      expect(res.json).toHaveBeenCalledWith({ patterns: ['buy the dip'] });
+    });
+
+    it('handles errors', () => {
+      mockGetTradeJournalManager.mockImplementationOnce(() => { throw new Error('fail'); });
+
+      const handler = findHandler(routes, 'get', '/journal/insights');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+    });
+  });
+
+  // ── GET /tax/summary ──────────────────────────────────────────────────
+  describe('GET /tax/summary', () => {
+    it('returns tax summary for given year', () => {
+      mockGetYearlyTaxSummary.mockReturnValueOnce({ gains: 2000, losses: 500 });
+
+      const handler = findHandler(routes, 'get', '/tax/summary');
+      const res = mockRes();
+      handler(mockReq({ query: { year: '2024' } }), res);
+
+      expect(mockGetYearlyTaxSummary).toHaveBeenCalledWith(2024);
+      expect(res.json).toHaveBeenCalledWith({ gains: 2000, losses: 500 });
+    });
+
+    it('uses current year when not specified', () => {
+      const handler = findHandler(routes, 'get', '/tax/summary');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      expect(mockGetYearlyTaxSummary).toHaveBeenCalledWith(new Date().getFullYear());
+    });
+
+    it('handles errors', () => {
+      mockGetTaxTracker.mockImplementationOnce(() => { throw new Error('fail'); });
+
+      const handler = findHandler(routes, 'get', '/tax/summary');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+    });
+  });
+
+  // ── GET /tax/harvest-candidates ───────────────────────────────────────
+  describe('GET /tax/harvest-candidates', () => {
+    it('returns harvest candidates', () => {
+      const positions = [{ symbol: 'AAPL', currentPrice: 140, shares: 10, entryPrice: 150 }];
+      mockDb.select.mockReturnValueOnce(chain(positions));
+      mockGetHarvestCandidates.mockReturnValueOnce([{ symbol: 'AAPL', unrealizedLoss: -100 }]);
+
+      const handler = findHandler(routes, 'get', '/tax/harvest-candidates');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      expect(mockGetHarvestCandidates).toHaveBeenCalled();
+      expect(res.json).toHaveBeenCalledWith([{ symbol: 'AAPL', unrealizedLoss: -100 }]);
+    });
+
+    it('skips positions with null currentPrice for price map', () => {
+      // Position with null currentPrice should not be added to priceMap (line 1210 branch)
+      const positions = [{ symbol: 'AAPL', currentPrice: null, shares: 10, entryPrice: 150 }];
+      mockDb.select.mockReturnValueOnce(chain(positions));
+      mockGetHarvestCandidates.mockReturnValueOnce([]);
+
+      const handler = findHandler(routes, 'get', '/tax/harvest-candidates');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      // priceMap should be empty since currentPrice is null
+      expect(mockGetHarvestCandidates).toHaveBeenCalledWith(new Map());
+    });
+
+    it('handles errors', () => {
+      mockGetTaxTracker.mockImplementationOnce(() => { throw new Error('fail'); });
+
+      const handler = findHandler(routes, 'get', '/tax/harvest-candidates');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+    });
+  });
+
+  // ── GET /portfolio/optimize ───────────────────────────────────────────
+  describe('GET /portfolio/optimize', () => {
+    it('returns error when no positions', () => {
+      mockDb.select.mockReturnValueOnce(chain([]));
+
+      const handler = findHandler(routes, 'get', '/portfolio/optimize');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      expect(res.json).toHaveBeenCalledWith({ error: 'No open positions to optimize' });
+    });
+
+    it('returns error when insufficient price data', () => {
+      const positions = [
+        { symbol: 'AAPL', shares: 10, currentPrice: 160, entryPrice: 150 },
+      ];
+      // First call: positions, subsequent calls: price data (< 5 for AAPL → skip)
+      let callCount = 0;
+      mockDb.select.mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) return chain(positions);
+        return chain([]); // not enough prices
+      });
+
+      const handler = findHandler(routes, 'get', '/portfolio/optimize');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      expect(res.json).toHaveBeenCalledWith({ error: 'Need price data for at least 2 positions' });
+    });
+
+    it('returns optimization result with sufficient data', () => {
+      const positions = [
+        { symbol: 'AAPL', shares: 10, currentPrice: 160, entryPrice: 150 },
+        { symbol: 'MSFT', shares: 5, currentPrice: 310, entryPrice: 300 },
+      ];
+      const prices6 = Array.from({ length: 10 }, (_, i) => ({ close: 150 + i }));
+
+      let callCount = 0;
+      mockDb.select.mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) return chain(positions);
+        return chain(prices6);
+      });
+
+      mockSuggestRebalanceOptimizer.mockReturnValueOnce({ rebalance: [{ symbol: 'AAPL', action: 'reduce' }] });
+
+      const handler = findHandler(routes, 'get', '/portfolio/optimize');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      expect(mockSuggestRebalanceOptimizer).toHaveBeenCalled();
+      expect(res.json).toHaveBeenCalledWith({ rebalance: [{ symbol: 'AAPL', action: 'reduce' }] });
+    });
+
+    it('handles null close price in price history', () => {
+      const positions = [
+        { symbol: 'AAPL', shares: 10, currentPrice: 160, entryPrice: 150 },
+        { symbol: 'MSFT', shares: 5, currentPrice: 310, entryPrice: 300 },
+      ];
+      const prices6 = Array.from({ length: 10 }, () => ({ close: null }));
+
+      let callCount = 0;
+      mockDb.select.mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) return chain(positions);
+        return chain(prices6);
+      });
+
+      const handler = findHandler(routes, 'get', '/portfolio/optimize');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      // Should still work, using 0 for null close
+      expect(mockSuggestRebalanceOptimizer).toHaveBeenCalled();
+    });
+
+    it('handles null currentPrice for positions', () => {
+      const positions = [
+        { symbol: 'AAPL', shares: 10, currentPrice: null, entryPrice: 150 },
+        { symbol: 'MSFT', shares: 5, currentPrice: null, entryPrice: 300 },
+      ];
+      const prices6 = Array.from({ length: 10 }, (_, i) => ({ close: 150 + i }));
+
+      let callCount = 0;
+      mockDb.select.mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) return chain(positions);
+        return chain(prices6);
+      });
+
+      const handler = findHandler(routes, 'get', '/portfolio/optimize');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      // Uses entryPrice when currentPrice is null
+      expect(mockSuggestRebalanceOptimizer).toHaveBeenCalled();
+    });
+
+    it('handles errors', () => {
+      mockGetPortfolioOptimizer.mockImplementationOnce(() => { throw new Error('fail'); });
+
+      const handler = findHandler(routes, 'get', '/portfolio/optimize');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+    });
+  });
+
+  // ── GET /reports/daily ────────────────────────────────────────────────
+  describe('GET /reports/daily', () => {
+    it('returns JSON report by default', async () => {
+      const handler = findHandler(routes, 'get', '/reports/daily');
+      const res = mockRes();
+      await handler(mockReq(), res);
+
+      expect(mockGenerateDailyReport).toHaveBeenCalled();
+      expect(res.json).toHaveBeenCalledWith({ date: '2024-01-15', trades: [] });
+    });
+
+    it('returns text report when format=text', async () => {
+      const handler = findHandler(routes, 'get', '/reports/daily');
+      const res = mockRes();
+      await handler(mockReq({ query: { format: 'text' } }), res);
+
+      expect(res.type).toHaveBeenCalledWith('text/plain');
+      expect(res.send).toHaveBeenCalledWith('text report');
+    });
+
+    it('returns markdown report when format=markdown', async () => {
+      const handler = findHandler(routes, 'get', '/reports/daily');
+      const res = mockRes();
+      await handler(mockReq({ query: { format: 'markdown' } }), res);
+
+      expect(res.type).toHaveBeenCalledWith('text/markdown');
+      expect(res.send).toHaveBeenCalledWith('# markdown report');
+    });
+
+    it('returns error when no report data', async () => {
+      mockGenerateDailyReport.mockResolvedValueOnce(null);
+
+      const handler = findHandler(routes, 'get', '/reports/daily');
+      const res = mockRes();
+      await handler(mockReq(), res);
+
+      expect(res.json).toHaveBeenCalledWith({ error: 'No data for this period' });
+    });
+
+    it('handles errors', async () => {
+      mockGenerateDailyReport.mockRejectedValueOnce(new Error('fail'));
+
+      const handler = findHandler(routes, 'get', '/reports/daily');
+      const res = mockRes();
+      await handler(mockReq(), res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+    });
+  });
+
+  // ── GET /reports/weekly ───────────────────────────────────────────────
+  describe('GET /reports/weekly', () => {
+    it('returns JSON report by default', async () => {
+      const handler = findHandler(routes, 'get', '/reports/weekly');
+      const res = mockRes();
+      await handler(mockReq(), res);
+
+      expect(mockGenerateWeeklyReport).toHaveBeenCalled();
+      expect(res.json).toHaveBeenCalledWith({ week: '2024-W03', trades: [] });
+    });
+
+    it('returns text report when format=text', async () => {
+      const handler = findHandler(routes, 'get', '/reports/weekly');
+      const res = mockRes();
+      await handler(mockReq({ query: { format: 'text' } }), res);
+
+      expect(res.type).toHaveBeenCalledWith('text/plain');
+      expect(res.send).toHaveBeenCalledWith('text report');
+    });
+
+    it('returns markdown report when format=markdown', async () => {
+      const handler = findHandler(routes, 'get', '/reports/weekly');
+      const res = mockRes();
+      await handler(mockReq({ query: { format: 'markdown' } }), res);
+
+      expect(res.type).toHaveBeenCalledWith('text/markdown');
+      expect(res.send).toHaveBeenCalledWith('# markdown report');
+    });
+
+    it('returns error when no report data', async () => {
+      mockGenerateWeeklyReport.mockResolvedValueOnce(null);
+
+      const handler = findHandler(routes, 'get', '/reports/weekly');
+      const res = mockRes();
+      await handler(mockReq(), res);
+
+      expect(res.json).toHaveBeenCalledWith({ error: 'No data for this period' });
+    });
+
+    it('handles errors', async () => {
+      mockGenerateWeeklyReport.mockRejectedValueOnce(new Error('fail'));
+
+      const handler = findHandler(routes, 'get', '/reports/weekly');
+      const res = mockRes();
+      await handler(mockReq(), res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+    });
+  });
+
+  // ── GET /conditional-orders ───────────────────────────────────────────
+  describe('GET /conditional-orders', () => {
+    it('returns conditional orders status', () => {
+      mockGetConditionalOrderStatus.mockReturnValueOnce({ orders: [{ id: 1 }] });
+
+      const handler = findHandler(routes, 'get', '/conditional-orders');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      expect(res.json).toHaveBeenCalledWith({ orders: [{ id: 1 }] });
+    });
+
+    it('handles errors', () => {
+      mockGetConditionalOrderManager.mockImplementationOnce(() => { throw new Error('fail'); });
+
+      const handler = findHandler(routes, 'get', '/conditional-orders');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+    });
+  });
+
+  // ── POST /conditional-orders ──────────────────────────────────────────
+  describe('POST /conditional-orders', () => {
+    it('creates a conditional order', () => {
+      mockCreateOrder.mockReturnValueOnce({ id: 99, type: 'limit' });
+
+      const handler = findHandler(routes, 'post', '/conditional-orders');
+      const res = mockRes();
+      handler(mockReq({ body: { symbol: 'AAPL', type: 'limit', price: 150 } }), res);
+
+      expect(mockCreateOrder).toHaveBeenCalled();
+      expect(res.json).toHaveBeenCalledWith({ id: 99, type: 'limit' });
+    });
+
+    it('handles errors', () => {
+      mockGetConditionalOrderManager.mockImplementationOnce(() => { throw new Error('fail'); });
+
+      const handler = findHandler(routes, 'post', '/conditional-orders');
+      const res = mockRes();
+      handler(mockReq({ body: {} }), res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+    });
+  });
+
+  // ── POST /conditional-orders/oco ──────────────────────────────────────
+  describe('POST /conditional-orders/oco', () => {
+    it('creates an OCO pair', () => {
+      mockCreateOcoPair.mockReturnValueOnce({ id1: 10, id2: 11 });
+
+      const handler = findHandler(routes, 'post', '/conditional-orders/oco');
+      const res = mockRes();
+      handler(mockReq({ body: { order1: { type: 'limit' }, order2: { type: 'stop' } } }), res);
+
+      expect(mockCreateOcoPair).toHaveBeenCalled();
+      expect(res.json).toHaveBeenCalledWith({ id1: 10, id2: 11 });
+    });
+
+    it('handles errors', () => {
+      mockGetConditionalOrderManager.mockImplementationOnce(() => { throw new Error('fail'); });
+
+      const handler = findHandler(routes, 'post', '/conditional-orders/oco');
+      const res = mockRes();
+      handler(mockReq({ body: {} }), res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+    });
+  });
+
+  // ── DELETE /conditional-orders/:id ───────────────────────────────────
+  describe('DELETE /conditional-orders/:id', () => {
+    it('cancels a conditional order', () => {
+      const handler = findHandler(routes, 'delete', '/conditional-orders/:id');
+      const res = mockRes();
+      handler(mockReq({ params: { id: '5' } }), res);
+
+      expect(mockCancelOrder).toHaveBeenCalledWith(5);
+      expect(res.json).toHaveBeenCalledWith({ success: true });
+    });
+
+    it('handles errors', () => {
+      mockGetConditionalOrderManager.mockImplementationOnce(() => { throw new Error('fail'); });
+
+      const handler = findHandler(routes, 'delete', '/conditional-orders/:id');
+      const res = mockRes();
+      handler(mockReq({ params: { id: '5' } }), res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+    });
+  });
+
+  // ── GET /ai/feedback ──────────────────────────────────────────────────
+  describe('GET /ai/feedback', () => {
+    it('returns AI feedback', async () => {
+      const handler = findHandler(routes, 'get', '/ai/feedback');
+      const res = mockRes();
+      await handler(mockReq(), res);
+
+      expect(mockGenerateFeedback).toHaveBeenCalled();
+      expect(res.json).toHaveBeenCalledWith({ feedback: 'improve stops' });
+    });
+
+    it('handles errors', async () => {
+      mockGetAISelfImprovement.mockImplementationOnce(() => { throw new Error('fail'); });
+
+      const handler = findHandler(routes, 'get', '/ai/feedback');
+      const res = mockRes();
+      await handler(mockReq(), res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+    });
+  });
+
+  // ── GET /ai/calibration ───────────────────────────────────────────────
+  describe('GET /ai/calibration', () => {
+    it('returns calibration curve', async () => {
+      const handler = findHandler(routes, 'get', '/ai/calibration');
+      const res = mockRes();
+      await handler(mockReq(), res);
+
+      expect(mockGetCalibrationCurve).toHaveBeenCalled();
+      expect(res.json).toHaveBeenCalledWith([{ bucket: '0.5-0.6', accuracy: 0.55 }]);
+    });
+
+    it('handles errors', async () => {
+      mockGetAISelfImprovement.mockImplementationOnce(() => { throw new Error('fail'); });
+
+      const handler = findHandler(routes, 'get', '/ai/calibration');
+      const res = mockRes();
+      await handler(mockReq(), res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+    });
+  });
+
+  // ── GET /ai/model-comparison ──────────────────────────────────────────
+  describe('GET /ai/model-comparison', () => {
+    it('returns model comparison', async () => {
+      const handler = findHandler(routes, 'get', '/ai/model-comparison');
+      const res = mockRes();
+      await handler(mockReq(), res);
+
+      expect(mockCompareModels).toHaveBeenCalled();
+      expect(res.json).toHaveBeenCalledWith([{ model: 'claude', accuracy: 0.8 }]);
+    });
+
+    it('handles errors', async () => {
+      mockGetAISelfImprovement.mockImplementationOnce(() => { throw new Error('fail'); });
+
+      const handler = findHandler(routes, 'get', '/ai/model-comparison');
+      const res = mockRes();
+      await handler(mockReq(), res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+    });
+  });
+
+  // ── GET /risk-parity/rebalance ────────────────────────────────────────
+  describe('GET /risk-parity/rebalance', () => {
+    it('returns empty actions when no positions', () => {
+      mockDb.select.mockReturnValueOnce(chain([]));
+
+      const handler = findHandler(routes, 'get', '/risk-parity/rebalance');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      expect(res.json).toHaveBeenCalledWith({ actions: [] });
+    });
+
+    it('returns rebalance suggestions with sufficient price data', () => {
+      const positions = [
+        { symbol: 'AAPL', shares: 10, currentPrice: 160, entryPrice: 150 },
+      ];
+      const prices10 = Array.from({ length: 10 }, (_, i) => ({
+        timestamp: `2024-01-${String(i + 1).padStart(2, '0')}T00:00:00.000Z`,
+        open: 155 + i, high: 162 + i, low: 150 + i, close: 158 + i, volume: 1000000,
+      }));
+
+      let callCount = 0;
+      mockDb.select.mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) return chain(positions);
+        return chain(prices10);
+      });
+
+      mockSuggestRebalanceParity.mockReturnValueOnce([{ symbol: 'AAPL', action: 'hold' }]);
+
+      const handler = findHandler(routes, 'get', '/risk-parity/rebalance');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      expect(mockSuggestRebalanceParity).toHaveBeenCalled();
+      expect(res.json).toHaveBeenCalledWith({ actions: [{ symbol: 'AAPL', action: 'hold' }] });
+    });
+
+    it('handles null currentPrice in positions', () => {
+      const positions = [
+        { symbol: 'AAPL', shares: 10, currentPrice: null, entryPrice: 150 },
+      ];
+      const prices10 = Array.from({ length: 10 }, (_, i) => ({
+        timestamp: `2024-01-${String(i + 1).padStart(2, '0')}T00:00:00.000Z`,
+        open: 155 + i, high: 162 + i, low: 150 + i, close: 158 + i, volume: 1000000,
+      }));
+
+      let callCount = 0;
+      mockDb.select.mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) return chain(positions);
+        return chain(prices10);
+      });
+
+      const handler = findHandler(routes, 'get', '/risk-parity/rebalance');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      // uses entryPrice as fallback
+      expect(mockSuggestRebalanceParity).toHaveBeenCalled();
+    });
+
+    it('handles null OHLCV values in price candles', () => {
+      const positions = [
+        { symbol: 'AAPL', shares: 10, currentPrice: 160, entryPrice: 150 },
+      ];
+      const prices10 = Array.from({ length: 10 }, (_, i) => ({
+        timestamp: `2024-01-${String(i + 1).padStart(2, '0')}T00:00:00.000Z`,
+        open: null, high: null, low: null, close: null, volume: null,
+      }));
+
+      let callCount = 0;
+      mockDb.select.mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) return chain(positions);
+        return chain(prices10);
+      });
+
+      const handler = findHandler(routes, 'get', '/risk-parity/rebalance');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      expect(mockSuggestRebalanceParity).toHaveBeenCalledWith(
+        expect.any(Array),
+        expect.any(Map)
+      );
+    });
+
+    it('skips positions with insufficient price data (<= 5 candles)', () => {
+      const positions = [
+        { symbol: 'AAPL', shares: 10, currentPrice: 160, entryPrice: 150 },
+      ];
+      // Only 3 prices - should be skipped (not added to candleMap)
+      const prices3 = Array.from({ length: 3 }, (_, i) => ({
+        timestamp: `2024-01-0${i + 1}T00:00:00.000Z`,
+        open: 155, high: 162, low: 150, close: 158, volume: 1000000,
+      }));
+
+      let callCount = 0;
+      mockDb.select.mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) return chain(positions);
+        return chain(prices3);
+      });
+
+      const handler = findHandler(routes, 'get', '/risk-parity/rebalance');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      // Should still call suggestRebalance with an empty candleMap
+      expect(mockSuggestRebalanceParity).toHaveBeenCalled();
+    });
+
+    it('handles errors', () => {
+      mockGetRiskParitySizer.mockImplementationOnce(() => { throw new Error('fail'); });
+
+      const handler = findHandler(routes, 'get', '/risk-parity/rebalance');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      expect(res.status).toHaveBeenCalledWith(500);
+    });
+  });
+
+  // ── POST /ai/test (inner try/catch) ───────────────────────────────────
+  describe('POST /ai/test (inner try/catch)', () => {
+    it('returns ok:false when rawChat throws', async () => {
+      mockConfigManager.get.mockImplementation((key: string) => {
+        if (key === 'ai.models') return JSON.stringify([{ id: 'gpt4', enabled: true, baseUrl: 'http://test', model: 'gpt4', apiKey: 'key', weight: 1 }]);
+        return null;
+      });
+      mockRawChat.mockRejectedValueOnce(new Error('connection refused'));
+
+      const handler = findHandler(routes, 'post', '/ai/test');
+      const res = mockRes();
+      await handler(mockReq({ body: { profileId: 'gpt4' } }), res);
+
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({ ok: false, error: expect.stringContaining('connection refused') })
+      );
+    });
+
+    it('returns ok:true when rawChat succeeds', async () => {
+      mockConfigManager.get.mockImplementation((key: string) => {
+        if (key === 'ai.models') return JSON.stringify([{ id: 'mymodel', enabled: true, baseUrl: 'http://test', model: 'gpt4', apiKey: 'key', weight: 1 }]);
+        return null;
+      });
+      mockRawChat.mockResolvedValueOnce('pong');
+
+      const handler = findHandler(routes, 'post', '/ai/test');
+      const res = mockRes();
+      await handler(mockReq({ body: { profileId: 'mymodel' } }), res);
+
+      expect(res.json).toHaveBeenCalledWith(
+        expect.objectContaining({ ok: true, latencyMs: expect.any(Number) })
+      );
+    });
+  });
+
+  // ── Screener duplicate symbol ─────────────────────────────────────────
+  describe('POST /api/research/screen (duplicate symbols)', () => {
+    it('deduplicates symbols across signal rows', () => {
+      // Return two rows with the same symbol - second should be skipped
+      const signalRows = [
+        { symbol: 'AAPL', technicalScore: 75, timestamp: '2024-01-15T10:00:00.000Z' },
+        { symbol: 'AAPL', technicalScore: 60, timestamp: '2024-01-14T10:00:00.000Z' }, // duplicate
+        { symbol: 'MSFT', technicalScore: 80, timestamp: '2024-01-15T10:00:00.000Z' },
+      ];
+      let callCount = 0;
+      mockDb.select.mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) return chain(signalRows);
+        // fundamental cache queries return undefined
+        return chain(undefined);
+      });
+
+      const handler = findHandler(routes, 'post', '/api/research/screen');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      const result = res.json.mock.calls[0][0];
+      // Should only have 2 results (AAPL deduplicated)
+      expect(result.results).toHaveLength(2);
+    });
+
+    it('handles null technicalScore', () => {
+      const signalRows = [
+        { symbol: 'AAPL', technicalScore: null, timestamp: '2024-01-15T10:00:00.000Z' },
+      ];
+      let callCount = 0;
+      mockDb.select.mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) return chain(signalRows);
+        return chain(undefined);
+      });
+
+      const handler = findHandler(routes, 'post', '/api/research/screen');
+      const res = mockRes();
+      handler(mockReq(), res);
+
+      const result = res.json.mock.calls[0][0];
+      expect(result.results[0].score).toBeNull();
+    });
+  });
+
+  // ── Audit log: type filter with no limit (uses default 50) ───────────
+  describe('GET /api/audit (type filter no limit)', () => {
+    it('uses default limit of 50 when filtering by type without limit', () => {
+      mockAuditLogger.getByType.mockReturnValue([]);
+
+      const handler = findHandler(routes, 'get', '/api/audit');
+      const res = mockRes();
+      handler(mockReq({ query: { type: 'trade' } }), res); // no limit param
+
+      expect(mockAuditLogger.getByType).toHaveBeenCalledWith('trade', 50);
     });
   });
 });

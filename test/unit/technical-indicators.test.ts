@@ -632,6 +632,17 @@ describe('Technical Indicators', () => {
       const result = calcPerfMetrics(candles);
       expect(result.relativeVolume).toBeNull();
     });
+
+    it('handles zero candles: lookback=0 branch (line 391 false branch)', () => {
+      // With n=0, lookback = Math.min(20, 0) = 0 → hits the `lookback > 0` false branch
+      // All perf metrics are null, relativeVolume is null (n === 0)
+      const result = calcPerfMetrics([]);
+      expect(result.perfWeek).toBeNull();
+      expect(result.perfMonth).toBeNull();
+      expect(result.perfQuarter).toBeNull();
+      expect(result.perfYear).toBeNull();
+      expect(result.relativeVolume).toBeNull();
+    });
   });
 
   // ── computeAllIndicators ─────────────────────────────────────────────────
@@ -696,5 +707,320 @@ describe('Technical Indicators', () => {
       );
       expect(result.vwap).toBeCloseTo(expectedVwap!, 5);
     });
+  });
+});
+
+// ── detectCandlestickPatterns (Inside Day / Outside Day) ──────────────────
+
+import { detectCandlestickPatterns } from '../../src/analysis/technical/indicators.js';
+
+describe('detectCandlestickPatterns - manual patterns', () => {
+  function makePatternCandles(
+    overrides: { open: number; high: number; low: number; close: number }[],
+  ): OHLCVCandle[] {
+    return overrides.map((c, i) => ({
+      date: `2024-01-${String(i + 1).padStart(2, '0')}`,
+      ...c,
+      volume: 1_000_000,
+    }));
+  }
+
+  it('returns empty result when opens.length < 5 (line 457 early return)', () => {
+    // Only 4 candles - should return empty result immediately
+    const candles = makePatternCandles([
+      { open: 100, high: 110, low: 90, close: 105 },
+      { open: 101, high: 111, low: 91, close: 106 },
+      { open: 102, high: 112, low: 92, close: 107 },
+      { open: 103, high: 113, low: 93, close: 108 },
+    ]);
+    const opens = candles.map((c) => c.open);
+    const highs = candles.map((c) => c.high);
+    const lows = candles.map((c) => c.low);
+    const closes = candles.map((c) => c.close);
+    const result = detectCandlestickPatterns(opens, highs, lows, closes);
+    expect(result.bullish).toEqual([]);
+    expect(result.bearish).toEqual([]);
+    expect(result.neutral).toEqual([]);
+  });
+
+  it('detects Inside Day: today range within yesterday range (line 514)', () => {
+    // Need at least 5 candles for the function to proceed past the early return
+    const candles = makePatternCandles([
+      { open: 100, high: 110, low: 90, close: 105 },
+      { open: 101, high: 111, low: 91, close: 106 },
+      { open: 102, high: 112, low: 92, close: 107 },
+      // yesterday: high=120, low=80
+      { open: 100, high: 120, low: 80, close: 100 },
+      // today: high=115 (< 120), low=85 (> 80) → Inside Day
+      { open: 100, high: 115, low: 85, close: 100 },
+    ]);
+
+    const opens = candles.map((c) => c.open);
+    const highs = candles.map((c) => c.high);
+    const lows = candles.map((c) => c.low);
+    const closes = candles.map((c) => c.close);
+
+    const result = detectCandlestickPatterns(opens, highs, lows, closes);
+
+    expect(result.neutral).toContain('Inside Day');
+  });
+
+  it('detects Outside Day: today range engulfs yesterday range (line 525)', () => {
+    // Need at least 5 candles for the function to proceed
+    const candles = makePatternCandles([
+      { open: 100, high: 110, low: 90, close: 105 },
+      { open: 101, high: 111, low: 91, close: 106 },
+      { open: 102, high: 112, low: 92, close: 107 },
+      // yesterday: high=105, low=95
+      { open: 100, high: 105, low: 95, close: 100 },
+      // today: high=110 (> 105), low=90 (< 95) → Outside Day
+      { open: 100, high: 110, low: 90, close: 100 },
+    ]);
+
+    const opens = candles.map((c) => c.open);
+    const highs = candles.map((c) => c.high);
+    const lows = candles.map((c) => c.low);
+    const closes = candles.map((c) => c.close);
+
+    const result = detectCandlestickPatterns(opens, highs, lows, closes);
+
+    expect(result.neutral).toContain('Outside Day');
+  });
+
+  it('detects Dragonfly Doji: open=close=high with long lower shadow (line 491)', () => {
+    // Need 5 candles; last candle is a dragonfly doji (open=close=high, long lower shadow)
+    const candles = makePatternCandles([
+      { open: 100, high: 105, low: 95, close: 103 },
+      { open: 103, high: 108, low: 98, close: 106 },
+      { open: 106, high: 111, low: 101, close: 109 },
+      { open: 109, high: 114, low: 104, close: 112 },
+      // Dragonfly Doji: open=close=high, long lower shadow
+      { open: 115, high: 115, low: 100, close: 115 },
+    ]);
+    const opens = candles.map((c) => c.open);
+    const highs = candles.map((c) => c.high);
+    const lows = candles.map((c) => c.low);
+    const closes = candles.map((c) => c.close);
+    const result = detectCandlestickPatterns(opens, highs, lows, closes);
+    expect(result.neutral).toContain('Dragonfly Doji');
+  });
+
+  it('detects Gravestone Doji: open=close=low with long upper shadow (line 492)', () => {
+    // Need 5 candles; last candle is a gravestone doji (open=close=low, long upper shadow)
+    const candles = makePatternCandles([
+      { open: 100, high: 105, low: 95, close: 103 },
+      { open: 103, high: 108, low: 98, close: 106 },
+      { open: 106, high: 111, low: 101, close: 109 },
+      { open: 109, high: 114, low: 104, close: 112 },
+      // Gravestone Doji: open=close=low, long upper shadow
+      { open: 112, high: 127, low: 112, close: 112 },
+    ]);
+    const opens = candles.map((c) => c.open);
+    const highs = candles.map((c) => c.high);
+    const lows = candles.map((c) => c.low);
+    const closes = candles.map((c) => c.close);
+    const result = detectCandlestickPatterns(opens, highs, lows, closes);
+    expect(result.neutral).toContain('Gravestone Doji');
+  });
+
+  it('detects NR7: today has the smallest range of last 7 bars (line 504)', () => {
+    // Need >= 7 candles so NR7 code runs; last candle must have the smallest range
+    // Bars 1-6: range = 20 each (high-low = 20); last bar (day 7): range = 5 (the smallest)
+    const candles = makePatternCandles([
+      { open: 100, high: 110, low: 90, close: 100 },  // range 20
+      { open: 100, high: 110, low: 90, close: 100 },  // range 20
+      { open: 100, high: 110, low: 90, close: 100 },  // range 20
+      { open: 100, high: 110, low: 90, close: 100 },  // range 20
+      { open: 100, high: 110, low: 90, close: 100 },  // range 20
+      { open: 100, high: 110, low: 90, close: 100 },  // range 20
+      // Last bar: range = 5 (today ≤ all previous 6 days → NR7)
+      { open: 100, high: 103, low: 98, close: 101 },  // range 5
+    ]);
+
+    const opens = candles.map((c) => c.open);
+    const highs = candles.map((c) => c.high);
+    const lows = candles.map((c) => c.low);
+    const closes = candles.map((c) => c.close);
+
+    const result = detectCandlestickPatterns(opens, highs, lows, closes);
+    expect(result.neutral).toContain('NR7');
+  });
+
+  // ── Library pattern tests (lines 468-487) ──
+
+  it('detects Bullish Engulfing pattern (line 468)', () => {
+    // 5 candles total; last 2 form bullish engulfing
+    const opens  = [105, 103, 101, 110, 95];
+    const highs  = [107, 106, 104, 115, 120];
+    const lows   = [103, 100, 99,  95,  90];
+    const closes = [106, 104, 102, 100, 115];
+    const result = detectCandlestickPatterns(opens, highs, lows, closes);
+    expect(result.bullish).toContain('Bullish Engulfing');
+  });
+
+  it('detects Hammer pattern (line 469)', () => {
+    // 5-candle downtrend ending with hammer
+    const opens  = [112, 108, 105, 100, 103];
+    const highs  = [114, 110, 107, 102, 110];
+    const lows   = [108, 105, 102,  96, 102];
+    const closes = [110, 107, 104, 102, 108];
+    const result = detectCandlestickPatterns(opens, highs, lows, closes);
+    expect(result.bullish).toContain('Hammer');
+  });
+
+  it('detects Morning Star pattern (line 470)', () => {
+    // 5 candles; last 3 form morning star
+    const opens  = [105, 102, 100, 72, 77];
+    const highs  = [107, 104, 102, 75, 100];
+    const lows   = [103, 100, 78,  70, 76];
+    const closes = [104, 101, 80,  73, 95];
+    const result = detectCandlestickPatterns(opens, highs, lows, closes);
+    expect(result.bullish).toContain('Morning Star');
+  });
+
+  it('detects Morning Doji Star pattern (line 471)', () => {
+    // 5 candles; last 3 form morning doji star
+    const opens  = [105, 102, 100, 72, 77];
+    const highs  = [107, 104, 102, 75, 100];
+    const lows   = [103, 100, 78,  70, 76];
+    const closes = [104, 101, 80,  72, 95];
+    const result = detectCandlestickPatterns(opens, highs, lows, closes);
+    expect(result.bullish).toContain('Morning Doji Star');
+  });
+
+  it('detects Three White Soldiers pattern (line 472)', () => {
+    // 5 candles; last 3 form three white soldiers
+    const opens  = [95, 98, 100, 104, 109];
+    const highs  = [100, 103, 110, 115, 120];
+    const lows   = [94,  97,  99, 103, 108];
+    const closes = [99, 102, 108, 113, 118];
+    const result = detectCandlestickPatterns(opens, highs, lows, closes);
+    expect(result.bullish).toContain('Three White Soldiers');
+  });
+
+  it('detects Bullish Harami pattern (line 473)', () => {
+    // 5 candles; last 2 form bullish harami
+    const opens  = [60, 58, 57, 55, 48];
+    const highs  = [62, 60, 59, 58, 52];
+    const lows   = [50, 48, 46, 42, 46];
+    const closes = [52, 50, 48, 44, 51];
+    const result = detectCandlestickPatterns(opens, highs, lows, closes);
+    expect(result.bullish).toContain('Bullish Harami');
+  });
+
+  it('detects Tweezer Bottom pattern (line 474)', () => {
+    const opens  = [110, 108, 106, 104, 102];
+    const highs  = [112, 110, 108, 106, 104];
+    const lows   = [100,  99,  95,  90,  90];
+    const closes = [109, 107, 105, 102, 103];
+    const result = detectCandlestickPatterns(opens, highs, lows, closes);
+    expect(result.bullish).toContain('Tweezer Bottom');
+  });
+
+  it('detects Piercing Line pattern (line 475)', () => {
+    // 5 candles; last 2 form piercing line
+    const opens  = [60, 58, 57, 55, 42];
+    const highs  = [62, 60, 59, 57, 52];
+    const lows   = [55, 52, 50, 43, 40];
+    const closes = [58, 56, 53, 44, 51];
+    const result = detectCandlestickPatterns(opens, highs, lows, closes);
+    expect(result.bullish).toContain('Piercing Line');
+  });
+
+  it('detects Abandoned Baby bullish pattern (line 476)', () => {
+    // 5 candles; last 3 form abandoned baby
+    const opens  = [105, 102, 100, 70, 76];
+    const highs  = [107, 104, 102, 72, 90];
+    const lows   = [103, 100, 78,  68, 74];
+    const closes = [104, 101, 80,  70, 88];
+    const result = detectCandlestickPatterns(opens, highs, lows, closes);
+    expect(result.bullish).toContain('Abandoned Baby');
+  });
+
+  it('detects Bearish Engulfing pattern (line 479)', () => {
+    // 5 candles; last 2 form bearish engulfing
+    const opens  = [40, 42, 43, 45, 55];
+    const highs  = [44, 47, 50, 55, 58];
+    const lows   = [38, 40, 41, 42, 43];
+    const closes = [43, 46, 49, 53, 44];
+    const result = detectCandlestickPatterns(opens, highs, lows, closes);
+    expect(result.bearish).toContain('Bearish Engulfing');
+  });
+
+  it('detects Shooting Star pattern (line 480)', () => {
+    const opens  = [100, 103, 106, 112, 113];
+    const highs  = [105, 108, 111, 120, 115];
+    const lows   = [ 99, 102, 105, 110, 107];
+    const closes = [103, 106, 110, 110, 108];
+    const result = detectCandlestickPatterns(opens, highs, lows, closes);
+    expect(result.bearish).toContain('Shooting Star');
+  });
+
+  it('detects Evening Star pattern (line 481)', () => {
+    // 5 candles; last 3 form evening star
+    const opens  = [75, 78, 80, 107, 104];
+    const highs  = [ 79, 82, 102, 110, 106];
+    const lows   = [ 73, 76,  78, 105,  75];
+    const closes = [ 78, 80, 100, 108,  77];
+    const result = detectCandlestickPatterns(opens, highs, lows, closes);
+    expect(result.bearish).toContain('Evening Star');
+  });
+
+  it('detects Evening Doji Star pattern (line 482)', () => {
+    // 5 candles; last 3 form evening doji star
+    const opens  = [75, 78, 80, 107, 104];
+    const highs  = [79, 82, 102, 110, 106];
+    const lows   = [73, 76,  78, 105,  75];
+    const closes = [78, 80, 100, 107,  77];
+    const result = detectCandlestickPatterns(opens, highs, lows, closes);
+    expect(result.bearish).toContain('Evening Doji Star');
+  });
+
+  it('detects Three Black Crows pattern (line 483)', () => {
+    // 5 candles; last 3 form three black crows
+    const opens  = [115, 112, 110, 107, 104];
+    const highs  = [118, 115, 112, 109, 106];
+    const lows   = [108, 105, 99,   97,  92];
+    const closes = [112, 110, 100,  98,  93];
+    const result = detectCandlestickPatterns(opens, highs, lows, closes);
+    expect(result.bearish).toContain('Three Black Crows');
+  });
+
+  it('detects Bearish Harami pattern (line 484)', () => {
+    // 5 candles; last 2 form bearish harami
+    const opens  = [40, 42, 43, 44, 53];
+    const highs  = [50, 52, 54, 58, 56];
+    const lows   = [38, 40, 41, 42, 50];
+    const closes = [48, 50, 52, 55, 51];
+    const result = detectCandlestickPatterns(opens, highs, lows, closes);
+    expect(result.bearish).toContain('Bearish Harami');
+  });
+
+  it('detects Tweezer Top pattern (line 485)', () => {
+    const opens  = [100, 103, 106, 109, 110];
+    const highs  = [105, 108, 111, 115, 115];
+    const lows   = [ 99, 102, 105, 107, 108];
+    const closes = [103, 106, 109, 112, 111];
+    const result = detectCandlestickPatterns(opens, highs, lows, closes);
+    expect(result.bearish).toContain('Tweezer Top');
+  });
+
+  it('detects Dark Cloud Cover pattern (line 486)', () => {
+    // 5 candles; last 2 form dark cloud cover
+    const opens  = [95, 98, 100, 100, 123];
+    const highs  = [98, 100, 122, 122, 125];
+    const lows   = [93, 96,  98,  98, 107];
+    const closes = [97, 99, 120, 120, 109];
+    const result = detectCandlestickPatterns(opens, highs, lows, closes);
+    expect(result.bearish).toContain('Dark Cloud Cover');
+  });
+
+  it('detects Hanging Man pattern (line 487)', () => {
+    const opens  = [100, 103, 106, 112, 113];
+    const highs  = [105, 108, 111, 112, 115];
+    const lows   = [ 99, 102, 105, 104, 107];
+    const closes = [103, 106, 110, 110, 108];
+    const result = detectCandlestickPatterns(opens, highs, lows, closes);
+    expect(result.bearish).toContain('Hanging Man');
   });
 });

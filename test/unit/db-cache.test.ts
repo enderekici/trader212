@@ -241,4 +241,223 @@ describe('db/repositories/cache', () => {
       expect(result).toEqual([]);
     });
   });
+
+  describe('getFundamentals', () => {
+    it('returns null when no cached fundamentals found', async () => {
+      mockDb.select.mockReturnValue(createChainableMock(undefined));
+
+      const { getFundamentals } = await import('../../src/db/repositories/cache.js');
+      const result = getFundamentals('XYZ');
+      expect(result).toBeNull();
+    });
+
+    it('returns null when cached fundamentals are stale (expired)', async () => {
+      // fetchedAt was 48 hours ago, default ttl is 24h → expired
+      const staleTime = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+      const row = { symbol: 'AAPL', fetchedAt: staleTime, peRatio: 25 };
+      mockDb.select.mockReturnValue(createChainableMock(row));
+
+      const { getFundamentals } = await import('../../src/db/repositories/cache.js');
+      const result = getFundamentals('AAPL');
+      expect(result).toBeNull();
+    });
+
+    it('returns FundamentalData when cache is fresh', async () => {
+      // fetchedAt was 1 hour ago, default ttl is 24h → fresh
+      const freshTime = new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString();
+      const row = {
+        symbol: 'AAPL',
+        fetchedAt: freshTime,
+        peRatio: 25,
+        forwardPE: 22,
+        revenueGrowthYoY: 0.15,
+        profitMargin: 0.2,
+        operatingMargin: 0.18,
+        debtToEquity: 0.5,
+        currentRatio: 2.1,
+        marketCap: 3e12,
+        sector: 'Technology',
+        industry: 'Consumer Electronics',
+        earningsSurprise: 0.05,
+        dividendYield: 0.006,
+        beta: 1.2,
+      };
+      mockDb.select.mockReturnValue(createChainableMock(row));
+
+      const { getFundamentals } = await import('../../src/db/repositories/cache.js');
+      const result = getFundamentals('AAPL');
+
+      expect(result).not.toBeNull();
+      expect(result?.peRatio).toBe(25);
+      expect(result?.sector).toBe('Technology');
+      expect(result?.beta).toBe(1.2);
+      // Fields not in schema should be null
+      expect(result?.analystTargetPrice).toBeNull();
+      expect(result?.analystConsensus).toBeNull();
+      expect(result?.shortInterestPct).toBeNull();
+    });
+
+    it('returns FundamentalData with null fields when row values are null', async () => {
+      const freshTime = new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString();
+      const row = {
+        symbol: 'AAPL',
+        fetchedAt: freshTime,
+        peRatio: null,
+        forwardPE: null,
+        revenueGrowthYoY: null,
+        profitMargin: null,
+        operatingMargin: null,
+        debtToEquity: null,
+        currentRatio: null,
+        marketCap: null,
+        sector: null,
+        industry: null,
+        earningsSurprise: null,
+        dividendYield: null,
+        beta: null,
+      };
+      mockDb.select.mockReturnValue(createChainableMock(row));
+
+      const { getFundamentals } = await import('../../src/db/repositories/cache.js');
+      const result = getFundamentals('AAPL');
+
+      expect(result).not.toBeNull();
+      expect(result?.peRatio).toBeNull();
+      expect(result?.sector).toBeNull();
+    });
+
+    it('respects custom ttlHours parameter', async () => {
+      // fetchedAt was 2 hours ago, ttl is 1h → expired
+      const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+      const row = { symbol: 'AAPL', fetchedAt: twoHoursAgo, peRatio: 25 };
+      mockDb.select.mockReturnValue(createChainableMock(row));
+
+      const { getFundamentals } = await import('../../src/db/repositories/cache.js');
+      const result = getFundamentals('AAPL', 1);
+      expect(result).toBeNull();
+    });
+
+    it('returns data when within custom ttlHours', async () => {
+      // fetchedAt was 30 minutes ago, ttl is 1h → fresh
+      const thirtyMinsAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+      const row = {
+        symbol: 'AAPL',
+        fetchedAt: thirtyMinsAgo,
+        peRatio: 30,
+        forwardPE: null,
+        revenueGrowthYoY: null,
+        profitMargin: null,
+        operatingMargin: null,
+        debtToEquity: null,
+        currentRatio: null,
+        marketCap: null,
+        sector: 'Technology',
+        industry: null,
+        earningsSurprise: null,
+        dividendYield: null,
+        beta: null,
+      };
+      mockDb.select.mockReturnValue(createChainableMock(row));
+
+      const { getFundamentals } = await import('../../src/db/repositories/cache.js');
+      const result = getFundamentals('AAPL', 1);
+      expect(result).not.toBeNull();
+      expect(result?.peRatio).toBe(30);
+    });
+  });
+
+  describe('setFundamentals', () => {
+    it('inserts fundamentals into the cache', async () => {
+      const runMock = vi.fn();
+      const chainMock = {
+        insert: vi.fn().mockReturnThis(),
+        values: vi.fn().mockReturnThis(),
+        run: runMock,
+      };
+      mockDb.insert = vi.fn().mockReturnValue(chainMock);
+
+      const { setFundamentals } = await import('../../src/db/repositories/cache.js');
+      const data = {
+        peRatio: 25,
+        forwardPE: 22,
+        revenueGrowthYoY: 0.15,
+        profitMargin: 0.2,
+        operatingMargin: 0.18,
+        debtToEquity: 0.5,
+        currentRatio: 2.1,
+        marketCap: 3e12,
+        sector: 'Technology',
+        industry: 'Consumer Electronics',
+        earningsSurprise: 0.05,
+        dividendYield: 0.006,
+        beta: 1.2,
+        analystTargetPrice: null,
+        analystConsensus: null,
+        analystCount: null,
+        shortInterestPct: null,
+        institutionalOwnershipPct: null,
+        pegRatio: null,
+        roe: null,
+        roa: null,
+        freeCashflow: null,
+        analystBuy: null,
+        analystSell: null,
+      };
+
+      setFundamentals('AAPL', data);
+
+      expect(mockDb.insert).toHaveBeenCalled();
+      expect(chainMock.values).toHaveBeenCalledWith(
+        expect.objectContaining({
+          symbol: 'AAPL',
+          peRatio: 25,
+          sector: 'Technology',
+        }),
+      );
+      expect(runMock).toHaveBeenCalled();
+    });
+
+    it('handles null values in FundamentalData gracefully', async () => {
+      const runMock = vi.fn();
+      const chainMock = {
+        insert: vi.fn().mockReturnThis(),
+        values: vi.fn().mockReturnThis(),
+        run: runMock,
+      };
+      mockDb.insert = vi.fn().mockReturnValue(chainMock);
+
+      const { setFundamentals } = await import('../../src/db/repositories/cache.js');
+      const data = {
+        peRatio: null,
+        forwardPE: null,
+        revenueGrowthYoY: null,
+        profitMargin: null,
+        operatingMargin: null,
+        debtToEquity: null,
+        currentRatio: null,
+        marketCap: null,
+        sector: null,
+        industry: null,
+        earningsSurprise: null,
+        dividendYield: null,
+        beta: null,
+        analystTargetPrice: null,
+        analystConsensus: null,
+        analystCount: null,
+        shortInterestPct: null,
+        institutionalOwnershipPct: null,
+        pegRatio: null,
+        roe: null,
+        roa: null,
+        freeCashflow: null,
+        analystBuy: null,
+        analystSell: null,
+      };
+
+      setFundamentals('XYZ', data);
+
+      expect(mockDb.insert).toHaveBeenCalled();
+      expect(runMock).toHaveBeenCalled();
+    });
+  });
 });

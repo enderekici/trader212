@@ -178,6 +178,119 @@ describe('OpenAICompatibleAdapter', () => {
       const adapter = new OpenAICompatibleAdapter();
       await expect(adapter.analyze(makeContext())).rejects.toThrow('502 Bad Gateway');
     });
+
+    it('attempts repair when processAIDecision returns null', async () => {
+      // First call (analyze): returns non-JSON text
+      // Second call (repairDecisionToJson): returns proper JSON
+      vi.mocked(processAIDecision)
+        .mockReturnValueOnce(null)  // fails to parse
+        .mockReturnValueOnce({      // repair succeeds
+          decision: 'HOLD',
+          conviction: 50,
+          reasoning: 'repaired',
+          risks: [],
+          suggestedStopLossPct: 0.04,
+          suggestedPositionSizePct: 0.05,
+          suggestedTakeProfitPct: 0.1,
+          urgency: 'no_rush',
+          exitConditions: '',
+        });
+
+      mockPost.mockResolvedValue({
+        data: { choices: [{ message: { content: 'not json text' } }] },
+      });
+
+      const adapter = new OpenAICompatibleAdapter();
+      const result = await adapter.analyze(makeContext());
+
+      expect(result?.decision).toBe('HOLD');
+      expect(mockPost).toHaveBeenCalledTimes(2);
+    });
+
+    it('returns null when repair also fails', async () => {
+      vi.mocked(processAIDecision).mockReturnValue(null);
+
+      // First call succeeds, second (repair) throws
+      mockPost
+        .mockResolvedValueOnce({ data: { choices: [{ message: { content: 'bad text' } }] } })
+        .mockRejectedValueOnce(new Error('Repair failed'));
+
+      const adapter = new OpenAICompatibleAdapter();
+      const result = await adapter.analyze(makeContext());
+
+      expect(result).toBeNull();
+    });
+
+    it('omits Authorization in repairDecisionToJson when apiKey is null', async () => {
+      // Use empty apiKey so repair gets called with null apiKey
+      vi.mocked(configManager.get).mockImplementation((key: string) => {
+        if (key === 'ai.openaiCompat.baseUrl') return 'http://localhost:8080/v1';
+        if (key === 'ai.openaiCompat.model') return 'gpt-4';
+        if (key === 'ai.openaiCompat.apiKey') return ''; // empty → null
+        if (key === 'ai.temperature') return 0.5;
+        if (key === 'ai.timeoutSeconds') return 90;
+        return undefined;
+      });
+
+      vi.mocked(processAIDecision)
+        .mockReturnValueOnce(null) // first parse fails
+        .mockReturnValueOnce({     // repair succeeds
+          decision: 'HOLD',
+          conviction: 50,
+          reasoning: 'repaired',
+          risks: [],
+          suggestedStopLossPct: 0.04,
+          suggestedPositionSizePct: 0.05,
+          suggestedTakeProfitPct: 0.1,
+          urgency: 'no_rush',
+          exitConditions: '',
+        });
+
+      mockPost.mockResolvedValue({
+        data: { choices: [{ message: { content: 'not json' } }] },
+      });
+
+      const adapter = new OpenAICompatibleAdapter();
+      const result = await adapter.analyze(makeContext());
+
+      expect(mockPost).toHaveBeenCalledTimes(2);
+      // The repair call (second) should NOT have Authorization header
+      const repairCallHeaders = mockPost.mock.calls[1][2].headers;
+      expect(repairCallHeaders).not.toHaveProperty('Authorization');
+      expect(result?.decision).toBe('HOLD');
+    });
+
+    it('retries without response_format on HTTP 400', async () => {
+      const axiosError = Object.assign(new Error('Bad Request'), {
+        response: { status: 400 },
+      });
+      // First call (with response_format) → 400, second (without) → success
+      mockPost
+        .mockRejectedValueOnce(axiosError)
+        .mockResolvedValueOnce({ data: { choices: [{ message: { content: '{"decision":"BUY"}' } }] } });
+
+      // Ensure processAIDecision returns a valid decision so no repair is attempted
+      vi.mocked(processAIDecision).mockReturnValue({
+        decision: 'SELL',
+        conviction: 70,
+        reasoning: 'bearish signals',
+        risks: ['reversal risk'],
+        suggestedStopLossPct: 0.03,
+        suggestedPositionSizePct: 0.05,
+        suggestedTakeProfitPct: 0.1,
+        urgency: 'immediate',
+        exitConditions: 'take profit hit',
+      });
+
+      const adapter = new OpenAICompatibleAdapter();
+      const result = await adapter.analyze(makeContext());
+
+      expect(mockPost).toHaveBeenCalledTimes(2);
+      // Second call should not have response_format
+      const secondCallBody = mockPost.mock.calls[1][1];
+      expect(secondCallBody).not.toHaveProperty('response_format');
+      expect(result?.decision).toBe('SELL'); // from processAIDecision mock
+    });
   });
 
   describe('rawChat', () => {
@@ -267,6 +380,95 @@ describe('OpenAICompatibleAdapter', () => {
           timeout: 30000,
         }),
       );
+    });
+
+    it('falls back to configManager for timeout when profile.timeoutSeconds is undefined', async () => {
+      const profile: ModelProfile = {
+        id: 'no-timeout-profile',
+        baseUrl: 'https://api.example.com/v1',
+        model: 'gpt-3.5',
+        apiKey: 'key123',
+        weight: 1,
+        enabled: true,
+        // timeoutSeconds intentionally omitted → undefined
+      };
+
+      mockPost.mockResolvedValue({
+        data: { choices: [{ message: { content: '{"decision":"HOLD"}' } }] },
+      });
+
+      const adapter = new OpenAICompatibleAdapter(profile);
+      await adapter.analyze(makeContext());
+
+      // configManager.get('ai.timeoutSeconds') returns 90 → timeout = 90000
+      expect(mockPost).toHaveBeenCalledWith(
+        'https://api.example.com/v1/chat/completions',
+        expect.anything(),
+        expect.objectContaining({ timeout: 90000 }),
+      );
+    });
+
+    it('treats empty string apiKey in profile as null (omits Authorization)', async () => {
+      const profile: ModelProfile = {
+        id: 'no-key-profile',
+        baseUrl: 'https://api.example.com/v1',
+        model: 'llama3',
+        apiKey: '', // empty → treated as null
+        weight: 1,
+        enabled: true,
+        timeoutSeconds: 10,
+      };
+
+      mockPost.mockResolvedValue({
+        data: { choices: [{ message: { content: '{"decision":"HOLD"}' } }] },
+      });
+
+      const adapter = new OpenAICompatibleAdapter(profile);
+      await adapter.analyze(makeContext());
+
+      const callHeaders = mockPost.mock.calls[0][2].headers;
+      expect(callHeaders).not.toHaveProperty('Authorization');
+    });
+
+    it('adds Authorization header in repairDecisionToJson when apiKey is provided', async () => {
+      // Make processAIDecision return null on first call so repair is triggered
+      vi.mocked(processAIDecision)
+        .mockReturnValueOnce(null)
+        .mockReturnValueOnce({
+          decision: 'BUY',
+          conviction: 80,
+          reasoning: 'repaired by profile',
+          risks: [],
+          suggestedStopLossPct: 0.05,
+          suggestedPositionSizePct: 0.05,
+          suggestedTakeProfitPct: 0.1,
+          urgency: 'no_rush',
+          exitConditions: '',
+        });
+
+      // Both calls succeed
+      mockPost.mockResolvedValue({
+        data: { choices: [{ message: { content: 'not json' } }] },
+      });
+
+      const profile: ModelProfile = {
+        id: 'repair-profile',
+        baseUrl: 'https://api.example.com/v1',
+        model: 'gpt-4',
+        apiKey: 'repair-key',
+        weight: 1,
+        enabled: true,
+        timeoutSeconds: 20,
+      };
+
+      const adapter = new OpenAICompatibleAdapter(profile);
+      const result = await adapter.analyze(makeContext());
+
+      // Second call is repair call — check it has the Authorization header
+      expect(mockPost).toHaveBeenCalledTimes(2);
+      const repairCallHeaders = mockPost.mock.calls[1][2].headers;
+      expect(repairCallHeaders).toHaveProperty('Authorization', 'Bearer repair-key');
+      expect(result?.decision).toBe('BUY');
     });
   });
 });

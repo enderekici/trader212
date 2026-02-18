@@ -165,6 +165,17 @@ describe('PairLockManager', () => {
       expect(result.reason).toBe('cooldown');
     });
 
+    it('uses default reason when symbol lock reason is null (line 75 ?? branch)', () => {
+      const futureDate = new Date(Date.now() + 60 * 60_000).toISOString();
+      selectResultsQueue.push([
+        { symbol: 'AAPL', lockEnd: futureDate, reason: null, side: '*', active: true },
+      ]);
+
+      const result = manager.isPairLocked('AAPL');
+      expect(result.locked).toBe(true);
+      expect(result.reason).toBe('Pair locked');
+    });
+
     it('returns locked=true when global lock is active', () => {
       const futureDate = new Date(Date.now() + 60 * 60_000).toISOString();
       // Symbol-specific locks (empty)
@@ -202,25 +213,62 @@ describe('PairLockManager', () => {
       expect(result.locked).toBe(false);
     });
 
-    it('returns locked=true when lock side is * and query side is specific', () => {
+    it('returns locked=true when global lock side matches queried side exactly', () => {
       const futureDate = new Date(Date.now() + 60 * 60_000).toISOString();
+      // Symbol-specific locks: empty
+      selectResultsQueue.push([]);
+      // Global locks: side = 'long'
       selectResultsQueue.push([
-        { symbol: 'AAPL', lockEnd: futureDate, reason: 'cooldown', side: '*', active: true },
+        { symbol: '*', lockEnd: futureDate, reason: 'stoploss_guard', side: 'long', active: true },
       ]);
 
+      // Query with side='long' → lock.side === side matches
       const result = manager.isPairLocked('AAPL', 'long');
       expect(result.locked).toBe(true);
+      expect(result.reason).toBe('stoploss_guard');
     });
 
-    it('uses default reason when lock reason is null', () => {
+    it('uses default reason when global lock reason is null (line 90 ?? branch)', () => {
       const futureDate = new Date(Date.now() + 60 * 60_000).toISOString();
+      // Symbol-specific locks: empty
+      selectResultsQueue.push([]);
+      // Global lock with null reason
       selectResultsQueue.push([
-        { symbol: 'AAPL', lockEnd: futureDate, reason: null, side: '*', active: true },
+        { symbol: '*', lockEnd: futureDate, reason: null, side: '*', active: true },
       ]);
 
       const result = manager.isPairLocked('AAPL');
       expect(result.locked).toBe(true);
-      expect(result.reason).toBe('Pair locked');
+      expect(result.reason).toBe('Global lock active');
+    });
+
+    it('returns locked=true when global lock exists and caller queries with side=*', () => {
+      const futureDate = new Date(Date.now() + 60 * 60_000).toISOString();
+      // Symbol-specific locks: empty
+      selectResultsQueue.push([]);
+      // Global locks: side = 'long'
+      selectResultsQueue.push([
+        { symbol: '*', lockEnd: futureDate, reason: 'stoploss_guard', side: 'long', active: true },
+      ]);
+
+      // Query with side='*' → side === '*' branch triggers
+      const result = manager.isPairLocked('AAPL', '*' as 'long' | 'short');
+      expect(result.locked).toBe(true);
+    });
+
+    it('returns locked=false when global lock side does not match queried side', () => {
+      const futureDate = new Date(Date.now() + 60 * 60_000).toISOString();
+      // Symbol-specific locks: empty
+      selectResultsQueue.push([]);
+      // Global lock is for 'short' side only
+      selectResultsQueue.push([
+        { symbol: '*', lockEnd: futureDate, reason: 'stoploss_guard', side: 'short', active: true },
+      ]);
+
+      // Query with side='long' → lock.side !== '*', lock.side !== side, side !== '*' → condition FALSE
+      // Loop continues without returning, falls through to { locked: false }
+      const result = manager.isPairLocked('AAPL', 'long');
+      expect(result.locked).toBe(false);
     });
   });
 
@@ -529,6 +577,53 @@ describe('ProtectionManager', () => {
       const guardLock = insertedRows.find((r) => r.reason === 'stoploss_guard');
       expect(guardLock).toBeDefined();
     });
+
+    it('treats null exitReason as empty string in stoploss filter (line 98 ?? branch)', () => {
+      // One trade has null exitReason — exercises the `t.exitReason ?? ''` fallback at line 98
+      // The null-exitReason trade is excluded from stoplossExits; only 2 real stoploss exits exist
+      // which is below tradeLimit=3, so no lock is triggered
+      selectResultsQueue.push([
+        { symbol: 'AAPL', exitReason: null, exitTime: new Date().toISOString() },
+        { symbol: 'TSLA', exitReason: 'Stop-loss triggered', exitTime: new Date().toISOString() },
+        { symbol: 'GOOGL', exitReason: 'stoploss', exitTime: new Date().toISOString() },
+      ]);
+      selectResultsQueue.push([]);
+      selectResultsQueue.push([]);
+
+      protectionManager.evaluateAfterClose('AAPL', 'Stop-loss triggered', -0.05);
+
+      // Only 2 stoploss exits (null excluded) < tradeLimit=3 → no guard lock
+      const guardLock = insertedRows.find((r) => r.reason === 'stoploss_guard');
+      expect(guardLock).toBeUndefined();
+    });
+
+    it('does not trigger per-pair lock when pair stoploss count is below limit (line 110 FALSE branch)', () => {
+      mockConfigGet.mockImplementation((key: string) => {
+        const defaults: Record<string, unknown> = {
+          'protection.cooldownMinutes': 0,
+          'protection.stoplossGuard.enabled': true,
+          'protection.stoplossGuard.tradeLimit': 3,
+          'protection.stoplossGuard.lookbackMinutes': 120,
+          'protection.stoplossGuard.lockMinutes': 60,
+          'protection.stoplossGuard.onlyPerPair': true,
+          'protection.maxDrawdownLock.enabled': false,
+          'protection.lowProfitPair.enabled': false,
+        };
+        return defaults[key];
+      });
+
+      // Only 1 stoploss for AAPL, but tradeLimit is 3 → pairStoplossCount(1) >= tradeLimit(3) is FALSE
+      selectResultsQueue.push([
+        { symbol: 'AAPL', exitReason: 'Stop-loss triggered', exitTime: new Date().toISOString() },
+        { symbol: 'TSLA', exitReason: 'stoploss', exitTime: new Date().toISOString() },
+      ]);
+
+      protectionManager.evaluateAfterClose('AAPL', 'Stop-loss triggered', -0.05);
+
+      // No lock because per-pair count (1) < tradeLimit (3)
+      const guardLock = insertedRows.find((r) => r.reason === 'stoploss_guard');
+      expect(guardLock).toBeUndefined();
+    });
   });
 
   describe('evaluateAfterClose - MaxDrawdownLock', () => {
@@ -592,6 +687,46 @@ describe('ProtectionManager', () => {
       const drawdownLock = insertedRows.find((r) => r.reason === 'max_drawdown');
       expect(drawdownLock).toBeUndefined();
     });
+
+    it('sorts trades by exitTime ascending (line 163 comparator both branches)', () => {
+      // Provide trades in DESCENDING order so the sort comparator must return negative,
+      // exercising both the a<b and a>b branches of localeCompare.
+      // Include one trade with null exitTime to exercise the `?? ''` fallback.
+      selectResultsQueue.push([
+        { pnlPct: -0.06, exitTime: '2026-02-14T13:00:00Z' }, // latest first
+        { pnlPct: -0.05, exitTime: '2026-02-14T11:00:00Z' },
+        { pnlPct: 0.03,  exitTime: null },                   // null exitTime → ?? ''
+        { pnlPct: -0.04, exitTime: '2026-02-14T12:00:00Z' },
+      ]);
+      // Low profit
+      selectResultsQueue.push([]);
+
+      // After sorting, null-exitTime trade sorts first ('' < '2026-...')
+      // cumReturn: 0.03, -0.02, -0.06, -0.12 → peak=0.03, maxDrawdown=0.15 > 0.10
+      protectionManager.evaluateAfterClose('AAPL', 'AI sell', 0);
+
+      const drawdownLock = insertedRows.find((r) => r.reason === 'max_drawdown');
+      expect(drawdownLock).toBeDefined();
+    });
+
+    it('handles trades with null pnlPct in drawdown calculation (uses ?? 0)', () => {
+      // Provides trades where some pnlPct are null — exercises the ?? 0 fallback at line 171
+      // and also the exitTime ?? '' fallback in the sort at line 163
+      selectResultsQueue.push([
+        { pnlPct: null, exitTime: null },  // null pnlPct → ?? 0, null exitTime → ?? ''
+        { pnlPct: -0.05, exitTime: '2026-02-14T11:00:00Z' },
+        { pnlPct: -0.04, exitTime: '2026-02-14T12:00:00Z' },
+        { pnlPct: -0.06, exitTime: '2026-02-14T13:00:00Z' },
+      ]);
+      // Low profit
+      selectResultsQueue.push([]);
+
+      protectionManager.evaluateAfterClose('AAPL', 'AI sell', 0);
+
+      // The cumReturn sequence: 0, -0.05, -0.09, -0.15 — drawdown >= 0.10 → triggers lock
+      const drawdownLock = insertedRows.find((r) => r.reason === 'max_drawdown');
+      expect(drawdownLock).toBeDefined();
+    });
   });
 
   describe('evaluateAfterClose - LowProfitPair', () => {
@@ -611,6 +746,23 @@ describe('ProtectionManager', () => {
       const lowProfitLock = insertedRows.find((r) => r.reason === 'low_profit');
       expect(lowProfitLock).toBeDefined();
       expect(lowProfitLock?.symbol).toBe('AAPL');
+    });
+
+    it('locks pair when some pnlPct are null (uses ?? 0 in reduce)', () => {
+      // Max drawdown (no trades)
+      selectResultsQueue.push([]);
+      // Low profit pair trades with null pnlPct values
+      selectResultsQueue.push([
+        { pnlPct: null },   // → ?? 0
+        { pnlPct: -0.03 },
+        { pnlPct: -0.03 },
+      ]);
+
+      // Total: 0 + (-0.03) + (-0.03) = -0.06 < -0.05 (minProfit) with 3 trades >= 3
+      protectionManager.evaluateAfterClose('AAPL', 'AI sell', -0.03);
+
+      const lowProfitLock = insertedRows.find((r) => r.reason === 'low_profit');
+      expect(lowProfitLock).toBeDefined();
     });
 
     it('does not lock when trade count is below limit', () => {

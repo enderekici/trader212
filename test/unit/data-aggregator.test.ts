@@ -450,6 +450,18 @@ describe('DataAggregator', () => {
       expect(result.earnings).toEqual([]);
       expect(result.insiderTransactions).toEqual([]);
     });
+
+    it('calculates changePercent as 0 when Finnhub pc is 0 in getResearchData (line 228)', async () => {
+      mockYahoo.getHistoricalData.mockResolvedValueOnce([]);
+      mockFinnhub.getQuote.mockResolvedValueOnce({ c: 10, h: 11, l: 9, o: 10, pc: 0, t: 0 });
+      mockYahoo.getFundamentals.mockResolvedValueOnce(null);
+      mockFinnhub.getCompanyNews.mockResolvedValueOnce([]);
+      mockFinnhub.getEarningsCalendar.mockResolvedValueOnce([]);
+      mockFinnhub.getInsiderTransactions.mockResolvedValueOnce([]);
+
+      const result = await aggregator.getResearchData('AAPL');
+      expect(result.quote?.changePercent).toBe(0);
+    });
   });
 
   describe('fundamental caching', () => {

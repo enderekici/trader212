@@ -21,6 +21,17 @@ vi.mock('../../src/utils/logger.js', () => ({
   }),
 }));
 
+// Mock DB for PerformanceFilter
+const mockDbAll = vi.fn().mockReturnValue([]);
+vi.mock('../../src/db/index.js', () => ({
+  getDb: vi.fn(() => ({
+    select: vi.fn().mockReturnThis(),
+    from: vi.fn().mockReturnThis(),
+    where: vi.fn().mockReturnThis(),
+    all: mockDbAll,
+  })),
+}));
+
 function makeStock(overrides: Partial<StockInfo> & { symbol: string }): StockInfo {
   return {
     t212Ticker: overrides.symbol,
@@ -384,6 +395,97 @@ describe('pairlist/filters', () => {
       const { MaxPairsFilter } = await import('../../src/pairlist/filters.js');
       const filter = new MaxPairsFilter();
       expect(filter.name).toBe('maxPairs');
+    });
+  });
+
+  describe('PerformanceFilter', () => {
+    beforeEach(() => {
+      mockDbAll.mockReset();
+      mockDbAll.mockReturnValue([]);
+    });
+
+    it('passes all stocks when filter is disabled', async () => {
+      mockConfigValues['pairlist.performance.enabled'] = false;
+
+      const { PerformanceFilter } = await import('../../src/pairlist/filters.js');
+      const filter = new PerformanceFilter();
+
+      const stocks = [makeStock({ symbol: 'AAPL' }), makeStock({ symbol: 'MSFT' })];
+      const result = await filter.filter(stocks);
+
+      expect(result).toHaveLength(2);
+    });
+
+    it('passes stocks with no trade history when enabled', async () => {
+      mockConfigValues['pairlist.performance.enabled'] = true;
+      mockConfigValues['pairlist.performance.minWinRate'] = 0.5;
+      mockConfigValues['pairlist.performance.minTrades'] = 3;
+
+      // No trades in DB
+      mockDbAll.mockReturnValue([]);
+
+      const { PerformanceFilter } = await import('../../src/pairlist/filters.js');
+      const filter = new PerformanceFilter();
+
+      const stocks = [makeStock({ symbol: 'AAPL' }), makeStock({ symbol: 'MSFT' })];
+      const result = await filter.filter(stocks);
+
+      expect(result).toHaveLength(2);
+    });
+
+    it('filters out stocks below minimum win rate (line 159: pnlPct with real values)', async () => {
+      mockConfigValues['pairlist.performance.enabled'] = true;
+      mockConfigValues['pairlist.performance.minWinRate'] = 0.5;
+      mockConfigValues['pairlist.performance.minTrades'] = 2;
+
+      // AAPL: 1 win, 3 losses → 25% win rate → filtered out
+      // MSFT: 3 wins, 1 loss → 75% win rate → kept
+      mockDbAll.mockReturnValue([
+        { symbol: 'AAPL', pnlPct: 5 },
+        { symbol: 'AAPL', pnlPct: -3 },
+        { symbol: 'AAPL', pnlPct: -2 },
+        { symbol: 'AAPL', pnlPct: -1 },
+        { symbol: 'MSFT', pnlPct: 4 },
+        { symbol: 'MSFT', pnlPct: 3 },
+        { symbol: 'MSFT', pnlPct: 2 },
+        { symbol: 'MSFT', pnlPct: -1 },
+      ]);
+
+      const { PerformanceFilter } = await import('../../src/pairlist/filters.js');
+      const filter = new PerformanceFilter();
+
+      const stocks = [makeStock({ symbol: 'AAPL' }), makeStock({ symbol: 'MSFT' })];
+      const result = await filter.filter(stocks);
+
+      expect(result).toHaveLength(1);
+      expect(result[0].symbol).toBe('MSFT');
+    });
+
+    it('treats null pnlPct as 0 via ?? 0 fallback (line 159)', async () => {
+      mockConfigValues['pairlist.performance.enabled'] = true;
+      mockConfigValues['pairlist.performance.minWinRate'] = 0.5;
+      mockConfigValues['pairlist.performance.minTrades'] = 2;
+
+      // AAPL: 2 trades with null pnlPct → pnl = 0 each time (not > 0) → 0% win rate → filtered out
+      mockDbAll.mockReturnValue([
+        { symbol: 'AAPL', pnlPct: null },
+        { symbol: 'AAPL', pnlPct: null },
+      ]);
+
+      const { PerformanceFilter } = await import('../../src/pairlist/filters.js');
+      const filter = new PerformanceFilter();
+
+      const stocks = [makeStock({ symbol: 'AAPL' })];
+      const result = await filter.filter(stocks);
+
+      // 0% win rate < 50% min → filtered out
+      expect(result).toHaveLength(0);
+    });
+
+    it('has correct name property', async () => {
+      const { PerformanceFilter } = await import('../../src/pairlist/filters.js');
+      const filter = new PerformanceFilter();
+      expect(filter.name).toBe('performance');
     });
   });
 });

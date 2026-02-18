@@ -15,10 +15,14 @@ vi.mock('../../src/utils/logger.js', () => ({
   }),
 }));
 
-vi.mock('../../src/execution/pair-locks.js', () => ({
-  getPairLockManager: () => ({
+const { mockGetPairLockManager } = vi.hoisted(() => ({
+  mockGetPairLockManager: vi.fn(() => ({
     isPairLocked: () => ({ locked: false }),
-  }),
+  })),
+}));
+
+vi.mock('../../src/execution/pair-locks.js', () => ({
+  getPairLockManager: mockGetPairLockManager,
 }));
 
 const mockAll = vi.fn().mockReturnValue([]);
@@ -81,6 +85,11 @@ describe('RiskGuard', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     guard = new RiskGuard();
+
+    // Reset pair lock manager to default (not locked)
+    mockGetPairLockManager.mockImplementation(() => ({
+      isPairLocked: () => ({ locked: false }),
+    }));
 
     mockConfigGet.mockImplementation((key: string) => {
       const defaults: Record<string, unknown> = {
@@ -209,6 +218,17 @@ describe('RiskGuard', () => {
       );
       expect(result.allowed).toBe(false);
       expect(result.reason).toContain('Insufficient cash');
+    });
+
+    it('blocks trade and fails closed when pair lock check throws', () => {
+      mockGetPairLockManager.mockImplementationOnce(() => {
+        throw new Error('lock manager unavailable');
+      });
+
+      const result = guard.validateTrade(makeProposal(), makePortfolio());
+
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toContain('Pair lock check failed');
     });
   });
 

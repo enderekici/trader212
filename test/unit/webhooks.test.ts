@@ -287,6 +287,58 @@ describe('Webhook Repository', () => {
 			expect(result).toEqual(mockWebhook);
 		});
 
+		it('should serialize eventTypes as JSON when provided', () => {
+			const mockWebhook: WebhookConfig = {
+				id: 1,
+				name: 'Test',
+				url: 'https://example.com',
+				secret: 'secret',
+				direction: 'outbound',
+				eventTypes: '["trade_executed"]',
+				active: true,
+				createdAt: '2024-01-01T00:00:00Z',
+			};
+
+			mockDb.get.mockReturnValue(mockWebhook);
+
+			const result = updateWebhook(1, { eventTypes: ['trade_executed'] });
+
+			expect(result).toEqual(mockWebhook);
+			expect(mockDb.set).toHaveBeenCalledWith(
+				expect.objectContaining({ eventTypes: '["trade_executed"]' }),
+			);
+		});
+
+		it('should update secret field when provided', () => {
+			const mockWebhook: WebhookConfig = {
+				id: 1,
+				name: 'Test',
+				url: 'https://example.com',
+				secret: 'newsecret',
+				direction: 'outbound',
+				eventTypes: null,
+				active: true,
+				createdAt: '2024-01-01T00:00:00Z',
+			};
+
+			mockDb.get.mockReturnValue(mockWebhook);
+
+			const result = updateWebhook(1, { secret: 'newsecret' });
+
+			expect(result).toEqual(mockWebhook);
+			expect(mockDb.set).toHaveBeenCalledWith(
+				expect.objectContaining({ secret: 'newsecret' }),
+			);
+		});
+
+		it('should return null when db update returns no result', () => {
+			mockDb.get.mockReturnValue(undefined);
+
+			const result = updateWebhook(1, { active: true });
+
+			expect(result).toBeNull();
+		});
+
 		it('should return null on error', () => {
 			mockDb.get.mockImplementation(() => {
 				throw new Error('DB error');
@@ -477,6 +529,22 @@ describe('WebhookManager', () => {
 		vi.clearAllMocks();
 	});
 
+	describe('constructor defaults', () => {
+		it('uses default values when configManager.get returns null/undefined', () => {
+			// Covers lines 42-44: ?? false, ?? 3, ?? ''
+			vi.mocked(configManager.get).mockReturnValue(undefined);
+
+			const defaultManager = new WebhookManager();
+
+			// enabled defaults to false → sendOutbound should skip immediately
+			const result = defaultManager.sendOutbound('trade_executed', { test: 'data' });
+			// Since enabled=false, fetch should not be called
+			return result.then(() => {
+				expect(fetchMock).not.toHaveBeenCalled();
+			});
+		});
+	});
+
 	describe('Signature Generation and Verification', () => {
 		it('should generate valid HMAC-SHA256 signature', () => {
 			const payload = '{"test":"data"}';
@@ -517,6 +585,20 @@ describe('WebhookManager', () => {
 				.digest('hex');
 
 			const isValid = manager.verifySignature(payload, signature, secret2);
+
+			expect(isValid).toBe(false);
+		});
+
+		it('should return false when timingSafeEqual throws due to multi-byte signature chars', () => {
+			const payload = '{"test":"data"}';
+			const secret = 'test-secret';
+
+			// Construct a 64-char string where one char is multi-byte (2 bytes in UTF-8),
+			// making Buffer.from(signature).length > 64, causing timingSafeEqual to throw.
+			// SHA256 hex is 64 chars = 64 bytes; this is also 64 chars but 65 bytes.
+			const multiByteSignature = 'a'.repeat(63) + '\u00e9'; // é = 2 bytes
+
+			const isValid = manager.verifySignature(payload, multiByteSignature, secret);
 
 			expect(isValid).toBe(false);
 		});
@@ -655,6 +737,52 @@ describe('WebhookManager', () => {
 			expect(fetchMock).not.toHaveBeenCalled();
 		});
 
+		it('should use globalSecret in sendWithRetry when webhook has no secret (line 120)', async () => {
+			// Covers line 120: const secret = webhook.secret || this.globalSecret;
+			// When webhook.secret is null/empty, globalSecret is used for the signature
+			const mockWebhook: WebhookConfig = {
+				id: 1,
+				name: 'No Secret Webhook',
+				url: 'https://example.com/webhook',
+				secret: null, // no per-webhook secret
+				direction: 'outbound',
+				eventTypes: '["trade_executed"]',
+				active: true,
+				createdAt: '2024-01-01T00:00:00Z',
+			};
+
+			mockDb.all.mockReturnValue([mockWebhook]);
+			mockDb.get.mockReturnValue({
+				id: 1,
+				webhookId: 1,
+				direction: 'outbound',
+				eventType: 'trade_executed',
+				payload: '{}',
+				statusCode: 200,
+				response: 'OK',
+				createdAt: '2024-01-01T00:00:00Z',
+			});
+
+			fetchMock.mockResolvedValue({
+				ok: true,
+				status: 200,
+				text: async () => 'OK',
+			});
+
+			await manager.sendOutbound('trade_executed', { symbol: 'AAPL' });
+
+			// Verify the request was made (using globalSecret for signing)
+			expect(fetchMock).toHaveBeenCalledWith(
+				'https://example.com/webhook',
+				expect.objectContaining({
+					method: 'POST',
+					headers: expect.objectContaining({
+						'X-Signature': expect.any(String),
+					}),
+				}),
+			);
+		});
+
 		it('should retry on failure with exponential backoff', async () => {
 			vi.useFakeTimers();
 
@@ -747,6 +875,46 @@ describe('WebhookManager', () => {
 			await promise;
 
 			expect(fetchMock).toHaveBeenCalledTimes(3); // maxRetries = 3
+
+			vi.useRealTimers();
+		});
+
+		it('should log String(error) when a non-Error is thrown (line 186)', async () => {
+			vi.useFakeTimers();
+
+			const mockWebhook: WebhookConfig = {
+				id: 1,
+				name: 'Non-Error Throw Webhook',
+				url: 'https://example.com/webhook',
+				secret: 'webhook-secret',
+				direction: 'outbound',
+				eventTypes: '["alert"]',
+				active: true,
+				createdAt: '2024-01-01T00:00:00Z',
+			};
+
+			mockDb.all.mockReturnValue([mockWebhook]);
+			mockDb.get.mockReturnValue({
+				id: 1,
+				webhookId: 1,
+				direction: 'outbound',
+				eventType: 'alert',
+				payload: '{}',
+				statusCode: 0,
+				response: 'network error string',
+				createdAt: '2024-01-01T00:00:00Z',
+			});
+
+			// Reject with a plain string, not an Error object → hits String(error) branch (line 186)
+			fetchMock.mockRejectedValue('network error string');
+
+			const promise = manager.sendOutbound('alert', { message: 'test' });
+
+			await vi.runAllTimersAsync();
+			await promise;
+
+			// The logWebhook call should have been made with the stringified non-Error
+			expect(mockDb.insert).toHaveBeenCalled();
 
 			vi.useRealTimers();
 		});

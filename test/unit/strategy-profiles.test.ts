@@ -394,6 +394,27 @@ describe('config/strategy-profiles', () => {
       // Should call update twice: deactivate all + activate target
       expect(mockDb.update).toHaveBeenCalledTimes(2);
     });
+
+    it('throws and logs error when configManager.set fails during apply', async () => {
+      const profile = {
+        id: 1,
+        name: 'TestProfile',
+        description: 'Test',
+        config: JSON.stringify({ 'risk.maxPositions': 5 }),
+        active: false,
+        createdAt: '2024-01-01T00:00:00Z',
+        updatedAt: null,
+      };
+
+      mockDb.select.mockReturnValue(createChainableMock(profile));
+      mockConfigManager.get.mockReturnValue(3);
+      mockConfigManager.set.mockRejectedValueOnce(new Error('DB write failed'));
+
+      const { getStrategyProfileManager } = await import('../../src/config/strategy-profiles.js');
+      const manager = getStrategyProfileManager();
+
+      await expect(manager.applyProfile('TestProfile')).rejects.toThrow('Failed to apply config key risk.maxPositions');
+    });
   });
 
   describe('StrategyProfileManager.removeProfile', () => {

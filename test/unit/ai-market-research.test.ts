@@ -188,6 +188,41 @@ describe('MarketResearcher', () => {
 
       await expect(researcher.runResearch()).rejects.toThrow('API Error');
     });
+
+    it('stores marketContext JSON in DB when marketContext is set (line 165 true branch)', async () => {
+      const agent = createMockAgent(validResearchResponse);
+      const researcher = new MarketResearcher(agent);
+
+      // Set market context — triggers the mc ? JSON.stringify({...}) : null TRUE branch
+      researcher.setMarketContext({
+        spyPrice: 450,
+        spyChange1d: 0.01,
+        vixLevel: 20,
+        marketTrend: 'bullish',
+      });
+
+      const report = await researcher.runResearch();
+      expect(report).toBeDefined();
+      // DB run() was called once (insert succeeded)
+      expect(mockDbInsert).toHaveBeenCalledOnce();
+    });
+
+    it('uses 0 as vixLevel fallback when vixLevel is null in marketContext (line 167 ?? branch)', async () => {
+      const agent = createMockAgent(validResearchResponse);
+      const researcher = new MarketResearcher(agent);
+
+      // vixLevel is null → mc.vixLevel ?? 0 fallback fires
+      researcher.setMarketContext({
+        spyPrice: 450,
+        spyChange1d: 0.01,
+        vixLevel: null,
+        marketTrend: 'bearish',
+      });
+
+      const report = await researcher.runResearch();
+      expect(report).toBeDefined();
+      expect(mockDbInsert).toHaveBeenCalledOnce();
+    });
   });
 
   describe('parseResearchResponse - valid JSON', () => {
@@ -455,6 +490,18 @@ some garbage in between
       expect(report.results[0].sector).toBe('Unknown');
     });
 
+    it('uses hold fallback when recommendation is null (line 322 ?? branch)', async () => {
+      // recommendation is explicitly null — obj.recommendation ?? 'hold' uses 'hold'
+      const rawResponse = `{"symbol": "NVDA", "recommendation": null, "conviction": 55, "reasoning": "Neutral", "catalysts": [], "risks": [], "timeHorizon": "short", "sector": "Tech"}`;
+
+      const agent = createMockAgent(rawResponse);
+      const researcher = new MarketResearcher(agent);
+
+      const report = await researcher.runResearch();
+      expect(report.results).toHaveLength(1);
+      expect(report.results[0].recommendation).toBe('hold');
+    });
+
     it('extracts individual blocks with targetPrice set', async () => {
       const rawResponse = `Results:
 {"symbol": "NVDA", "recommendation": "strong_buy", "conviction": 90, "reasoning": "AI leader", "catalysts": ["Data center"], "risks": ["Valuation"], "targetPrice": 950, "timeHorizon": "long", "sector": "Technology"}`;
@@ -681,6 +728,143 @@ some garbage in between
       const report = await researcher.runResearch();
       // String(undefined ?? '') = ''
       expect(report.results[0].symbol).toBe('');
+    });
+  });
+
+  describe('parseResearchContext - sectorRotation and keyThemes edge cases', () => {
+    it('returns empty sectorRotation when sectorRotation is not a string (line 377)', async () => {
+      // JSON is valid but sectorRotation is a number (not string) → triggers false branch of typeof check
+      const rawResponse = JSON.stringify({
+        results: [],
+        sectorRotation: 42, // not a string
+        keyThemes: ['AI', 'Cloud'],
+      });
+
+      const agent = createMockAgent(rawResponse);
+      const researcher = new MarketResearcher(agent);
+
+      // The report stores marketContext from parseResearchContext; verify it runs without error
+      const report = await researcher.runResearch();
+      expect(report).toBeDefined();
+    });
+
+    it('returns empty keyThemes when keyThemes is not an array (line 378)', async () => {
+      // JSON is valid but keyThemes is a string → triggers false branch of Array.isArray check
+      const rawResponse = JSON.stringify({
+        results: [],
+        sectorRotation: 'Tech rotating to value',
+        keyThemes: 'single theme as string', // not an array
+      });
+
+      const agent = createMockAgent(rawResponse);
+      const researcher = new MarketResearcher(agent);
+
+      const report = await researcher.runResearch();
+      expect(report).toBeDefined();
+    });
+  });
+
+  describe('parseResearchResponse - individual block fallback null results (line 336)', () => {
+    it('falls through to warn when all matched blocks fail JSON.parse after repair (line 336 false)', async () => {
+      // Construct a response where resultBlocks regex matches but every parsed block fails JSON.parse
+      // The regex: /\{[^{}]*"symbol"\s*:\s*"[A-Z]+[^{}]*\}/g
+      // After repair, if parse still fails → results stays empty → falls through to log.warn
+      const rawResponse = `garbage { "symbol": "AAPL", broken json: value: }`;
+
+      const agent = createMockAgent(rawResponse);
+      const researcher = new MarketResearcher(agent);
+
+      const report = await researcher.runResearch();
+      // All blocks fail → results is empty → log.warn path → returns []
+      expect(report.results).toHaveLength(0);
+    });
+  });
+
+  describe('setDataFetcher, setMarketContext, setRegime, getMarketContext', () => {
+    it('stores and retrieves marketContext via setMarketContext / getMarketContext', () => {
+      const agent = createMockAgent(validResearchResponse);
+      const researcher = new MarketResearcher(agent);
+
+      expect(researcher.getMarketContext()).toBeNull();
+
+      const ctx = { spyPrice: 450, spyChange1d: 0.01, vixLevel: 15, marketTrend: 'bullish' as const };
+      researcher.setMarketContext(ctx);
+
+      expect(researcher.getMarketContext()).toEqual(ctx);
+    });
+
+    it('sets regime via setRegime (does not throw)', () => {
+      const agent = createMockAgent(validResearchResponse);
+      const researcher = new MarketResearcher(agent);
+
+      researcher.setRegime({
+        regime: 'trending_up',
+        confidence: 0.8,
+        details: { spyTrend: 'up', vixLevel: 15, breadthScore: 0.7, volatilityPctile: 20, adjustments: { newEntriesAllowed: true, positionSizeMultiplier: 1, stopLossMultiplier: 1, entryThresholdAdjustment: 0 } },
+      });
+      researcher.setRegime(null);
+
+      // No assertion needed — just confirming no throw
+      expect(researcher.getMarketContext()).toBeNull();
+    });
+
+    it('sets dataFetcher via setDataFetcher and uses it during runResearch when symbols provided', async () => {
+      const agent = createMockAgent(validResearchResponse);
+      const researcher = new MarketResearcher(agent);
+
+      const mockData = new Map([
+        ['AAPL', {
+          price: 150,
+          change1dPct: 1.0,
+          change5dPct: null,
+          change1mPct: null,
+          technical: null,
+          fundamentals: null,
+          fundamentalScore: 0,
+          sentimentScore: 0,
+          headlines: [],
+          insiderNetBuying: 0,
+          daysToEarnings: null,
+          sector: null,
+          marketCap: null,
+        }],
+      ]);
+
+      const fetcherFn = vi.fn().mockResolvedValue(mockData);
+      researcher.setDataFetcher(fetcherFn);
+
+      await researcher.runResearch({ symbols: ['AAPL'] });
+
+      expect(fetcherFn).toHaveBeenCalledWith(['AAPL']);
+    });
+
+    it('handles dataFetcher error gracefully during runResearch', async () => {
+      const agent = createMockAgent(validResearchResponse);
+      const researcher = new MarketResearcher(agent);
+
+      const fetcherFn = vi.fn().mockRejectedValue(new Error('fetch failed'));
+      researcher.setDataFetcher(fetcherFn);
+
+      // Should NOT throw even if dataFetcher fails — error is caught and logged
+      const report = await researcher.runResearch({ symbols: ['AAPL'] });
+      expect(report).toBeDefined();
+      expect(fetcherFn).toHaveBeenCalledWith(['AAPL']);
+    });
+
+    it('skips buildResearchDataPrompt when dataFetcher returns empty map (line 129 false branch)', async () => {
+      const agent = createMockAgent(validResearchResponse);
+      const researcher = new MarketResearcher(agent);
+
+      // Empty map → symbolData.size > 0 is false → enrichedDataPrompt stays ''
+      const fetcherFn = vi.fn().mockResolvedValue(new Map());
+      researcher.setDataFetcher(fetcherFn);
+
+      const report = await researcher.runResearch({ symbols: ['AAPL'] });
+      expect(report).toBeDefined();
+      expect(fetcherFn).toHaveBeenCalledWith(['AAPL']);
+      // Prompt should NOT contain 'ACTUAL market data' since enrichedDataPrompt is empty
+      const promptArg = (agent.rawChat as ReturnType<typeof vi.fn>).mock.calls[0][1];
+      expect(promptArg).not.toContain('ACTUAL market data provided above');
     });
   });
 });

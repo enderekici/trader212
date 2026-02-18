@@ -188,4 +188,67 @@ describe('HealthMetricsCollector', () => {
 			expect(a).toBe(b);
 		});
 	});
+
+	describe('computeStatus recentCount === 0 branch', () => {
+		it('skips jobs with recentCount === 0 in status computation (line 206)', () => {
+			// Only call recordJobStart (no recordJobEnd) → recentCount stays 0
+			// computeStatus iterates jobMetrics and hits `if (state.recentCount === 0) continue`
+			collector.recordJobStart('orphanJob');
+
+			// getSnapshot() calls computeStatus() internally
+			const snapshot = collector.getSnapshot();
+
+			// With no completed runs and no data source calls, status should be healthy
+			expect(snapshot.status).toBe('healthy');
+			// The job metrics should show up but with 0 total runs
+			const jobMetrics = collector.getJobMetrics();
+			expect(jobMetrics).toHaveLength(1);
+			expect(jobMetrics[0].totalRuns).toBe(0);
+		});
+
+		it('computeAvgDuration returns 0 when durationCount === 0 (line 248)', () => {
+			// recordJobEnd without prior start → durationMs = 0, but durationCount IS incremented
+			// To get durationCount === 0 in getJobMetrics: only call recordJobStart, not End
+			collector.recordJobStart('startOnlyJob');
+
+			const metrics = collector.getJobMetrics();
+			// Job exists in metrics with 0 total runs and avgDurationMs = 0
+			expect(metrics[0].avgDurationMs).toBe(0);
+		});
+	});
+
+	describe('ring buffer overflow branches', () => {
+		it('should NOT increment recentCount beyond RECENT_RUNS_SIZE (line 102 false branch)', () => {
+			// RECENT_RUNS_SIZE = 5; call recordJobEnd 7 times to overflow the buffer
+			// After 5 calls, recentCount hits max and the `if (recentCount < RECENT_RUNS_SIZE)` branch is false
+			for (let i = 0; i < 7; i++) {
+				collector.recordJobStart('ringJob');
+				collector.recordJobEnd('ringJob', true);
+			}
+			const metrics = collector.getJobMetrics();
+			expect(metrics[0].totalRuns).toBe(7);
+			expect(metrics[0].avgDurationMs).toBeGreaterThanOrEqual(0);
+		});
+
+		it('should NOT increment latencyCount beyond RING_BUFFER_SIZE (line 123 false branch)', () => {
+			// RING_BUFFER_SIZE = 100; call recordDataSourceCall 102 times to overflow
+			for (let i = 0; i < 102; i++) {
+				collector.recordDataSourceCall('testSource', true, 100 + i);
+			}
+			const sources = collector.getDataSourceHealth();
+			expect(sources[0].totalCalls).toBe(102);
+			expect(sources[0].avgLatencyMs).toBeGreaterThan(0);
+		});
+
+		it('should NOT increment durationCount beyond RING_BUFFER_SIZE (line 96 false branch)', () => {
+			// RING_BUFFER_SIZE = 100; call recordJobEnd 102 times to overflow
+			for (let i = 0; i < 102; i++) {
+				collector.recordJobStart('durationJob');
+				collector.recordJobEnd('durationJob', true);
+			}
+			const metrics = collector.getJobMetrics();
+			expect(metrics[0].totalRuns).toBe(102);
+			expect(metrics[0].avgDurationMs).toBeGreaterThanOrEqual(0);
+		});
+	});
 });

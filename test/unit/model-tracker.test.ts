@@ -435,5 +435,17 @@ describe('ModelTracker', () => {
 
       expect(stats[0].holdAccuracy).toBe(0.5); // 1/2
     });
+
+    it('calculates avgReturnOnSell with null actualReturnPct treated as 0', () => {
+      mockDbAll.mockReturnValueOnce([
+        { aiModel: 'claude', decision: 'SELL', conviction: 70, actualOutcome: 'correct', actualReturnPct: null },
+        { aiModel: 'claude', decision: 'SELL', conviction: 65, actualOutcome: 'correct', actualReturnPct: null },
+      ]);
+
+      const stats = tracker.getModelStats();
+
+      // sells.length > 0 but all actualReturnPct are null → reduce gives 0, /2 = 0
+      expect(stats[0].avgReturnOnSell).toBe(0);
+    });
   });
 });

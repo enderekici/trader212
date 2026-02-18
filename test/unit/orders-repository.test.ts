@@ -80,6 +80,8 @@ import {
   getRecentOrders,
   getOrderCount,
   recalcFromOrders,
+  findOrderReplacedBy,
+  setReplacedByOrderId,
   type Order,
   type NewOrder,
 } from '../../src/db/repositories/orders.js';
@@ -489,6 +491,38 @@ describe('db/repositories/orders', () => {
       expect(result.avgPrice).toBe(150);
       expect(result.totalQuantity).toBe(20);
       expect(result.totalStake).toBe(3000);
+    });
+  });
+
+  // ── findOrderReplacedBy ─────────────────────────────────────────────────
+  describe('findOrderReplacedBy', () => {
+    it('returns the order whose replacedByOrderId matches', () => {
+      const mockOrder: Order = makeFilledOrder({ id: 5, replacedByOrderId: 10 });
+      mockDb.select.mockReturnValue(createChainableMock(mockOrder));
+
+      const result = findOrderReplacedBy(10);
+
+      expect(mockDb.select).toHaveBeenCalled();
+      expect(result).toEqual(mockOrder);
+    });
+
+    it('returns undefined when no matching order exists', () => {
+      mockDb.select.mockReturnValue(createChainableMock(undefined));
+
+      const result = findOrderReplacedBy(999);
+
+      expect(result).toBeUndefined();
+    });
+  });
+
+  // ── setReplacedByOrderId ────────────────────────────────────────────────
+  describe('setReplacedByOrderId', () => {
+    it('updates the replacedByOrderId and updatedAt fields', () => {
+      mockDb.update.mockReturnValue(createChainableMock());
+
+      setReplacedByOrderId(3, 7);
+
+      expect(mockDb.update).toHaveBeenCalled();
     });
   });
 });

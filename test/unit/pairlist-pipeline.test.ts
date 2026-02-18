@@ -18,14 +18,38 @@ const mockDbInsert = vi.fn(() => ({
   })),
 }));
 
+const mockDbSelectAll = vi.fn().mockReturnValue([]);
+const mockDbSelect = vi.fn(() => ({
+  from: vi.fn(() => ({
+    orderBy: vi.fn(() => ({
+      all: mockDbSelectAll,
+    })),
+  })),
+}));
+
 vi.mock('../../src/db/index.js', () => ({
   getDb: () => ({
     insert: mockDbInsert,
+    select: mockDbSelect,
   }),
 }));
 
 vi.mock('../../src/db/schema.js', () => ({
   pairlistHistory: {},
+  fundamentalCache: {
+    symbol: 'symbol',
+    sector: 'sector',
+    fetchedAt: 'fetchedAt',
+  },
+}));
+
+const { mockGetQuote } = vi.hoisted(() => ({
+  mockGetQuote: vi.fn().mockResolvedValue(null),
+}));
+vi.mock('../../src/data/yahoo-finance.js', () => ({
+  YahooFinanceClient: class {
+    getQuote = mockGetQuote;
+  },
 }));
 
 vi.mock('../../src/utils/logger.js', () => ({
@@ -59,6 +83,10 @@ describe('pairlist/pipeline', () => {
     for (const key of Object.keys(mockConfigValues)) {
       delete mockConfigValues[key];
     }
+    // Restore defaults after vi.clearAllMocks()
+    mockDbSelectAll.mockReturnValue([]);
+    mockGetQuote.mockResolvedValue(null);
+    mockDbInsert.mockReturnValue({ values: vi.fn(() => ({ run: vi.fn() })) });
   });
 
   afterEach(() => {
@@ -139,6 +167,70 @@ describe('pairlist/pipeline', () => {
 
       const pipeline = new PairlistPipeline([]);
       // Should not throw
+      const result = await pipeline.run([makeStock('AAPL')]);
+      expect(result).toHaveLength(1);
+    });
+
+    it('applies sector data from fundamentals cache to stocks without a sector', async () => {
+      mockConfigValues['pairlist.mode'] = 'dynamic';
+
+      // Return rows: AAPL has sector, MSFT has no sector (falsy), AAPL appears twice (duplicate suppressed)
+      mockDbSelectAll.mockReturnValue([
+        { symbol: 'AAPL', sector: 'Technology' },
+        { symbol: 'AAPL', sector: 'Technology' }, // duplicate → sectorMap.has() is true → skipped
+        { symbol: 'MSFT', sector: null },          // falsy sector → skipped
+      ]);
+
+      mockGetQuote.mockImplementation((symbol: string) => {
+        if (symbol === 'AAPL') {
+          return Promise.resolve({
+            price: 150,
+            avgVolume: 1000000,
+            marketCap: null,        // null marketCap → ?? undefined branch
+            dayHigh: null,          // null dayHigh → volatility branch not taken
+            dayLow: null,
+          });
+        }
+        if (symbol === 'MSFT') {
+          return Promise.resolve({
+            price: 300,
+            avgVolume: 500000,
+            marketCap: 3000000000,
+            dayHigh: 310,           // non-null → volatility computed
+            dayLow: 290,
+          });
+        }
+        return Promise.resolve(null);
+      });
+
+      const { PairlistPipeline } = await import('../../src/pairlist/pipeline.js');
+
+      const pipeline = new PairlistPipeline([]);
+      // AAPL has no price → enrichStocks runs; MSFT has sector already set
+      const result = await pipeline.run([
+        makeStock('AAPL'),                          // no price, no sector
+        makeStock('MSFT', { sector: 'Software' }), // has sector → !stock.sector is false
+      ]);
+
+      const aapl = result.find((s) => s.symbol === 'AAPL');
+      expect(aapl?.sector).toBe('Technology');
+
+      const msft = result.find((s) => s.symbol === 'MSFT');
+      expect(msft?.sector).toBe('Software'); // untouched
+    });
+
+    it('logs warning and continues when sector DB load throws', async () => {
+      mockConfigValues['pairlist.mode'] = 'dynamic';
+
+      // Make DB select throw to trigger the catch block (line 109)
+      mockDbSelect.mockImplementationOnce(() => {
+        throw new Error('DB select failed');
+      });
+
+      const { PairlistPipeline } = await import('../../src/pairlist/pipeline.js');
+
+      const pipeline = new PairlistPipeline([]);
+      // Should not throw — catch block handles it gracefully
       const result = await pipeline.run([makeStock('AAPL')]);
       expect(result).toHaveLength(1);
     });

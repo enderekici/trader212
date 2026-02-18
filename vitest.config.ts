@@ -17,6 +17,7 @@ export default defineConfig({
         'src/db/repositories/conditional-orders.ts',
         'src/db/repositories/tax-lots.ts',
         'src/execution/order-sync.ts',
+        'src/backtest/types.ts',
       ],
       thresholds: {
         lines: 90,

@@ -503,6 +503,28 @@ describe('PartialExitManager', () => {
       );
     });
 
+    it('should treat null partialExitCount as 0 when incrementing (line 420 ?? branch)', async () => {
+      const position = createMockPosition({
+        shares: 100,
+        partialExitCount: null, // triggers (null ?? 0) + 1 = 1
+        entryPrice: 100,
+        currentPrice: 105,
+        stopLoss: 95,
+      });
+
+      mockDb.get.mockReturnValue(position);
+
+      const result = await manager.executePartialExit('AAPL', 'AAPL_US_EQ', 50, 'Tier 1', 'INVEST');
+
+      expect(result.success).toBe(true);
+      // Verify update was called with partialExitCount = 0 + 1 = 1
+      expect(mockDb.set).toHaveBeenCalledWith(
+        expect.objectContaining({
+          partialExitCount: 1,
+        }),
+      );
+    });
+
     it('should increment partialExitCount', async () => {
       const position = createMockPosition({
         shares: 100,
@@ -629,6 +651,89 @@ describe('PartialExitManager', () => {
         }),
       );
     });
+
+    it('continues (warns) when cancelling old stop order fails during moveToBreakeven', async () => {
+      // Covers line 346: catch block when cancelOrder throws for the old stop
+      vi.mocked(configManager.get).mockImplementation((key: string) => {
+        const defaults: Record<string, any> = {
+          'partialExit.enabled': true,
+          'partialExit.moveStopToBreakeven': true,
+          'execution.dryRun': false,
+          'execution.orderTimeoutSeconds': 10,
+          'execution.stopLossDelay': 0,
+        };
+        return defaults[key];
+      });
+
+      const position = createMockPosition({
+        shares: 100,
+        entryPrice: 100,
+        currentPrice: 105,
+        partialExitCount: 0,
+        stopOrderId: 'old-stop-456',
+      });
+      mockDb.get.mockReturnValue(position);
+
+      vi.mocked(mockT212Client.placeMarketOrder).mockResolvedValue({ id: 8001 } as any);
+      vi.mocked(mockT212Client.getOrder).mockResolvedValue({
+        status: 'FILLED',
+        filledValue: 5250,
+        filledQuantity: 50,
+      } as any);
+      // cancelOrder throws — should be caught and logged as warn, not propagated
+      vi.mocked(mockT212Client.cancelOrder).mockRejectedValue(new Error('Cancel failed'));
+      // placeStopOrder succeeds for the new breakeven stop
+      vi.mocked(mockT212Client.placeStopOrder).mockResolvedValue({ id: 8002 } as any);
+
+      mockDb.run.mockReturnValue({ lastInsertRowid: 1n });
+
+      const result = await manager.executePartialExit('AAPL', 'AAPL_US_EQ', 50, 'Tier 1', 'INVEST');
+
+      // Should still succeed overall (cancel failure is non-fatal)
+      expect(result.success).toBe(true);
+      expect(result.newStopLoss).toBe(100); // Moved to breakeven
+    });
+
+    it('continues (logs error) when placing new breakeven stop-loss fails', async () => {
+      // Covers line 389: catch block when placeStopOrder throws for the new stop
+      vi.mocked(configManager.get).mockImplementation((key: string) => {
+        const defaults: Record<string, any> = {
+          'partialExit.enabled': true,
+          'partialExit.moveStopToBreakeven': true,
+          'execution.dryRun': false,
+          'execution.orderTimeoutSeconds': 10,
+          'execution.stopLossDelay': 0,
+        };
+        return defaults[key];
+      });
+
+      const position = createMockPosition({
+        shares: 100,
+        entryPrice: 100,
+        currentPrice: 105,
+        partialExitCount: 0,
+        stopOrderId: 'old-stop-789',
+      });
+      mockDb.get.mockReturnValue(position);
+
+      vi.mocked(mockT212Client.placeMarketOrder).mockResolvedValue({ id: 8003 } as any);
+      vi.mocked(mockT212Client.getOrder).mockResolvedValue({
+        status: 'FILLED',
+        filledValue: 5250,
+        filledQuantity: 50,
+      } as any);
+      // cancelOrder succeeds for old stop
+      vi.mocked(mockT212Client.cancelOrder).mockResolvedValue(undefined);
+      // placeStopOrder throws for new breakeven stop — should be caught, not propagated
+      vi.mocked(mockT212Client.placeStopOrder).mockRejectedValue(new Error('Exchange rejected stop'));
+
+      mockDb.run.mockReturnValue({ lastInsertRowid: 1n });
+
+      const result = await manager.executePartialExit('AAPL', 'AAPL_US_EQ', 50, 'Tier 1', 'INVEST');
+
+      // Should still succeed overall (stop placement failure is non-fatal for partial exit)
+      expect(result.success).toBe(true);
+    });
   });
 
   describe('getPartialExitManager singleton', () => {
@@ -637,6 +742,274 @@ describe('PartialExitManager', () => {
       const instance2 = getPartialExitManager();
 
       expect(instance1).toBe(instance2);
+    });
+  });
+
+  describe('executePartialExit - waitForFill edge cases', () => {
+    beforeEach(() => {
+      vi.mocked(configManager.get).mockImplementation((key: string) => {
+        const defaults: Record<string, any> = {
+          'partialExit.enabled': true,
+          'partialExit.moveStopToBreakeven': false,
+          'execution.dryRun': false, // Live mode
+          'execution.orderTimeoutSeconds': 1, // 1 second = 2 attempts
+          'execution.stopLossDelay': 0,
+        };
+        return defaults[key];
+      });
+    });
+
+    it('returns null (timeout) when order is CANCELLED during polling', async () => {
+      const position = createMockPosition({ shares: 100 });
+      mockDb.get.mockReturnValue(position);
+
+      vi.mocked(mockT212Client.placeMarketOrder).mockResolvedValue({ id: 9001 } as any);
+      // Immediately return CANCELLED status
+      vi.mocked(mockT212Client.getOrder).mockResolvedValue({ status: 'CANCELLED' } as any);
+      vi.mocked(mockT212Client.cancelOrder).mockResolvedValue(undefined);
+
+      const result = await manager.executePartialExit('AAPL', 'AAPL_US_EQ', 50, 'Tier 1', 'INVEST');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Partial exit order fill timeout');
+    });
+
+    it('returns null (timeout) when order is REJECTED during polling', async () => {
+      const position = createMockPosition({ shares: 100 });
+      mockDb.get.mockReturnValue(position);
+
+      vi.mocked(mockT212Client.placeMarketOrder).mockResolvedValue({ id: 9002 } as any);
+      vi.mocked(mockT212Client.getOrder).mockResolvedValue({ status: 'REJECTED' } as any);
+      vi.mocked(mockT212Client.cancelOrder).mockResolvedValue(undefined);
+
+      const result = await manager.executePartialExit('AAPL', 'AAPL_US_EQ', 50, 'Tier 1', 'INVEST');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Partial exit order fill timeout');
+    });
+
+    it('recovers fill price when cancel fails but final status is FILLED', async () => {
+      const position = createMockPosition({
+        shares: 100,
+        entryPrice: 100,
+        currentPrice: 105,
+        partialExitCount: 0,
+        stopOrderId: null,
+      });
+      mockDb.get.mockReturnValue(position);
+
+      vi.mocked(mockT212Client.placeMarketOrder).mockResolvedValue({ id: 9003 } as any);
+      // Polling: 2x NEW (timeout with 1s timeout)
+      vi.mocked(mockT212Client.getOrder)
+        .mockResolvedValueOnce({ status: 'NEW' } as any)
+        .mockResolvedValueOnce({ status: 'NEW' } as any)
+        // Final status check after cancel fails: FILLED with price data
+        .mockResolvedValueOnce({
+          status: 'FILLED',
+          filledValue: 5250,
+          filledQuantity: 50,
+        } as any);
+
+      // Cancel throws, triggering the cancel-fail path
+      vi.mocked(mockT212Client.cancelOrder).mockRejectedValue(new Error('Cancel failed'));
+      vi.mocked(mockT212Client.placeStopOrder).mockResolvedValue({ id: 9004 } as any);
+
+      mockDb.run.mockReturnValue({ lastInsertRowid: 1n });
+
+      const result = await manager.executePartialExit('AAPL', 'AAPL_US_EQ', 50, 'Tier 1', 'INVEST');
+
+      // Should succeed since we recovered the fill
+      expect(result.success).toBe(true);
+    });
+
+    it('returns null when cancel fails and final status check also throws', async () => {
+      const position = createMockPosition({ shares: 100 });
+      mockDb.get.mockReturnValue(position);
+
+      vi.mocked(mockT212Client.placeMarketOrder).mockResolvedValue({ id: 9005 } as any);
+      vi.mocked(mockT212Client.getOrder)
+        .mockResolvedValueOnce({ status: 'NEW' } as any)
+        .mockResolvedValueOnce({ status: 'NEW' } as any)
+        // Final status check throws
+        .mockRejectedValueOnce(new Error('Status check failed'));
+
+      vi.mocked(mockT212Client.cancelOrder).mockRejectedValue(new Error('Cancel failed'));
+
+      const result = await manager.executePartialExit('AAPL', 'AAPL_US_EQ', 50, 'Tier 1', 'INVEST');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Partial exit order fill timeout');
+    });
+
+    it('returns fill price from value/quantity fallback when filledValue/filledQuantity are null', async () => {
+      // Covers lines 472-474: waitForFill uses value/quantity when filledValue/filledQuantity are null
+      const position = createMockPosition({
+        shares: 100,
+        entryPrice: 100,
+        currentPrice: 105,
+        partialExitCount: 0,
+        stopOrderId: null,
+      });
+      mockDb.get.mockReturnValue(position);
+
+      vi.mocked(mockT212Client.placeMarketOrder).mockResolvedValue({ id: 9006 } as any);
+      // FILLED but filledValue/filledQuantity are null — only value/quantity set
+      vi.mocked(mockT212Client.getOrder).mockResolvedValue({
+        status: 'FILLED',
+        filledValue: null,
+        filledQuantity: null,
+        value: 5250,
+        quantity: 50,
+      } as any);
+
+      mockDb.run.mockReturnValue({ lastInsertRowid: 1n });
+
+      const result = await manager.executePartialExit('AAPL', 'AAPL_US_EQ', 50, 'Tier 1', 'INVEST');
+
+      // Fill price = 5250 / 50 = 105 — should succeed and record the trade
+      expect(result.success).toBe(true);
+      expect(result.sharesToSell).toBe(50);
+    });
+
+    it('returns failure when order is FILLED but all price data is null (waitForFill returns null)', async () => {
+      // Covers lines 475-476: all four price fields null → log.warn + return null
+      const position = createMockPosition({
+        shares: 100,
+        entryPrice: 100,
+        currentPrice: 105,
+        partialExitCount: 0,
+        stopOrderId: null,
+      });
+      mockDb.get.mockReturnValue(position);
+
+      vi.mocked(mockT212Client.placeMarketOrder).mockResolvedValue({ id: 9007 } as any);
+      // FILLED but all price fields null → waitForFill returns null
+      vi.mocked(mockT212Client.getOrder).mockResolvedValue({
+        status: 'FILLED',
+        filledValue: null,
+        filledQuantity: null,
+        value: null,
+        quantity: null,
+      } as any);
+
+      const result = await manager.executePartialExit('AAPL', 'AAPL_US_EQ', 50, 'Tier 1', 'INVEST');
+
+      // waitForFill returns null → executePartialExit returns failure
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Partial exit order fill timeout');
+    });
+
+    it('covers line 420 ?? 0 true branch: null partialExitCount in LIVE mode', async () => {
+      // In live mode with partialExitCount: null, (null ?? 0) + 1 = 1
+      const position = createMockPosition({
+        shares: 100,
+        entryPrice: 100,
+        currentPrice: 105,
+        partialExitCount: null, // triggers null ?? 0
+        stopOrderId: null,
+        stopLoss: 95,
+      });
+      mockDb.get.mockReturnValue(position);
+
+      vi.mocked(mockT212Client.placeMarketOrder).mockResolvedValue({ id: 9010 } as any);
+      vi.mocked(mockT212Client.getOrder).mockResolvedValue({
+        status: 'FILLED',
+        filledValue: 5250,
+        filledQuantity: 50,
+      } as any);
+      mockDb.run.mockReturnValue({ lastInsertRowid: 1n });
+
+      const result = await manager.executePartialExit('AAPL', 'AAPL_US_EQ', 50, 'Tier 1', 'INVEST');
+
+      expect(result.success).toBe(true);
+      expect(mockDb.set).toHaveBeenCalledWith(
+        expect.objectContaining({ partialExitCount: 1 }),
+      );
+    });
+
+    it('covers line 444 newStopLoss ?? undefined true branch: null stopLoss in LIVE mode', async () => {
+      // When stopLoss is null, newStopLoss stays null, and null ?? undefined returns undefined
+      const position = createMockPosition({
+        shares: 100,
+        entryPrice: 100,
+        currentPrice: 105,
+        partialExitCount: 0,
+        stopOrderId: null,
+        stopLoss: null, // newStopLoss will be null → null ?? undefined = undefined
+      });
+      mockDb.get.mockReturnValue(position);
+
+      vi.mocked(mockT212Client.placeMarketOrder).mockResolvedValue({ id: 9011 } as any);
+      vi.mocked(mockT212Client.getOrder).mockResolvedValue({
+        status: 'FILLED',
+        filledValue: 5250,
+        filledQuantity: 50,
+      } as any);
+      mockDb.run.mockReturnValue({ lastInsertRowid: 1n });
+
+      const result = await manager.executePartialExit('AAPL', 'AAPL_US_EQ', 50, 'Tier 1', 'INVEST');
+
+      expect(result.success).toBe(true);
+      expect(result.newStopLoss).toBeUndefined(); // null ?? undefined = undefined
+    });
+
+    it('covers lines 446-456 catch block: db.transaction throws in LIVE mode', async () => {
+      // When db.transaction throws, the catch block returns { success: false, error: ... }
+      const position = createMockPosition({
+        shares: 100,
+        entryPrice: 100,
+        currentPrice: 105,
+        partialExitCount: 0,
+        stopOrderId: null,
+        stopLoss: 95,
+      });
+      mockDb.get.mockReturnValue(position);
+
+      vi.mocked(mockT212Client.placeMarketOrder).mockResolvedValue({ id: 9012 } as any);
+      vi.mocked(mockT212Client.getOrder).mockResolvedValue({
+        status: 'FILLED',
+        filledValue: 5250,
+        filledQuantity: 50,
+      } as any);
+
+      // Make db.transaction throw
+      mockDb.transaction.mockImplementationOnce(() => {
+        throw new Error('DB transaction failed');
+      });
+
+      const result = await manager.executePartialExit('AAPL', 'AAPL_US_EQ', 50, 'Tier 1', 'INVEST');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('DB transaction failed');
+    });
+
+    it('covers catch block error string path (non-Error thrown)', async () => {
+      const position = createMockPosition({
+        shares: 100,
+        entryPrice: 100,
+        currentPrice: 105,
+        partialExitCount: 0,
+        stopOrderId: null,
+        stopLoss: 95,
+      });
+      mockDb.get.mockReturnValue(position);
+
+      vi.mocked(mockT212Client.placeMarketOrder).mockResolvedValue({ id: 9013 } as any);
+      vi.mocked(mockT212Client.getOrder).mockResolvedValue({
+        status: 'FILLED',
+        filledValue: 5250,
+        filledQuantity: 50,
+      } as any);
+
+      // Throw a non-Error string
+      mockDb.transaction.mockImplementationOnce(() => {
+        throw 'string error';
+      });
+
+      const result = await manager.executePartialExit('AAPL', 'AAPL_US_EQ', 50, 'Tier 1', 'INVEST');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('string error');
     });
   });
 });

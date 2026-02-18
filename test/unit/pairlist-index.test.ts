@@ -53,7 +53,7 @@ describe('pairlist/index', () => {
 
     it('creates a pipeline with all filter types', async () => {
       mockConfigValues['pairlist.filters'] = [
-        'volume', 'price', 'marketCap', 'volatility', 'blacklist', 'maxPairs'
+        'volume', 'price', 'marketCap', 'volatility', 'blacklist', 'maxPairs', 'performance', 'sector'
       ];
 
       const { createPairlistPipeline } = await import('../../src/pairlist/index.js');

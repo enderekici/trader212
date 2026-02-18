@@ -376,6 +376,39 @@ describe('TaxTracker', () => {
 				accountType: 'INVEST',
 			});
 		});
+
+		it('should warn when selling more shares than available in lots (line 140)', async () => {
+			vi.mocked(getOpenLots).mockResolvedValue([
+				{
+					id: 1,
+					symbol: 'AAPL',
+					shares: 5,
+					costBasis: 150,
+					purchaseDate: '2024-01-01T00:00:00.000Z',
+					saleDate: null,
+					salePrice: null,
+					pnl: null,
+					holdingPeriod: null,
+					accountType: 'INVEST',
+					createdAt: '2024-01-01T00:00:00.000Z',
+				},
+			]);
+
+			vi.mocked(closeLot).mockResolvedValue(undefined);
+
+			const tracker = getTaxTracker();
+			// Sell 20 shares but only 5 are available in the lot
+			await tracker.recordSale('AAPL', 20, 200, '2025-06-01T00:00:00.000Z');
+
+			// Should close the available 5 shares
+			expect(closeLot).toHaveBeenCalledWith(1, {
+				saleDate: '2025-06-01T00:00:00.000Z',
+				salePrice: 200,
+				pnl: 250, // 5 * (200 - 150)
+				holdingPeriod: 'long',
+			});
+			// remainingShares (15) > 0 triggers the warning log
+		});
 	});
 
 	describe('getHarvestCandidates', () => {
@@ -1011,6 +1044,112 @@ describe('TaxTracker', () => {
 			const tracker2 = getTaxTracker();
 
 			expect(tracker1).toBe(tracker2);
+		});
+	});
+
+	describe('recordSale - remainingShares <= 0 break (line 97)', () => {
+		it('should break loop early when remainingShares hits exactly 0 after first lot', async () => {
+			// Two lots; sell exactly lot1.shares → remainingShares becomes 0 → loop breaks before lot2
+			vi.mocked(getOpenLots).mockResolvedValue([
+				{
+					id: 1,
+					symbol: 'AAPL',
+					shares: 10,
+					costBasis: 100,
+					purchaseDate: '2024-01-01T00:00:00.000Z',
+					saleDate: null,
+					salePrice: null,
+					pnl: null,
+					holdingPeriod: null,
+					accountType: 'INVEST',
+					createdAt: '2024-01-01T00:00:00.000Z',
+				},
+				{
+					id: 2,
+					symbol: 'AAPL',
+					shares: 5,
+					costBasis: 120,
+					purchaseDate: '2024-06-01T00:00:00.000Z',
+					saleDate: null,
+					salePrice: null,
+					pnl: null,
+					holdingPeriod: null,
+					accountType: 'INVEST',
+					createdAt: '2024-06-01T00:00:00.000Z',
+				},
+			]);
+
+			const tracker = getTaxTracker();
+			// Sell exactly 10 shares — covers lot1 fully, remainingShares becomes 0 → break before lot2
+			await tracker.recordSale('AAPL', 10, 150, '2025-02-01T00:00:00.000Z');
+
+			// Only lot1 should be closed, not lot2
+			expect(closeLot).toHaveBeenCalledTimes(1);
+			expect(closeLot).toHaveBeenCalledWith(1, expect.objectContaining({ salePrice: 150 }));
+		});
+	});
+
+	describe('getWashSaleWarnings - branch coverage', () => {
+		it('should handle lot with pnl: null via ?? 0 (line 238 branch)', async () => {
+			const now = new Date('2025-02-18T00:00:00.000Z');
+			vi.useFakeTimers();
+			vi.setSystemTime(now);
+
+			// A lot with pnl: null — the filter uses (lot.pnl ?? 0) < 0, so null → 0 → NOT < 0 → excluded
+			vi.mocked(getClosedLots).mockResolvedValue([
+				{
+					id: 10,
+					symbol: 'AAPL',
+					shares: 10,
+					costBasis: 100,
+					purchaseDate: '2025-01-01T00:00:00.000Z',
+					saleDate: '2025-02-01T00:00:00.000Z',
+					salePrice: 90,
+					pnl: null,  // null pnl → (null ?? 0) = 0, not < 0, so excluded
+					holdingPeriod: 'short',
+					accountType: 'INVEST',
+					createdAt: '2025-01-01T00:00:00.000Z',
+				},
+			]);
+
+			const tracker = getTaxTracker();
+			const warnings = await tracker.getWashSaleWarnings('AAPL');
+
+			// pnl null → treated as 0, not a loss, so no wash sale warnings
+			expect(warnings).toHaveLength(0);
+
+			vi.useRealTimers();
+		});
+
+		it('should skip lots with saleDate: null (line 244 branch)', async () => {
+			const now = new Date('2025-02-18T00:00:00.000Z');
+			vi.useFakeTimers();
+			vi.setSystemTime(now);
+
+			// A lot with negative pnl but saleDate: null → hits `if (!sale.saleDate) continue`
+			vi.mocked(getClosedLots).mockResolvedValue([
+				{
+					id: 11,
+					symbol: 'AAPL',
+					shares: 10,
+					costBasis: 100,
+					purchaseDate: '2025-01-01T00:00:00.000Z',
+					saleDate: null,  // null saleDate → continue
+					salePrice: 80,
+					pnl: -200,  // negative pnl → passes filter
+					holdingPeriod: 'short',
+					accountType: 'INVEST',
+					createdAt: '2025-01-01T00:00:00.000Z',
+				},
+			]);
+
+			const tracker = getTaxTracker();
+			const warnings = await tracker.getWashSaleWarnings('AAPL');
+
+			// saleDate null → skipped → no warnings
+			expect(warnings).toHaveLength(0);
+
+			vi.useRealTimers();
 		});
 	});
 });

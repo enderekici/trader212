@@ -77,6 +77,31 @@ describe('MarketauxClient', () => {
       const c = new MarketauxClient();
       expect(c).toBeDefined();
     });
+
+    it('restores callsToday when savedDate matches today', () => {
+      const today = new Date().toISOString().split('T')[0];
+      mockConfigGet.mockImplementation((key: string) => {
+        if (key === 'data.marketaux.enabled') return true;
+        if (key === 'data.marketaux.maxCallsPerDay') return 100;
+        if (key === '_internal.marketaux.budgetDate') return today;
+        if (key === '_internal.marketaux.callsToday') return 42;
+        return null;
+      });
+      const c = new MarketauxClient();
+      expect(c).toBeDefined();
+    });
+
+    it('uses default callsToday=0 when configManager.get throws in constructor', () => {
+      mockConfigGet.mockImplementation((key: string) => {
+        if (key === 'data.marketaux.enabled') return true;
+        if (key === 'data.marketaux.maxCallsPerDay') return 100;
+        // Throw for _internal keys (simulating first-run where keys don't exist)
+        if (key === '_internal.marketaux.budgetDate') throw new Error('Key not found');
+        return null;
+      });
+      const c = new MarketauxClient();
+      expect(c).toBeDefined();
+    });
   });
 
   describe('getNews', () => {

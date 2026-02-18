@@ -580,10 +580,52 @@ describe("ReportGenerator", () => {
 				"2026-02-14T23:59:59.999Z",
 			);
 
-			expect(report.summary.totalPnl).toBe(100);
-			expect(report.summary.totalPnlPct).toBe(5);
-		});
+		expect(report.summary.totalPnl).toBe(100);
+		expect(report.summary.totalPnlPct).toBe(5);
 	});
+
+	it("should use ?? 0 fallback for null pnl in avgWin and avgLoss reduce (lines 401, 406)", async () => {
+		// Trades with null pnl — exercises the t.pnl ?? 0 fallback inside the reduce
+		// For filter: (null ?? 0) === 0, which is not > 0 or < 0, so neither winning nor losing.
+		// To actually cover the reduce with null pnl, use mixed: one trade with pnlPct > 0 but pnl: null
+		const mockTrades = [
+			{
+				symbol: "AAPL",
+				pnl: null,
+				pnlPct: 5, // positive pnlPct but null pnl → pnl ?? 0 = 0 → NOT in winningTrades
+				exitTime: "2026-02-14T15:30:00.000Z",
+			},
+			{
+				symbol: "GOOGL",
+				pnl: 100,
+				pnlPct: 5,
+				exitTime: "2026-02-14T15:30:00.000Z",
+			},
+			{
+				symbol: "MSFT",
+				pnl: -50,
+				pnlPct: -2.5,
+				exitTime: "2026-02-14T16:00:00.000Z",
+			},
+		];
+
+		mockDb.all
+			.mockResolvedValueOnce(mockTrades)
+			.mockResolvedValueOnce([])
+			.mockResolvedValueOnce([]);
+
+		const generator = getReportGenerator();
+		const report = await generator.generateCustomReport(
+			"2026-02-14T00:00:00.000Z",
+			"2026-02-14T23:59:59.999Z",
+		);
+
+		// AAPL: pnl null → (null ?? 0) = 0 → not winning; GOOGL: pnl 100 → winning; MSFT: pnl -50 → losing
+		expect(report.riskMetrics.avgWin).toBe(100); // winningTrades = [GOOGL], avgWin = 100/1
+		expect(report.riskMetrics.avgLoss).toBe(-50); // losingTrades = [MSFT], avgLoss = -50/1
+	});
+});
+
 
 	describe("formatAsText", () => {
 		it("should format report as plain text", async () => {
@@ -663,10 +705,49 @@ describe("ReportGenerator", () => {
 
 			expect(text).toContain("Total Trades: 0");
 			expect(text).not.toContain("Best Trade:");
-			expect(text).not.toContain("TOP PERFORMERS");
-			expect(text).not.toContain("OPEN POSITIONS");
-		});
+		expect(text).not.toContain("TOP PERFORMERS");
+		expect(text).not.toContain("OPEN POSITIONS");
 	});
+
+	it("should show negative pnlPct without + sign in text format open positions (line 230 false branch)", async () => {
+		const mockReport: ReportData = {
+			period: {
+				from: "2026-02-14T00:00:00.000Z",
+				to: "2026-02-14T23:59:59.999Z",
+			},
+			summary: {
+				totalTrades: 1,
+				winRate: 0,
+				totalPnl: -100,
+				totalPnlPct: -5,
+				bestTrade: null,
+				worstTrade: null,
+			},
+			dailyBreakdown: [],
+			topPerformers: [],
+			worstPerformers: [],
+			riskMetrics: {
+				sharpeRatio: 0,
+				maxDrawdown: 0,
+				profitFactor: 0,
+				avgWin: 0,
+				avgLoss: -100,
+			},
+			openPositions: [
+				{ symbol: "AAPL", pnl: -50, pnlPct: -2.5, holdDays: 3 },
+			],
+		};
+
+		const generator = getReportGenerator();
+		const text = generator.formatAsText(mockReport);
+
+		// Negative pnlPct → line 230 false branch: no '+' prefix
+		expect(text).toContain("OPEN POSITIONS");
+		expect(text).toContain("AAPL: -2.50% (3d)");
+		expect(text).not.toContain("AAPL: +-");
+	});
+});
+
 
 	describe("formatAsMarkdown", () => {
 		it("should format report as Markdown", async () => {
@@ -745,6 +826,42 @@ describe("ReportGenerator", () => {
 
 			expect(markdown).toContain("| AAPL | -2.50% | 1 |");
 			expect(markdown).not.toContain("+-");
+		});
+
+		it("should omit worst trade section when worstTrade is null (line 276 false branch)", async () => {
+			const mockReport: ReportData = {
+				period: {
+					from: "2026-02-14T00:00:00.000Z",
+					to: "2026-02-14T23:59:59.999Z",
+				},
+				summary: {
+					totalTrades: 0,
+					winRate: 0,
+					totalPnl: 0,
+					totalPnlPct: 0,
+					bestTrade: null,
+					worstTrade: null,
+				},
+				dailyBreakdown: [],
+				topPerformers: [],
+				worstPerformers: [],
+				riskMetrics: {
+					sharpeRatio: 0,
+					maxDrawdown: 0,
+					profitFactor: 0,
+					avgWin: 0,
+					avgLoss: 0,
+				},
+				openPositions: [],
+			};
+
+			const generator = getReportGenerator();
+			const markdown = generator.formatAsMarkdown(mockReport);
+
+			// worstTrade is null → line 276 false branch: no "Worst Trade" line
+			expect(markdown).not.toContain("**Worst Trade:**");
+			// openPositions is empty → line 318 false branch: no "Open Positions" section
+			expect(markdown).not.toContain("## 💼 Open Positions");
 		});
 	});
 
@@ -949,6 +1066,155 @@ describe("ReportGenerator", () => {
 			const instance2 = getReportGenerator();
 
 			expect(instance1).toBe(instance2);
+		});
+	});
+
+	describe("branch coverage - null metrics and edge cases", () => {
+		it("should handle null tradesCount and portfolioValue in metrics (line 118)", async () => {
+			const mockMetrics = [
+				{
+					date: "2026-02-14",
+					totalPnl: 50,
+					tradesCount: null,
+					portfolioValue: null,
+					sharpeRatio: 1.0,
+					maxDrawdown: -2,
+					profitFactor: 1.5,
+				},
+			];
+
+			mockDb.all
+				.mockResolvedValueOnce([]) // trades
+				.mockResolvedValueOnce(mockMetrics) // metrics
+				.mockResolvedValueOnce([]); // positions
+
+			const generator = getReportGenerator();
+			const report = await generator.generateCustomReport(
+				"2026-02-14T00:00:00.000Z",
+				"2026-02-14T23:59:59.999Z",
+			);
+
+			expect(report.dailyBreakdown[0].trades).toBe(0);
+			expect(report.dailyBreakdown[0].portfolioValue).toBe(0);
+		});
+
+		it("should handle all losing trades - no winners (avgWin = 0, line 401)", async () => {
+			const mockTrades = [
+				{ symbol: "AAPL", pnl: -100, pnlPct: -5, exitTime: "2026-02-14T15:00:00.000Z" },
+				{ symbol: "TSLA", pnl: -50, pnlPct: -3, exitTime: "2026-02-14T16:00:00.000Z" },
+			];
+
+			mockDb.all
+				.mockResolvedValueOnce(mockTrades)
+				.mockResolvedValueOnce([]) // no metrics
+				.mockResolvedValueOnce([]); // positions
+
+			const generator = getReportGenerator();
+			const report = await generator.generateCustomReport(
+				"2026-02-14T00:00:00.000Z",
+				"2026-02-14T23:59:59.999Z",
+			);
+
+			// avgWin should be 0 since there are no winning trades
+			expect(report.riskMetrics.avgWin).toBe(0);
+			expect(report.summary.totalTrades).toBe(2);
+		});
+
+		it("should handle all winning trades - no losers (avgLoss = 0, line 406)", async () => {
+			const mockTrades = [
+				{ symbol: "AAPL", pnl: 100, pnlPct: 5, exitTime: "2026-02-14T15:00:00.000Z" },
+				{ symbol: "TSLA", pnl: 50, pnlPct: 3, exitTime: "2026-02-14T16:00:00.000Z" },
+			];
+
+			mockDb.all
+				.mockResolvedValueOnce(mockTrades)
+				.mockResolvedValueOnce([]) // no metrics
+				.mockResolvedValueOnce([]); // positions
+
+			const generator = getReportGenerator();
+			const report = await generator.generateCustomReport(
+				"2026-02-14T00:00:00.000Z",
+				"2026-02-14T23:59:59.999Z",
+			);
+
+			// avgLoss should be 0 since there are no losing trades
+			expect(report.riskMetrics.avgLoss).toBe(0);
+			expect(report.summary.winRate).toBe(100);
+		});
+
+		it("should accumulate P&L for same symbol (line 441)", async () => {
+			const mockTrades = [
+				{ symbol: "AAPL", pnl: 100, pnlPct: 5, exitTime: "2026-02-14T14:00:00.000Z" },
+				{ symbol: "AAPL", pnl: 50, pnlPct: 2.5, exitTime: "2026-02-14T16:00:00.000Z" },
+				{ symbol: "TSLA", pnl: -30, pnlPct: -2, exitTime: "2026-02-14T15:00:00.000Z" },
+			];
+
+			mockDb.all
+				.mockResolvedValueOnce(mockTrades)
+				.mockResolvedValueOnce([]) // no metrics
+				.mockResolvedValueOnce([]); // positions
+
+			const generator = getReportGenerator();
+			const report = await generator.generateCustomReport(
+				"2026-02-14T00:00:00.000Z",
+				"2026-02-14T23:59:59.999Z",
+			);
+
+			// AAPL should be top performer with accumulated pnl of 150
+			const aaplPerformer = report.topPerformers.find((p) => p.symbol === "AAPL");
+			expect(aaplPerformer).toBeDefined();
+			expect(aaplPerformer!.pnl).toBe(150);
+			expect(aaplPerformer!.trades).toBe(2);
+		});
+
+		it("should handle null pnl when accumulating same symbol (line 441 null branch)", async () => {
+			const mockTrades = [
+				{ symbol: "AAPL", pnl: 100, pnlPct: 5, exitTime: "2026-02-14T14:00:00.000Z" },
+				// Second AAPL occurrence with null pnl — triggers: existing.pnl += null ?? 0
+				{ symbol: "AAPL", pnl: null, pnlPct: null, exitTime: "2026-02-14T16:00:00.000Z" },
+			];
+
+			mockDb.all
+				.mockResolvedValueOnce(mockTrades)
+				.mockResolvedValueOnce([]) // no metrics
+				.mockResolvedValueOnce([]); // positions
+
+			const generator = getReportGenerator();
+			const report = await generator.generateCustomReport(
+				"2026-02-14T00:00:00.000Z",
+				"2026-02-14T23:59:59.999Z",
+			);
+
+			// AAPL accumulated pnl = 100 + (null ?? 0) = 100
+			const aaplPerformer = report.topPerformers.find((p) => p.symbol === "AAPL");
+			expect(aaplPerformer).toBeDefined();
+			expect(aaplPerformer!.pnl).toBe(100);
+			expect(aaplPerformer!.trades).toBe(2);
+		});
+
+		it("should handle null totalPnl in daily breakdown (line 118)", async () => {
+			const mockTrades = [
+				{ symbol: "AAPL", pnl: 50, pnlPct: 2.5, exitTime: "2026-02-14T15:00:00.000Z" },
+			];
+			const mockMetrics = [
+				// totalPnl is null — triggers: m.totalPnl ?? 0
+				{ date: "2026-02-14", totalPnl: null, tradesCount: 1, portfolioValue: 10000 },
+			];
+
+			mockDb.all
+				.mockResolvedValueOnce(mockTrades)
+				.mockResolvedValueOnce(mockMetrics)
+				.mockResolvedValueOnce([]);
+
+			const generator = getReportGenerator();
+			const report = await generator.generateCustomReport(
+				"2026-02-14T00:00:00.000Z",
+				"2026-02-14T23:59:59.999Z",
+			);
+
+			// dailyBreakdown pnl should be 0 (null ?? 0)
+			expect(report.dailyBreakdown).toHaveLength(1);
+			expect(report.dailyBreakdown[0].pnl).toBe(0);
 		});
 	});
 });

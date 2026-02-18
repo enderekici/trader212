@@ -472,6 +472,33 @@ describe('DCAManager', () => {
       result = manager.evaluatePosition('AAPL', 134, position, portfolio);
       expect(result.shouldDCA).toBe(true);
     });
+
+    it('should trigger DCA when last trade exists but enough time has passed', () => {
+      const manager = new DCAManager();
+      const position: Position = {
+        symbol: 'AAPL',
+        shares: 10,
+        entryPrice: 150,
+        entryTime: new Date(Date.now() - 120 * 60 * 1000).toISOString(),
+        dcaCount: 0,
+        totalInvested: 1500,
+      };
+      const portfolio: PortfolioState = { cashAvailable: 2000 };
+
+      // Mock DB to return an old trade (120 minutes ago — well past the 60-min min)
+      const oldTrade = {
+        id: 1,
+        symbol: 'AAPL',
+        side: 'BUY',
+        entryTime: new Date(Date.now() - 120 * 60 * 1000).toISOString(),
+      };
+      mockDbInstance.all.mockReturnValue([oldTrade]);
+
+      // Round 1 needs 5% drop (to 142.50), current price 140 → should trigger
+      const result = manager.evaluatePosition('AAPL', 140, position, portfolio);
+
+      expect(result.shouldDCA).toBe(true);
+    });
   });
 
   describe('executeDCA', () => {
@@ -630,6 +657,29 @@ describe('DCAManager', () => {
       );
     });
 
+    it('should use dcaCount 0 when position.dcaCount is null', async () => {
+      const manager = new DCAManager();
+
+      const position = {
+        symbol: 'AAPL',
+        shares: 10,
+        entryPrice: 150,
+        entryTime: new Date().toISOString(),
+        dcaCount: null, // null → ?? 0 → dcaRound = 1
+        totalInvested: 1500,
+      };
+
+      mockDbInstance.get.mockReturnValue(position);
+
+      await manager.executeDCA('AAPL', 'AAPL_US_EQ', 10, 140, 'INVEST');
+
+      expect(mockDbInstance.set).toHaveBeenCalledWith(
+        expect.objectContaining({
+          dcaCount: 1,
+        }),
+      );
+    });
+
     it('should return error if T212 client not initialized in live mode', async () => {
       vi.mocked(configManager.get).mockImplementation((key: string) => {
         if (key === 'execution.dryRun') return false;
@@ -653,6 +703,415 @@ describe('DCAManager', () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toContain('T212 client not initialized');
+    });
+
+    it('should execute live DCA successfully when order fills', async () => {
+      vi.mocked(configManager.get).mockImplementation((key: string) => {
+        if (key === 'execution.dryRun') return false;
+        if (key === 'execution.orderTimeoutSeconds') return 10;
+        return true;
+      });
+
+      const manager = new DCAManager();
+      const position = {
+        symbol: 'AAPL',
+        shares: 10,
+        entryPrice: 150,
+        entryTime: new Date().toISOString(),
+        dcaCount: 0,
+        totalInvested: 1500,
+      };
+      mockDbInstance.get.mockReturnValue(position);
+
+      const t212Client: any = {
+        placeMarketOrder: vi.fn().mockResolvedValue({ id: 999 }),
+        getOrder: vi.fn().mockResolvedValue({
+          status: 'FILLED',
+          filledValue: 1400,
+          filledQuantity: 10,
+        }),
+        cancelOrder: vi.fn(),
+      };
+
+      const result = await manager.executeDCA('AAPL', 'AAPL_US_EQ', 10, 140, 'INVEST', t212Client);
+
+      expect(result.success).toBe(true);
+      expect(t212Client.placeMarketOrder).toHaveBeenCalledWith({
+        ticker: 'AAPL_US_EQ',
+        quantity: 10,
+        timeValidity: 'DAY',
+      });
+      expect(mockDbInstance.set).toHaveBeenCalledWith(
+        expect.objectContaining({
+          dcaCount: 1,
+          shares: 20,
+        }),
+      );
+    });
+
+    it('should use value/quantity fallback when filledValue/filledQuantity unavailable', async () => {
+      vi.mocked(configManager.get).mockImplementation((key: string) => {
+        if (key === 'execution.dryRun') return false;
+        if (key === 'execution.orderTimeoutSeconds') return 10;
+        return true;
+      });
+
+      const manager = new DCAManager();
+      const position = {
+        symbol: 'AAPL',
+        shares: 10,
+        entryPrice: 150,
+        entryTime: new Date().toISOString(),
+        dcaCount: 0,
+        totalInvested: null,
+      };
+      mockDbInstance.get.mockReturnValue(position);
+
+      const t212Client: any = {
+        placeMarketOrder: vi.fn().mockResolvedValue({ id: 1001 }),
+        getOrder: vi.fn().mockResolvedValue({
+          status: 'FILLED',
+          filledValue: null,
+          filledQuantity: null,
+          value: 1400,
+          quantity: 10,
+        }),
+        cancelOrder: vi.fn(),
+      };
+
+      const result = await manager.executeDCA('AAPL', 'AAPL_US_EQ', 10, 140, 'INVEST', t212Client);
+
+      expect(result.success).toBe(true);
+    });
+
+    it('should return error when order fill times out', async () => {
+      vi.mocked(configManager.get).mockImplementation((key: string) => {
+        if (key === 'execution.dryRun') return false;
+        if (key === 'execution.orderTimeoutSeconds') return 1; // 2 poll attempts
+        return true;
+      });
+
+      const manager = new DCAManager();
+      const position = {
+        symbol: 'AAPL',
+        shares: 10,
+        entryPrice: 150,
+        entryTime: new Date().toISOString(),
+        dcaCount: 0,
+        totalInvested: 1500,
+      };
+      mockDbInstance.get.mockReturnValue(position);
+
+      const t212Client: any = {
+        placeMarketOrder: vi.fn().mockResolvedValue({ id: 1002 }),
+        // Always return PENDING — will time out
+        getOrder: vi.fn().mockResolvedValue({ status: 'PENDING' }),
+        cancelOrder: vi.fn().mockResolvedValue(undefined),
+      };
+
+      const result = await manager.executeDCA('AAPL', 'AAPL_US_EQ', 10, 140, 'INVEST', t212Client);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('DCA order fill timeout');
+      expect(t212Client.cancelOrder).toHaveBeenCalledWith(1002);
+    });
+
+    it('should return error when order is CANCELLED', async () => {
+      vi.mocked(configManager.get).mockImplementation((key: string) => {
+        if (key === 'execution.dryRun') return false;
+        if (key === 'execution.orderTimeoutSeconds') return 10;
+        return true;
+      });
+
+      const manager = new DCAManager();
+      const position = {
+        symbol: 'AAPL',
+        shares: 10,
+        entryPrice: 150,
+        entryTime: new Date().toISOString(),
+        dcaCount: 0,
+        totalInvested: 1500,
+      };
+      mockDbInstance.get.mockReturnValue(position);
+
+      const t212Client: any = {
+        placeMarketOrder: vi.fn().mockResolvedValue({ id: 1003 }),
+        getOrder: vi.fn().mockResolvedValue({ status: 'CANCELLED' }),
+        cancelOrder: vi.fn(),
+      };
+
+      const result = await manager.executeDCA('AAPL', 'AAPL_US_EQ', 10, 140, 'INVEST', t212Client);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('DCA order fill timeout');
+    });
+
+    it('should return error when order is REJECTED', async () => {
+      vi.mocked(configManager.get).mockImplementation((key: string) => {
+        if (key === 'execution.dryRun') return false;
+        if (key === 'execution.orderTimeoutSeconds') return 10;
+        return true;
+      });
+
+      const manager = new DCAManager();
+      const position = {
+        symbol: 'AAPL',
+        shares: 10,
+        entryPrice: 150,
+        entryTime: new Date().toISOString(),
+        dcaCount: 0,
+        totalInvested: 1500,
+      };
+      mockDbInstance.get.mockReturnValue(position);
+
+      const t212Client: any = {
+        placeMarketOrder: vi.fn().mockResolvedValue({ id: 1004 }),
+        getOrder: vi.fn().mockResolvedValue({ status: 'REJECTED' }),
+        cancelOrder: vi.fn(),
+      };
+
+      const result = await manager.executeDCA('AAPL', 'AAPL_US_EQ', 10, 140, 'INVEST', t212Client);
+
+      expect(result.success).toBe(false);
+    });
+
+    it('should return null fill price when FILLED order has no price data', async () => {
+      vi.mocked(configManager.get).mockImplementation((key: string) => {
+        if (key === 'execution.dryRun') return false;
+        if (key === 'execution.orderTimeoutSeconds') return 10;
+        return true;
+      });
+
+      const manager = new DCAManager();
+      const position = {
+        symbol: 'AAPL',
+        shares: 10,
+        entryPrice: 150,
+        entryTime: new Date().toISOString(),
+        dcaCount: 0,
+        totalInvested: 1500,
+      };
+      mockDbInstance.get.mockReturnValue(position);
+
+      const t212Client: any = {
+        placeMarketOrder: vi.fn().mockResolvedValue({ id: 1005 }),
+        getOrder: vi.fn().mockResolvedValue({
+          status: 'FILLED',
+          filledValue: null,
+          filledQuantity: null,
+          value: null,
+          quantity: null,
+        }),
+        cancelOrder: vi.fn(),
+      };
+
+      const result = await manager.executeDCA('AAPL', 'AAPL_US_EQ', 10, 140, 'INVEST', t212Client);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('DCA order fill timeout');
+    });
+
+    it('should handle cancel failure and recover if final check shows FILLED', async () => {
+      vi.mocked(configManager.get).mockImplementation((key: string) => {
+        if (key === 'execution.dryRun') return false;
+        if (key === 'execution.orderTimeoutSeconds') return 1; // force timeout quickly
+        return true;
+      });
+
+      const manager = new DCAManager();
+      const position = {
+        symbol: 'AAPL',
+        shares: 10,
+        entryPrice: 150,
+        entryTime: new Date().toISOString(),
+        dcaCount: 0,
+        totalInvested: 1500,
+      };
+      mockDbInstance.get.mockReturnValue(position);
+
+      const t212Client: any = {
+        placeMarketOrder: vi.fn().mockResolvedValue({ id: 1006 }),
+        // All poll attempts: PENDING → times out
+        getOrder: vi.fn()
+          .mockResolvedValueOnce({ status: 'PENDING' })
+          .mockResolvedValueOnce({ status: 'PENDING' })
+          // final check after cancel failure: FILLED with price data
+          .mockResolvedValue({
+            status: 'FILLED',
+            filledValue: 1400,
+            filledQuantity: 10,
+          }),
+        // Cancel throws → triggers the cancel-error branch
+        cancelOrder: vi.fn().mockRejectedValue(new Error('cancel failed')),
+      };
+
+      const result = await manager.executeDCA('AAPL', 'AAPL_US_EQ', 10, 140, 'INVEST', t212Client);
+
+      // After cancel failure, final getOrder shows FILLED → fill price recovered → success
+      expect(result.success).toBe(true);
+    });
+
+    it('should handle cancel failure with final FILLED order having no price data', async () => {
+      vi.mocked(configManager.get).mockImplementation((key: string) => {
+        if (key === 'execution.dryRun') return false;
+        if (key === 'execution.orderTimeoutSeconds') return 1;
+        return true;
+      });
+
+      const manager = new DCAManager();
+      const position = {
+        symbol: 'AAPL',
+        shares: 10,
+        entryPrice: 150,
+        entryTime: new Date().toISOString(),
+        dcaCount: 0,
+        totalInvested: 1500,
+      };
+      mockDbInstance.get.mockReturnValue(position);
+
+      const t212Client: any = {
+        placeMarketOrder: vi.fn().mockResolvedValue({ id: 1007 }),
+        getOrder: vi.fn()
+          .mockResolvedValueOnce({ status: 'PENDING' })
+          .mockResolvedValueOnce({ status: 'PENDING' })
+          // final check: FILLED but no price data
+          .mockResolvedValue({
+            status: 'FILLED',
+            filledValue: null,
+            filledQuantity: null,
+          }),
+        cancelOrder: vi.fn().mockRejectedValue(new Error('cancel failed')),
+      };
+
+      const result = await manager.executeDCA('AAPL', 'AAPL_US_EQ', 10, 140, 'INVEST', t212Client);
+
+      expect(result.success).toBe(false);
+    });
+
+    it('should handle cancel failure with statusErr during final check', async () => {
+      vi.mocked(configManager.get).mockImplementation((key: string) => {
+        if (key === 'execution.dryRun') return false;
+        if (key === 'execution.orderTimeoutSeconds') return 1;
+        return true;
+      });
+
+      const manager = new DCAManager();
+      const position = {
+        symbol: 'AAPL',
+        shares: 10,
+        entryPrice: 150,
+        entryTime: new Date().toISOString(),
+        dcaCount: 0,
+        totalInvested: 1500,
+      };
+      mockDbInstance.get.mockReturnValue(position);
+
+      const t212Client: any = {
+        placeMarketOrder: vi.fn().mockResolvedValue({ id: 1008 }),
+        getOrder: vi.fn()
+          .mockResolvedValueOnce({ status: 'PENDING' })
+          .mockResolvedValueOnce({ status: 'PENDING' })
+          // final check throws too
+          .mockRejectedValue(new Error('status check failed')),
+        cancelOrder: vi.fn().mockRejectedValue(new Error('cancel failed')),
+      };
+
+      const result = await manager.executeDCA('AAPL', 'AAPL_US_EQ', 10, 140, 'INVEST', t212Client);
+
+      expect(result.success).toBe(false);
+    });
+
+    it('should handle cancel failure with final order not FILLED (PENDING)', async () => {
+      vi.mocked(configManager.get).mockImplementation((key: string) => {
+        if (key === 'execution.dryRun') return false;
+        if (key === 'execution.orderTimeoutSeconds') return 1;
+        return true;
+      });
+
+      const manager = new DCAManager();
+      const position = {
+        symbol: 'AAPL',
+        shares: 10,
+        entryPrice: 150,
+        entryTime: new Date().toISOString(),
+        dcaCount: 0,
+        totalInvested: 1500,
+      };
+      mockDbInstance.get.mockReturnValue(position);
+
+      const t212Client: any = {
+        placeMarketOrder: vi.fn().mockResolvedValue({ id: 1009 }),
+        getOrder: vi.fn()
+          .mockResolvedValueOnce({ status: 'PENDING' })
+          .mockResolvedValueOnce({ status: 'PENDING' })
+          // final check: order is PENDING (not FILLED) → returns null
+          .mockResolvedValue({ status: 'PENDING' }),
+        cancelOrder: vi.fn().mockRejectedValue(new Error('cancel failed')),
+      };
+
+      const result = await manager.executeDCA('AAPL', 'AAPL_US_EQ', 10, 140, 'INVEST', t212Client);
+
+      expect(result.success).toBe(false);
+    });
+
+    it('should handle placeMarketOrder throwing an error', async () => {
+      vi.mocked(configManager.get).mockImplementation((key: string) => {
+        if (key === 'execution.dryRun') return false;
+        if (key === 'execution.orderTimeoutSeconds') return 10;
+        return true;
+      });
+
+      const manager = new DCAManager();
+      const position = {
+        symbol: 'AAPL',
+        shares: 10,
+        entryPrice: 150,
+        entryTime: new Date().toISOString(),
+        dcaCount: 0,
+        totalInvested: 1500,
+      };
+      mockDbInstance.get.mockReturnValue(position);
+
+      const t212Client: any = {
+        placeMarketOrder: vi.fn().mockRejectedValue(new Error('Order rejected by broker')),
+        getOrder: vi.fn(),
+        cancelOrder: vi.fn(),
+      };
+
+      const result = await manager.executeDCA('AAPL', 'AAPL_US_EQ', 10, 140, 'INVEST', t212Client);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Order rejected by broker');
+    });
+
+    it('should handle non-Error thrown in live execution', async () => {
+      vi.mocked(configManager.get).mockImplementation((key: string) => {
+        if (key === 'execution.dryRun') return false;
+        if (key === 'execution.orderTimeoutSeconds') return 10;
+        return true;
+      });
+
+      const manager = new DCAManager();
+      const position = {
+        symbol: 'AAPL',
+        shares: 10,
+        entryPrice: 150,
+        entryTime: new Date().toISOString(),
+        dcaCount: 0,
+        totalInvested: 1500,
+      };
+      mockDbInstance.get.mockReturnValue(position);
+
+      const t212Client: any = {
+        placeMarketOrder: vi.fn().mockRejectedValue('string error'),
+        getOrder: vi.fn(),
+        cancelOrder: vi.fn(),
+      };
+
+      const result = await manager.executeDCA('AAPL', 'AAPL_US_EQ', 10, 140, 'INVEST', t212Client);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('string error');
     });
   });
 

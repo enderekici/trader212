@@ -126,6 +126,34 @@ describe('PriceStreamer', () => {
 			expect(updates[0].previousPrice).toBe(155);
 		});
 
+		it('sets changePct to 0 when previousPrice is 0 (entryPrice = 0, currentPrice = null)', async () => {
+			const positions: PositionForStreaming[] = [
+				{
+					symbol: 'ZERO',
+					entryPrice: 0,
+					stopLossPrice: null,
+					trailingStop: null,
+					takeProfitPrice: null,
+					currentPrice: null,
+				},
+			];
+
+			const quotes = new Map([['ZERO', 10]]);
+
+			streamer.setPositionProvider(() => positions);
+			streamer.setQuoteProvider(async () => quotes);
+
+			const updates: PriceUpdate[] = [];
+			streamer.on('price_update', (update) => updates.push(update));
+
+			streamer.start();
+			await flushPolling();
+
+			expect(updates).toHaveLength(1);
+			expect(updates[0].previousPrice).toBe(0);
+			expect(updates[0].changePct).toBe(0); // previousPrice === 0 → else branch
+		});
+
 		it('uses entry price when currentPrice is null', async () => {
 			const positions: PositionForStreaming[] = [
 				{

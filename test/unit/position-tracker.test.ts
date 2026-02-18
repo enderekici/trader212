@@ -240,6 +240,29 @@ describe('PositionTracker', () => {
       await tracker.syncWithT212(mockClient);
       expect(mockClient.getPortfolio).toHaveBeenCalledOnce();
     });
+
+    it('uses entryPrice as exitPrice when currentPrice is null (line 73)', async () => {
+      // Covers line 73: const exitPrice = dbPos.currentPrice ?? dbPos.entryPrice;
+      mockDbAll.mockReturnValueOnce([
+        {
+          symbol: 'AAPL',
+          t212Ticker: 'AAPL_US_EQ',
+          shares: 10,
+          entryPrice: 150,
+          currentPrice: null, // null → falls back to entryPrice
+          entryTime: '2024-01-01T00:00:00Z',
+        },
+      ]);
+
+      const mockClient = {
+        getPortfolio: vi.fn().mockResolvedValue([]),
+      } as any;
+
+      await tracker.syncWithT212(mockClient);
+
+      // Auto-reconcile should have run using entryPrice (150) as exitPrice
+      expect(mockDbRun).toHaveBeenCalled();
+    });
   });
 
   // ── updateTrailingStops ────────────────────────────────────────────────

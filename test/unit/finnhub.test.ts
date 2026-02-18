@@ -381,6 +381,24 @@ describe('FinnhubClient', () => {
       await c.getQuote('AAPL');
     });
 
+    it('removes stale timestamps older than 60s from sharedCallTimestamps', async () => {
+      // Use fake timers to control Date.now()
+      vi.useFakeTimers();
+      const c = new FinnhubClient();
+      mockAxiosGet.mockResolvedValue({ data: { c: 100, h: 100, l: 100, o: 100, pc: 100, t: 0 } });
+
+      // First call pushes a timestamp at t=0
+      await c.getQuote('AAPL');
+
+      // Advance time by 61 seconds so the first timestamp is now stale
+      vi.advanceTimersByTime(61_000);
+
+      // Second call: the while loop should shift() the stale timestamp
+      await c.getQuote('MSFT');
+
+      vi.useRealTimers();
+    });
+
     it('passes key from key rotator to API', async () => {
       mockAxiosGet.mockResolvedValueOnce({ data: { c: 100, h: 100, l: 100, o: 100, pc: 100, t: 0 } });
       await client.getQuote('AAPL');

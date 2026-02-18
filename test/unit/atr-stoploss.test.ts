@@ -143,6 +143,31 @@ describe('ATR Stop-Loss', () => {
       expect(result.stopLossPrice).toBe(98); // 100 - 2.0
       expect(result.stopLossPct).toBe(0.02); // 2% stop for stable stock
     });
+
+    it('uses ?? false fallback when enabled config returns null', () => {
+      vi.mocked(configManager.get).mockImplementation((_key: string) => null);
+
+      // enabled ?? false → false → falls through to fixed stop-loss
+      const result = calculateATRStopLoss(100, mockTechAnalysis, 0.05);
+
+      expect(result.method).toBe('fixed');
+      expect(result.stopLossPrice).toBe(95);
+    });
+
+    it('uses ?? 2.0 fallback when multiplier config returns null', () => {
+      vi.mocked(configManager.get).mockImplementation((key: string) => {
+        if (key === 'risk.atrStopLossEnabled') return true;
+        // multiplier returns null → should fall back to ?? 2.0
+        return null;
+      });
+
+      const result = calculateATRStopLoss(100, mockTechAnalysis, 0.05);
+
+      // multiplier defaults to 2.0: 2.5 * 2.0 = 5.0 → price 95
+      expect(result.method).toBe('atr');
+      expect(result.atrMultiplier).toBe(2.0);
+      expect(result.stopLossDistance).toBe(5.0);
+    });
   });
 
   describe('getRecommendedStopLossPct', () => {
@@ -175,6 +200,27 @@ describe('ATR Stop-Loss', () => {
       const noAtrAnalysis = { ...mockTechAnalysis, atr: null };
       const result = getRecommendedStopLossPct(noAtrAnalysis);
       expect(result).toBe(0.05);
+    });
+
+    it('uses ?? false fallback when enabled config returns null', () => {
+      vi.mocked(configManager.get).mockImplementation((_key: string) => null);
+
+      // enabled ?? false → false → uses defaultStopLossPct (also null → 0.05 fallback)
+      const result = getRecommendedStopLossPct(mockTechAnalysis);
+      expect(typeof result).toBe('number');
+    });
+
+    it('uses ?? 2.0 multiplier fallback in getRecommendedStopLossPct when multiplier is null', () => {
+      vi.mocked(configManager.get).mockImplementation((key: string) => {
+        if (key === 'risk.atrStopLossEnabled') return true;
+        if (key === 'risk.defaultStopLossPct') return 0.05;
+        // multiplier returns null → ?? 2.0 kicks in
+        return null;
+      });
+
+      const result = getRecommendedStopLossPct(mockTechAnalysis);
+      // With multiplier 2.0 and ATR 2.5, estimated pct = (2.5 * 2.0) / vwap
+      expect(result).toBeGreaterThan(0);
     });
   });
 });

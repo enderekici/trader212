@@ -273,5 +273,13 @@ describe('BacktestDataLoader', () => {
 
       expect(commonDates).toEqual([]);
     });
+
+    it('returns empty array when data map is empty', () => {
+      const emptyData = new Map<string, Candle[]>();
+      const loader = new BacktestDataLoader();
+      const commonDates = loader.getCommonDates(emptyData, '2024-01-01', '2024-12-31');
+
+      expect(commonDates).toEqual([]);
+    });
   });
 });

@@ -376,6 +376,24 @@ describe('MultiTimeframeAnalyzer', () => {
       expect(result?.timeframeDetails).toHaveLength(3);
     });
 
+    it('should handle empty candles returned by getTimeframeCandles (lines 71-80)', () => {
+      // Spy on the private getTimeframeCandles method to return [] for one timeframe
+      const getTimeframeCanglesSpy = vi
+        .spyOn(analyzer as unknown as { getTimeframeCandles: () => unknown[] }, 'getTimeframeCandles')
+        .mockReturnValueOnce([]) // first timeframe (1d) returns empty
+        .mockReturnValue(createCandles(5)); // rest return some candles
+
+      const candles = createCandles(10);
+      const result = analyzer.analyze('AAPL', candles);
+
+      expect(result).not.toBeNull();
+      // The empty-candles timeframe should get neutral score (50) and candleCount=0
+      expect(result?.timeframeDetails.some((d) => d.candleCount === 0)).toBe(true);
+      expect(result?.timeframeDetails.some((d) => d.signal === 'neutral' && d.score === 50)).toBe(true);
+
+      getTimeframeCanglesSpy.mockRestore();
+    });
+
     it('should handle empty timeframes configuration', () => {
       mockConfigGet.mockImplementation((key: string) => {
         if (key === 'multiTimeframe.enabled') return true;
@@ -591,6 +609,41 @@ describe('MultiTimeframeAnalyzer', () => {
       const factoryAnalyzer = createMultiTimeframeAnalyzer();
 
       expect(factoryAnalyzer).toBeInstanceOf(MultiTimeframeAnalyzer);
+    });
+  });
+
+  describe('Unknown timeframe handling', () => {
+    it('should default to daily behavior for unknown timeframe', () => {
+      mockConfigGet.mockImplementation((key: string) => {
+        if (key === 'multiTimeframe.enabled') return true;
+        if (key === 'multiTimeframe.timeframes') return ['2h'];
+        if (key === 'multiTimeframe.weights') return { '2h': 1.0 };
+        return undefined;
+      });
+
+      mockScoreTechnicals.mockReturnValue(65);
+
+      const candles = createCandles(30);
+      const result = analyzer.analyze('AAPL', candles);
+
+      expect(result).not.toBeNull();
+      // Should have processed the unknown '2h' timeframe as daily (returns all candles)
+      expect(result?.timeframeDetails).toHaveLength(1);
+      expect(result?.timeframeDetails[0].timeframe).toBe('2h');
+    });
+
+    it('should return [] from getTimeframeCandles when input candles are empty (line 130)', () => {
+      // Pass empty candles array directly — each call to getTimeframeCandles([], tf)
+      // hits line 130: if (candles.length === 0) return []
+      // Then line 71 in analyze fires: candles.length === 0 → neutral score fallback
+      mockScoreTechnicals.mockReturnValue(70);
+
+      const result = analyzer.analyze('AAPL', []);
+
+      expect(result).not.toBeNull();
+      // All timeframes should get neutral score (50) since getTimeframeCandles returns []
+      expect(result?.timeframeDetails.every((d) => d.score === 50)).toBe(true);
+      expect(result?.timeframeDetails.every((d) => d.candleCount === 0)).toBe(true);
     });
   });
 });

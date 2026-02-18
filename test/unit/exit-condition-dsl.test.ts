@@ -371,6 +371,63 @@ describe('formatExitCondition', () => {
 		});
 		expect(result).toContain('ANY:');
 	});
+
+	it('formatTimeMetric default: returns unknown metric unchanged', () => {
+		// Trigger the default case in formatTimeMetric (line 290) via type assertion
+		const cond = { type: 'time' as const, metric: 'unknown_time_metric' as 'days_held', operator: 'gt' as const, value: 5 };
+		const result = formatExitCondition(cond);
+		expect(result).toContain('unknown_time_metric');
+	});
+
+	it('formatTimeMetric hours_held: returns "Hours held" label (line 288)', () => {
+		// Trigger the hours_held case in formatTimeMetric
+		const result = formatExitCondition({ type: 'time', metric: 'hours_held', operator: 'gte', value: 48 });
+		expect(result).toBe('Hours held >= 48');
+	});
+
+	it('formatVolumeMetric default: returns unknown metric unchanged', () => {
+		// Trigger the default case in formatVolumeMetric (line 301) via type assertion
+		const cond = { type: 'volume' as const, metric: 'unknown_vol_metric' as 'current_volume', operator: 'gt' as const, value: 100 };
+		const result = formatExitCondition(cond);
+		expect(result).toContain('unknown_vol_metric');
+	});
+
+	it('formatVolumeMetric current_volume: returns "Volume" label (line 297)', () => {
+		// Trigger the current_volume case in formatVolumeMetric
+		const result = formatExitCondition({ type: 'volume', metric: 'current_volume', operator: 'gt', value: 500000 });
+		expect(result).toBe('Volume > 500000');
+	});
+
+	it('formatComparisonOp lte: formats time condition with <= operator (line 274-275)', () => {
+		// Trigger the `lte` case in formatComparisonOp via a time condition
+		const result = formatExitCondition({ type: 'time', metric: 'days_held', operator: 'lte', value: 10 });
+		expect(result).toBe('Days held <= 10');
+	});
+
+	it('formatComparisonOp eq: formats time condition with = operator (line 276-277)', () => {
+		// Trigger the `eq` case in formatComparisonOp via a time condition (TimeCondition supports eq)
+		const result = formatExitCondition({ type: 'time', metric: 'days_held', operator: 'eq', value: 5 });
+		expect(result).toBe('Days held = 5');
+	});
+
+	it('formatComparisonOp default: returns raw operator string for unknown op (line 278-279)', () => {
+		// Trigger the default case in formatComparisonOp via a time condition with unknown operator
+		const cond = { type: 'time' as const, metric: 'days_held' as const, operator: 'neq' as 'gt', value: 1 };
+		const result = formatExitCondition(cond);
+		expect(result).toContain('neq');
+	});
+
+	it('formatOperator crosses_below: formats price crosses_below condition (lines 259-260)', () => {
+		// Trigger the `crosses_below` case in formatOperator via a price condition
+		const result = formatExitCondition({ type: 'price', operator: 'crosses_below', value: 100 });
+		expect(result).toBe('Price crosses below $100.00');
+	});
+
+	it('formatComparisonOp lt: formats time condition with < operator (line 270-271)', () => {
+		// Trigger the `lt` case in formatComparisonOp via a time condition
+		const result = formatExitCondition({ type: 'time', metric: 'days_held', operator: 'lt', value: 3 });
+		expect(result).toBe('Days held < 3');
+	});
 });
 
 describe('parseExitConditionText', () => {
@@ -534,5 +591,62 @@ describe('parseExitConditionText', () => {
 		expect(parseExitConditionText('close above SMA200')).toHaveLength(1);
 		expect(parseExitConditionText('close below 50-sma')).toHaveLength(1);
 		expect(parseExitConditionText('close above bollinger upper')).toHaveLength(1);
+	});
+});
+
+describe('extractPriceOperator (via parseExitConditionText)', () => {
+	// Line 478: extractPriceOperator returns null when text matches none of the patterns
+	it('returns null (no condition) for unrecognized price operator string', () => {
+		// The "price at $150" pattern won't match the regex (requires above/below/crosses)
+		// so priceMatch itself won't fire. Use the indicator regex path instead:
+		// "RSI at 50" — indicatorMatch fires but extractPriceOperator("at") returns null
+		const result = parseExitConditionText('RSI at 50');
+		// The indicator name resolves but operator is null → returns null → no condition
+		expect(result).toEqual([]);
+	});
+
+	it('returns null (no condition) when close operator string is unrecognized', () => {
+		// "close near SMA200" — closeMatch fires but extractPriceOperator("near") returns null
+		const result = parseExitConditionText('close near SMA200');
+		expect(result).toEqual([]);
+	});
+});
+
+describe('parseComparisonOperator (via parseExitConditionText)', () => {
+	// Lines 486-495: >= <= = == and default(null) cases
+	it('parses >= operator', () => {
+		const result = parseExitConditionText('profit >= 5%');
+		expect(result).toHaveLength(1);
+		expect(result[0]).toMatchObject({ type: 'profit', operator: 'gte', value: 5 });
+	});
+
+	it('parses <= operator', () => {
+		const result = parseExitConditionText('days held <= 10');
+		expect(result).toHaveLength(1);
+		expect(result[0]).toMatchObject({ type: 'time', operator: 'lte', value: 10 });
+	});
+
+	it('parses = operator', () => {
+		const result = parseExitConditionText('profit = 5%');
+		expect(result).toHaveLength(1);
+		expect(result[0]).toMatchObject({ type: 'profit', operator: 'eq', value: 5 });
+	});
+
+	it('parses == operator', () => {
+		const result = parseExitConditionText('profit == 5%');
+		expect(result).toHaveLength(1);
+		expect(result[0]).toMatchObject({ type: 'profit', operator: 'eq', value: 5 });
+	});
+
+	it('parses < operator (lt)', () => {
+		const result = parseExitConditionText('profit < 5%');
+		expect(result).toHaveLength(1);
+		expect(result[0]).toMatchObject({ type: 'profit', operator: 'lt', value: 5 });
+	});
+
+	it('returns no condition for unknown comparison operator', () => {
+		// "profit ~~ 5%" — profitMatch fires but parseComparisonOperator("~~") returns null
+		const result = parseExitConditionText('profit ~~ 5%');
+		expect(result).toEqual([]);
 	});
 });

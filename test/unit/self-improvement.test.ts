@@ -156,6 +156,115 @@ describe('AISelfImprovement', () => {
 			expect(result?.sellAccuracy).toBe(0.5);
 		});
 
+		it('should populate bestPerformingSetups for high-conviction SELL with accuracy >= 0.75', async () => {
+			// 4 high-conviction SELL predictions all correct → accuracy = 1.0 >= 0.75
+			const predictions = Array.from({ length: 10 }, (_, i) => ({
+				id: i + 1,
+				aiModel: 'claude-opus-4',
+				symbol: 'AAPL',
+				decision: (i < 4 ? 'SELL' : 'BUY') as 'SELL' | 'BUY',
+				conviction: i < 4 ? 85 : 60,
+				signalTimestamp: new Date().toISOString(),
+				priceAtSignal: 150,
+				actualOutcome: 'correct' as const,
+				actualReturnPct: 3,
+				evaluatedAt: new Date().toISOString(),
+			}));
+
+			mockDb.all.mockReturnValue(predictions);
+
+			const selfImprovement = getAISelfImprovement();
+			const result = await selfImprovement.generateFeedback();
+
+			expect(result?.bestPerformingSetups.some((s) => s.includes('High-conviction SELL'))).toBe(true);
+		});
+
+		it('should populate worstPerformingSetups for high-conviction SELL with accuracy < 0.5', async () => {
+			// 4 high-conviction SELL predictions — 1 correct, 3 incorrect → accuracy = 0.25 < 0.5
+			const predictions = Array.from({ length: 10 }, (_, i) => ({
+				id: i + 1,
+				aiModel: 'claude-opus-4',
+				symbol: 'AAPL',
+				decision: (i < 4 ? 'SELL' : 'BUY') as 'SELL' | 'BUY',
+				conviction: i < 4 ? 85 : 60,
+				signalTimestamp: new Date().toISOString(),
+				priceAtSignal: 150,
+				actualOutcome: (i === 0 ? 'correct' : 'incorrect') as 'correct' | 'incorrect',
+				actualReturnPct: i === 0 ? 3 : -2,
+				evaluatedAt: new Date().toISOString(),
+			}));
+
+			mockDb.all.mockReturnValue(predictions);
+
+			const selfImprovement = getAISelfImprovement();
+			const result = await selfImprovement.generateFeedback();
+
+			expect(result?.worstPerformingSetups.some((s) => s.includes('High-conviction SELL'))).toBe(true);
+		});
+
+		it('should populate worstPerformingSetups for high-conviction BUY with accuracy < 0.5', async () => {
+			// 4 high-conviction BUY predictions — 1 correct, 3 incorrect → accuracy = 0.25 < 0.5
+			const predictions = Array.from({ length: 10 }, (_, i) => ({
+				id: i + 1,
+				aiModel: 'claude-opus-4',
+				symbol: 'AAPL',
+				decision: 'BUY' as const,
+				conviction: 85,
+				signalTimestamp: new Date().toISOString(),
+				priceAtSignal: 150,
+				actualOutcome: (i === 0 ? 'correct' : 'incorrect') as 'correct' | 'incorrect',
+				actualReturnPct: i === 0 ? 5 : -3,
+				evaluatedAt: new Date().toISOString(),
+			}));
+
+			mockDb.all.mockReturnValue(predictions);
+
+			const selfImprovement = getAISelfImprovement();
+			const result = await selfImprovement.generateFeedback();
+
+			expect(result?.worstPerformingSetups.some((s) => s.includes('High-conviction BUY'))).toBe(true);
+		});
+
+		it('should call getMostCommonDecision for big winners path', async () => {
+			// Need >= minSamples (10) predictions total, >= 5 with actualReturnPct correct
+			// Use 8 BUY with return=1 and 2 SELL with return=10
+			// avg = (8×1 + 2×10)/10 = 2.8; bigWinners = returns > 5.6 → both SELL predictions ✓
+			const predictions = [
+				...Array.from({ length: 8 }, (_, i) => ({
+					id: i + 1,
+					aiModel: 'model-a',
+					symbol: 'AAPL',
+					decision: 'BUY' as const,
+					conviction: 60,
+					signalTimestamp: new Date().toISOString(),
+					priceAtSignal: 100,
+					actualOutcome: 'correct' as const,
+					actualReturnPct: 1,
+					evaluatedAt: new Date().toISOString(),
+				})),
+				...Array.from({ length: 2 }, (_, i) => ({
+					id: i + 9,
+					aiModel: 'model-a',
+					symbol: 'MSFT',
+					decision: 'SELL' as const,
+					conviction: 60,
+					signalTimestamp: new Date().toISOString(),
+					priceAtSignal: 200,
+					actualOutcome: 'correct' as const,
+					actualReturnPct: 10,
+					evaluatedAt: new Date().toISOString(),
+				})),
+			];
+
+			mockDb.all.mockReturnValue(predictions);
+
+			const selfImprovement = getAISelfImprovement();
+			const result = await selfImprovement.generateFeedback();
+
+			// getMostCommonDecision called; most common among bigWinners is SELL (both have SELL)
+			expect(result?.bestPerformingSetups.some((s) => s.includes('SELL signals with strong returns'))).toBe(true);
+		});
+
 		it('should calculate conviction correlation', async () => {
 			const predictions = [
 				...Array.from({ length: 10 }, (_, i) => ({
@@ -380,6 +489,82 @@ describe('AISelfImprovement', () => {
 			expect(
 				biases.some((b) => b.includes('Conviction calibration')),
 			).toBe(true);
+		});
+
+		it('should ignore symbols with fewer than 3 predictions in symbol-bias check (line 234 false branch)', () => {
+			// AAPL has 2 predictions (< 3, filtered out), MSFT and GOOGL and TSLA have 5 each
+			// With only 3 symbols contributing (< 3 required for symbolAccuracies.length >= 3), no bias triggered
+			const predictions = [
+				// AAPL: 2 predictions (too few — filtered out at line 234)
+				...Array.from({ length: 2 }, (_, i) => ({
+					id: i + 1,
+					aiModel: 'claude-opus-4',
+					symbol: 'AAPL',
+					decision: 'BUY' as const,
+					conviction: 70,
+					signalTimestamp: new Date().toISOString(),
+					priceAtSignal: 150,
+					priceAfter1d: null,
+					priceAfter5d: null,
+					priceAfter10d: null,
+					actualOutcome: 'correct' as const,
+					actualReturnPct: 5,
+					evaluatedAt: new Date().toISOString(),
+				})),
+				// MSFT: 5 predictions (>= 3, included)
+				...Array.from({ length: 5 }, (_, i) => ({
+					id: i + 3,
+					aiModel: 'claude-opus-4',
+					symbol: 'MSFT',
+					decision: 'BUY' as const,
+					conviction: 70,
+					signalTimestamp: new Date().toISOString(),
+					priceAtSignal: 200,
+					priceAfter1d: null,
+					priceAfter5d: null,
+					priceAfter10d: null,
+					actualOutcome: 'correct' as const,
+					actualReturnPct: 5,
+					evaluatedAt: new Date().toISOString(),
+				})),
+				// GOOGL: 5 predictions (>= 3, included)
+				...Array.from({ length: 5 }, (_, i) => ({
+					id: i + 8,
+					aiModel: 'claude-opus-4',
+					symbol: 'GOOGL',
+					decision: 'BUY' as const,
+					conviction: 70,
+					signalTimestamp: new Date().toISOString(),
+					priceAtSignal: 100,
+					priceAfter1d: null,
+					priceAfter5d: null,
+					priceAfter10d: null,
+					actualOutcome: 'correct' as const,
+					actualReturnPct: 5,
+					evaluatedAt: new Date().toISOString(),
+				})),
+				// TSLA: 5 predictions (>= 3, included)
+				...Array.from({ length: 5 }, (_, i) => ({
+					id: i + 13,
+					aiModel: 'claude-opus-4',
+					symbol: 'TSLA',
+					decision: 'BUY' as const,
+					conviction: 70,
+					signalTimestamp: new Date().toISOString(),
+					priceAtSignal: 180,
+					priceAfter1d: null,
+					priceAfter5d: null,
+					priceAfter10d: null,
+					actualOutcome: 'correct' as const,
+					actualReturnPct: 5,
+					evaluatedAt: new Date().toISOString(),
+				})),
+			];
+
+			const biases = selfImprovement.detectBiases(predictions);
+
+			// AAPL filtered out (line 234 false branch hit), no stock-specific weakness detected
+			expect(biases.some((b) => b.includes('Stock-specific weakness'))).toBe(false);
 		});
 
 		it('should detect stock-specific weakness', () => {
@@ -725,6 +910,29 @@ describe('AISelfImprovement', () => {
 			).toBe(true);
 		});
 
+		it('should generate SELL direction bias suggestion', () => {
+			const feedback: PerformanceFeedback = {
+				overallAccuracy: 0.6,
+				buyAccuracy: 0.6,
+				sellAccuracy: 0.6,
+				holdAccuracy: 0.6,
+				avgConvictionCorrect: 75,
+				avgConvictionIncorrect: 70,
+				bestPerformingSetups: [],
+				worstPerformingSetups: [],
+				biases: ['Direction bias: Favoring SELL (75% of predictions)'],
+				suggestions: [],
+				sampleSize: 20,
+				periodDays: 30,
+			};
+
+			const suggestions = selfImprovement.generateSuggestions(feedback);
+
+			expect(
+				suggestions.some((s) => s.includes('too bearish') || s.includes('SELL signals')),
+			).toBe(true);
+		});
+
 		it('should suggest avoiding worst setups', () => {
 			const feedback: PerformanceFeedback = {
 				overallAccuracy: 0.6,
@@ -820,6 +1028,118 @@ describe('AISelfImprovement', () => {
 			expect(result).toContain('Overall accuracy: 60%');
 			expect(result).toContain('last 30 days');
 			expect(result).toContain('20 predictions');
+		});
+
+		it('should include best setup line when bestPerformingSetups is non-empty', async () => {
+			// Use high-conviction BUY predictions with >= 75% accuracy to populate bestPerformingSetups
+			const predictions = Array.from({ length: 20 }, (_, i) => ({
+				id: i + 1,
+				aiModel: 'claude-opus-4',
+				symbol: 'AAPL',
+				decision: 'BUY' as const,
+				conviction: 85, // >= 80 for high-conviction
+				signalTimestamp: new Date().toISOString(),
+				priceAtSignal: 150,
+				priceAfter1d: null,
+				priceAfter5d: null,
+				priceAfter10d: null,
+				actualOutcome: i < 16 ? ('correct' as const) : ('incorrect' as const), // 80% accuracy >= 75%
+				actualReturnPct: i < 16 ? 5 : -3,
+				evaluatedAt: new Date().toISOString(),
+			}));
+
+			mockDb.all.mockReturnValue(predictions);
+
+			const selfImprovement = getAISelfImprovement();
+			const result = await selfImprovement.buildFeedbackPromptSection();
+
+			expect(result).toContain('- Best setup:');
+			expect(result).toContain('High-conviction BUY signals');
+		});
+
+		it('should include suggestion line when accuracy < 0.55 (line 453)', async () => {
+			// 10/20 = 50% accuracy → below 0.55 → generateSuggestions returns non-empty array
+			const predictions = Array.from({ length: 20 }, (_, i) => ({
+				id: i + 1,
+				aiModel: 'claude-opus-4',
+				symbol: 'AAPL',
+				decision: 'BUY' as const,
+				conviction: 70,
+				signalTimestamp: new Date().toISOString(),
+				priceAtSignal: 150,
+				priceAfter1d: null,
+				priceAfter5d: null,
+				priceAfter10d: null,
+				actualOutcome: i < 10 ? ('correct' as const) : ('incorrect' as const), // 50% accuracy
+				actualReturnPct: i < 10 ? 3 : -2,
+				evaluatedAt: new Date().toISOString(),
+			}));
+
+			mockDb.all.mockReturnValue(predictions);
+
+			const selfImprovement = getAISelfImprovement();
+			const result = await selfImprovement.buildFeedbackPromptSection();
+
+			expect(result).toContain('- Suggestion:');
+		});
+
+		it('should skip avgConvictionCorrect line when all predictions are incorrect (line 443 false branch)', async () => {
+			// All predictions incorrect → correct.length = 0 → avgConvictionCorrect = 0 → line 443 false branch
+			const predictions = Array.from({ length: 20 }, (_, i) => ({
+				id: i + 1,
+				aiModel: 'claude-opus-4',
+				symbol: 'AAPL',
+				decision: 'BUY' as const,
+				conviction: 75,
+				signalTimestamp: new Date().toISOString(),
+				priceAtSignal: 150,
+				priceAfter1d: null,
+				priceAfter5d: null,
+				priceAfter10d: null,
+				actualOutcome: 'incorrect' as const,
+				actualReturnPct: -3,
+				evaluatedAt: new Date().toISOString(),
+			}));
+
+			mockDb.all.mockReturnValue(predictions);
+
+			const selfImprovement = getAISelfImprovement();
+			const result = await selfImprovement.buildFeedbackPromptSection();
+
+			expect(result).toContain('## Your Recent Performance');
+			expect(result).not.toContain('high-conviction');
+		});
+		it('should skip biases line when biases array is empty (line 449 false branch)', async () => {
+			// Design: mixed BUY/SELL/HOLD decisions (4 each = 33%, no direction bias),
+			// low conviction (60, no overconfidence check), single symbol (no sector bias),
+			// 12 total → recentPreds = 4 < 5 (timing bias check skipped).
+			// Result: biases = [] → line 449 FALSE branch fires.
+			const decisions = ['BUY', 'SELL', 'HOLD', 'BUY', 'SELL', 'HOLD', 'BUY', 'SELL', 'HOLD', 'BUY', 'SELL', 'HOLD'] as const;
+			const predictions = decisions.map((decision, i) => ({
+				id: i + 1,
+				aiModel: 'claude-opus-4',
+				symbol: 'AAPL',
+				decision,
+				conviction: 60,
+				signalTimestamp: new Date().toISOString(),
+				priceAtSignal: 150,
+				priceAfter1d: null,
+				priceAfter5d: null,
+				priceAfter10d: null,
+				actualOutcome: i % 2 === 0 ? ('correct' as const) : ('incorrect' as const),
+				actualReturnPct: i % 2 === 0 ? 2 : -1,
+				evaluatedAt: new Date().toISOString(),
+			}));
+
+			mockDb.all.mockReturnValue(predictions);
+
+			const selfImprovement = getAISelfImprovement();
+			const result = await selfImprovement.buildFeedbackPromptSection();
+
+			// Should still return a prompt section with accuracy info
+			expect(result).toContain('## Your Recent Performance');
+			// But no bias line since biases array is empty
+			expect(result).not.toContain('Detected biases');
 		});
 	});
 
@@ -1002,6 +1322,179 @@ describe('AISelfImprovement', () => {
 			const result = await selfImprovement.compareModels();
 
 			expect(result.models[0].bestDecision).toBe('BUY');
+		});
+
+		it('should compute HOLD accuracy per model in compareModels', async () => {
+			const predictions = [
+				...Array.from({ length: 5 }, (_, i) => ({
+					id: i + 1,
+					aiModel: 'model-h',
+					symbol: 'AAPL',
+					decision: 'HOLD' as const,
+					conviction: 55,
+					signalTimestamp: new Date().toISOString(),
+					priceAtSignal: 150,
+					priceAfter1d: null,
+					priceAfter5d: null,
+					priceAfter10d: null,
+					actualOutcome: i < 4 ? ('correct' as const) : ('incorrect' as const),
+					actualReturnPct: 1,
+					evaluatedAt: new Date().toISOString(),
+				})),
+			];
+
+			mockDb.all.mockReturnValue(predictions);
+
+			const selfImprovement = getAISelfImprovement();
+			const result = await selfImprovement.compareModels();
+
+			expect(result.models).toHaveLength(1);
+			// holdAcc = 4/5 = 0.8, buyAcc = 0, sellAcc = 0 → bestDecision = HOLD
+			expect(result.models[0].bestDecision).toBe('HOLD');
+		});
+
+		it('should generate "moderately outperforms" recommendation when diff is 0.05-0.1', async () => {
+			// model-a: 13/17 ≈ 0.7647, model-b: 7/10 = 0.7 → diff ≈ 0.065 (clearly > 0.05 and < 0.1)
+			// Avoids floating point edge case of 8/10 - 7/10 = 0.1000...009 which triggers "significantly"
+			const predictions = [
+				...Array.from({ length: 17 }, (_, i) => ({
+					id: i + 1,
+					aiModel: 'model-a',
+					symbol: 'AAPL',
+					decision: 'BUY' as const,
+					conviction: 70,
+					signalTimestamp: new Date().toISOString(),
+					priceAtSignal: 150,
+					priceAfter1d: null,
+					priceAfter5d: null,
+					priceAfter10d: null,
+					actualOutcome: i < 13 ? ('correct' as const) : ('incorrect' as const),
+					actualReturnPct: 5,
+					evaluatedAt: new Date().toISOString(),
+				})),
+				...Array.from({ length: 10 }, (_, i) => ({
+					id: i + 18,
+					aiModel: 'model-b',
+					symbol: 'MSFT',
+					decision: 'SELL' as const,
+					conviction: 60,
+					signalTimestamp: new Date().toISOString(),
+					priceAtSignal: 200,
+					priceAfter1d: null,
+					priceAfter5d: null,
+					priceAfter10d: null,
+					actualOutcome: i < 7 ? ('correct' as const) : ('incorrect' as const),
+					actualReturnPct: 3,
+					evaluatedAt: new Date().toISOString(),
+				})),
+			];
+
+			mockDb.all.mockReturnValue(predictions);
+
+			const selfImprovement = getAISelfImprovement();
+			const result = await selfImprovement.compareModels();
+
+			// diff = 13/17 - 7/10 ≈ 0.065, which is > 0.05 but NOT > 0.1 → "moderately outperforms"
+			expect(result.recommendation).toContain('moderately outperforms');
+		});
+
+		it('should generate "Models perform similarly" recommendation when diff <= 0.05', async () => {
+			// model-a: 7/10 = 0.7, model-b: 7/10 = 0.7 → diff = 0.0 ≤ 0.05
+			const predictions = [
+				...Array.from({ length: 10 }, (_, i) => ({
+					id: i + 1,
+					aiModel: 'model-x',
+					symbol: 'AAPL',
+					decision: 'BUY' as const,
+					conviction: 70,
+					signalTimestamp: new Date().toISOString(),
+					priceAtSignal: 150,
+					priceAfter1d: null,
+					priceAfter5d: null,
+					priceAfter10d: null,
+					actualOutcome: i < 7 ? ('correct' as const) : ('incorrect' as const),
+					actualReturnPct: 5,
+					evaluatedAt: new Date().toISOString(),
+				})),
+				...Array.from({ length: 10 }, (_, i) => ({
+					id: i + 11,
+					aiModel: 'model-y',
+					symbol: 'MSFT',
+					decision: 'SELL' as const,
+					conviction: 65,
+					signalTimestamp: new Date().toISOString(),
+					priceAtSignal: 200,
+					priceAfter1d: null,
+					priceAfter5d: null,
+					priceAfter10d: null,
+					actualOutcome: i < 7 ? ('correct' as const) : ('incorrect' as const),
+					actualReturnPct: 3,
+					evaluatedAt: new Date().toISOString(),
+				})),
+			];
+
+			mockDb.all.mockReturnValue(predictions);
+
+			const selfImprovement = getAISelfImprovement();
+			const result = await selfImprovement.compareModels();
+
+			expect(result.recommendation).toContain('Models perform similarly');
+		});
+
+		it('computes avgReturn=0 when all actualReturnPct are null (lines 509-510 false branch)', async () => {
+			// All predictions have actualReturnPct: null → withReturns.length === 0 → avgReturn = 0
+			const predictions = Array.from({ length: 10 }, (_, i) => ({
+				id: i + 1,
+				aiModel: 'model-null',
+				symbol: 'AAPL',
+				decision: 'BUY' as const,
+				conviction: 70,
+				signalTimestamp: new Date().toISOString(),
+				priceAtSignal: 150,
+				priceAfter1d: null,
+				priceAfter5d: null,
+				priceAfter10d: null,
+				actualOutcome: i < 7 ? ('correct' as const) : ('incorrect' as const),
+				actualReturnPct: null,
+				evaluatedAt: new Date().toISOString(),
+			}));
+
+			mockDb.all.mockReturnValue(predictions);
+
+			const selfImprovement = getAISelfImprovement();
+			const result = await selfImprovement.compareModels();
+
+			expect(result.models).toHaveLength(1);
+			// withReturns.length === 0 → avgReturn = 0 (line 509-510 false branch)
+			expect(result.models[0].avgReturn).toBe(0);
+		});
+
+		it('computes correct avgReturn when all actualReturnPct are non-null (line 510 true branch)', async () => {
+			// withReturns.length > 0 → avgReturn computed via reduce (line 510 true branch)
+			const predictions = Array.from({ length: 10 }, (_, i) => ({
+				id: i + 1,
+				aiModel: 'model-returns',
+				symbol: 'AAPL',
+				decision: 'BUY' as const,
+				conviction: 70,
+				signalTimestamp: new Date().toISOString(),
+				priceAtSignal: 150,
+				priceAfter1d: null,
+				priceAfter5d: null,
+				priceAfter10d: null,
+				actualOutcome: i < 7 ? ('correct' as const) : ('incorrect' as const),
+				actualReturnPct: 4, // all non-null → withReturns has 10 items → avgReturn = 4
+				evaluatedAt: new Date().toISOString(),
+			}));
+
+			mockDb.all.mockReturnValue(predictions);
+
+			const selfImprovement = getAISelfImprovement();
+			const result = await selfImprovement.compareModels();
+
+			expect(result.models).toHaveLength(1);
+			// withReturns.length === 10 > 0 → avgReturn = sum(4*10) / 10 = 4
+			expect(result.models[0].avgReturn).toBe(4);
 		});
 	});
 

@@ -25,6 +25,12 @@ vi.mock('../../src/ai/consensus.js', () => ({
   }),
 }));
 
+vi.mock('../../src/ai/rules-engine.js', () => ({
+  RulesEngine: vi.fn().mockImplementation(function () {
+    return { analyze: vi.fn(), rawChat: vi.fn() };
+  }),
+}));
+
 vi.mock('../../src/config/manager.js', () => ({
   configManager: {
     get: vi.fn(),
@@ -40,12 +46,13 @@ vi.mock('../../src/utils/logger.js', () => ({
   }),
 }));
 
-import { createAIAgent, safeParseJson } from '../../src/ai/agent.js';
+import { createAIAgent, getActiveModelName, safeParseJson } from '../../src/ai/agent.js';
 import { configManager } from '../../src/config/manager.js';
 import { AnthropicAdapter } from '../../src/ai/adapters/anthropic.js';
 import { OllamaAdapter } from '../../src/ai/adapters/ollama.js';
 import { OpenAICompatibleAdapter } from '../../src/ai/adapters/openai-compat.js';
 import { ConsensusEngine } from '../../src/ai/consensus.js';
+import { RulesEngine } from '../../src/ai/rules-engine.js';
 
 describe('createAIAgent', () => {
   beforeEach(() => {
@@ -123,6 +130,102 @@ describe('createAIAgent', () => {
     const agent = createAIAgent();
     expect(ConsensusEngine).toHaveBeenCalledOnce();
     expect(agent).toBeDefined();
+  });
+
+  it('returns RulesEngine when provider is "rules" (legacy path)', () => {
+    mockLegacyProvider('rules');
+    const agent = createAIAgent();
+    expect(RulesEngine).toHaveBeenCalledOnce();
+    expect(agent).toBeDefined();
+  });
+
+  it('falls back to AnthropicAdapter when primaryId set but no matching enabled profile', () => {
+    const profiles = [
+      { id: 'other', baseUrl: 'http://x/v1', model: 'gpt-4', apiKey: 'k', weight: 1, enabled: true },
+    ];
+    vi.mocked(configManager.get).mockImplementation((key: string) => {
+      if (key === 'ai.provider') return 'anthropic';
+      if (key === 'ai.primaryModel') return 'nonexistent-id';
+      if (key === 'ai.models') return JSON.stringify(profiles);
+      if (key === 'ai.consensus.enabled') return false;
+      return undefined;
+    });
+    const agent = createAIAgent();
+    // falls through to legacy path -> AnthropicAdapter
+    expect(AnthropicAdapter).toHaveBeenCalledOnce();
+    expect(agent).toBeDefined();
+  });
+});
+
+describe('getActiveModelName', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns profile id/model when primaryId matches an enabled profile', () => {
+    const profile = { id: 'my-model', baseUrl: 'http://x/v1', model: 'gpt-4', apiKey: 'k', weight: 1, enabled: true };
+    vi.mocked(configManager.get).mockImplementation((key: string) => {
+      if (key === 'ai.provider') return 'openai-compatible';
+      if (key === 'ai.primaryModel') return 'my-model';
+      if (key === 'ai.models') return JSON.stringify([profile]);
+      return undefined;
+    });
+    expect(getActiveModelName()).toBe('my-model/gpt-4');
+  });
+
+  it('falls through to switch when primaryId set but no matching enabled profile', () => {
+    const profile = { id: 'other', baseUrl: 'http://x/v1', model: 'gpt-4', apiKey: 'k', weight: 1, enabled: true };
+    vi.mocked(configManager.get).mockImplementation((key: string) => {
+      if (key === 'ai.provider') return 'ollama';
+      if (key === 'ai.primaryModel') return 'nonexistent';
+      if (key === 'ai.models') return JSON.stringify([profile]);
+      if (key === 'ai.ollama.model') return 'llama3';
+      return undefined;
+    });
+    expect(getActiveModelName()).toBe('llama3');
+  });
+
+  it('returns ollama model name when provider is ollama', () => {
+    vi.mocked(configManager.get).mockImplementation((key: string) => {
+      if (key === 'ai.provider') return 'ollama';
+      if (key === 'ai.primaryModel') return '';
+      if (key === 'ai.models') return '[]';
+      if (key === 'ai.ollama.model') return 'llama3.2';
+      return undefined;
+    });
+    expect(getActiveModelName()).toBe('llama3.2');
+  });
+
+  it('returns openai-compat model name when provider is openai-compatible', () => {
+    vi.mocked(configManager.get).mockImplementation((key: string) => {
+      if (key === 'ai.provider') return 'openai-compatible';
+      if (key === 'ai.primaryModel') return '';
+      if (key === 'ai.models') return '[]';
+      if (key === 'ai.openaiCompat.model') return 'gpt-4o';
+      return undefined;
+    });
+    expect(getActiveModelName()).toBe('gpt-4o');
+  });
+
+  it('returns "rules-engine" when provider is rules', () => {
+    vi.mocked(configManager.get).mockImplementation((key: string) => {
+      if (key === 'ai.provider') return 'rules';
+      if (key === 'ai.primaryModel') return '';
+      if (key === 'ai.models') return '[]';
+      return undefined;
+    });
+    expect(getActiveModelName()).toBe('rules-engine');
+  });
+
+  it('returns anthropic model name as default', () => {
+    vi.mocked(configManager.get).mockImplementation((key: string) => {
+      if (key === 'ai.provider') return 'anthropic';
+      if (key === 'ai.primaryModel') return '';
+      if (key === 'ai.models') return '[]';
+      if (key === 'ai.model') return 'claude-opus-4-5';
+      return undefined;
+    });
+    expect(getActiveModelName()).toBe('claude-opus-4-5');
   });
 });
 

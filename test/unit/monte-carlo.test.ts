@@ -308,6 +308,52 @@ describe('MonteCarloSimulator', () => {
       expect(result!.percentiles[1].level).toBe(0.5);
       expect(result!.percentiles[2].level).toBe(0.9);
     });
+
+    it('should use default simulations (10000) when no config provided (line 259)', () => {
+      // config is undefined → config?.simulations ?? 10000 hits the ?? 10000 path
+      const trades: TradeInput[] = [
+        { pnlPct: 0.02 },
+        { pnlPct: -0.01 },
+        { pnlPct: 0.03 },
+      ];
+
+      const result = simulator.simulate(trades); // no config at all
+
+      expect(result).toBeDefined();
+      expect(result!.simulations).toBe(10000);
+    });
+
+    it('should use Math.random() path when no seed provided (lines 263, 276)', () => {
+      // seed is undefined → rng = null → uses Math.floor(Math.random() * ...) branch
+      const trades: TradeInput[] = [
+        { pnlPct: 0.02 },
+        { pnlPct: -0.01 },
+        { pnlPct: 0.03 },
+      ];
+
+      const result = simulator.simulate(trades, { simulations: 50 }); // no seed
+
+      expect(result).toBeDefined();
+      expect(result!.simulations).toBe(50);
+      // Result should still be a valid simulation
+      expect(result!.expectedValue).toBeGreaterThan(0);
+    });
+
+    it('should handle peak === 0 when initialCapital is 0 (line 288 false branch)', () => {
+      // initialCapital = 0 → peak starts at 0 → peak > 0 is false → dd = 0
+      const trades: TradeInput[] = [
+        { pnlPct: 0.05 },
+        { pnlPct: -0.03 },
+        { pnlPct: 0.02 },
+      ];
+
+      const result = simulator.simulateWithSizing(trades, 0, { simulations: 10, seed: 42 });
+
+      expect(result).toBeDefined();
+      // With initialCapital=0, equity stays 0 throughout (0 * (1+ret) = 0)
+      // So maxDrawdownPct should be 0 (peak never > 0 → always returns 0)
+      expect(result!.worstCase.maxDrawdownPct).toBe(0);
+    });
   });
 
   describe('simulateWithSizing()', () => {
@@ -404,6 +450,36 @@ describe('MonteCarloSimulator', () => {
       expect(result).toBeDefined();
       // 10000 * 0.9 * 0.9 = 8100
       expect(result!.expectedValue).toBeCloseTo(8100, 0);
+    });
+
+    it('uses default initialCapital (10000) when no capital arg provided (line 259 ?? branch)', () => {
+      // Call simulateWithSizing with only trades — covers config?.simulations ?? 10000
+      const trades: TradeInput[] = [
+        { pnlPct: 0.05 },
+        { pnlPct: 0.03 },
+        { pnlPct: 0.02 },
+      ];
+
+      const result = simulator.simulateWithSizing(trades);
+
+      expect(result).toBeDefined();
+      // Default initialCapital is 10000; with all positive returns probability of profit is high
+      expect(result!.probabilityOfProfit).toBeGreaterThan(0.9);
+    });
+
+    it('uses random sampling when no seed provided (lines 263,276 false branches)', () => {
+      // Call simulateWithSizing without a seed — covers seed != null false branch (rng = null)
+      // and the rng ? rng.nextInt(...) : Math.floor(Math.random() * ...) false branch
+      const trades: TradeInput[] = [
+        { pnlPct: 0.10 },
+        { pnlPct: 0.05 },
+        { pnlPct: -0.02 },
+      ];
+
+      const result = simulator.simulateWithSizing(trades, 10000, { simulations: 50 });
+
+      expect(result).toBeDefined();
+      expect(result!.expectedValue).toBeGreaterThan(0);
     });
   });
 
@@ -596,6 +672,31 @@ describe('MonteCarloSimulator', () => {
       expect(result!.expectedValue).toBeCloseTo(1.0, 4);
       expect(result!.probabilityOfProfit).toBe(0); // No profit, but no loss
       expect(result!.probabilityOfRuin).toBe(0);
+    });
+
+    it('getConfidenceInterval returns null when percentile level not found in results', () => {
+      // Simulate with confidenceLevels that only include 0.5 → no 0.025/0.975 percentiles
+      const trades: TradeInput[] = [
+        { pnlPct: 0.02 },
+        { pnlPct: -0.01 },
+        { pnlPct: 0.03 },
+        { pnlPct: 0.01 },
+        { pnlPct: -0.02 },
+      ];
+
+      // Run simulation with limited percentile levels (only 0.5)
+      const result = simulator.simulate(trades, {
+        simulations: 100,
+        seed: 42,
+        confidenceLevels: [0.5],
+      });
+
+      expect(result).not.toBeNull();
+
+      // Request 0.95 confidence interval — needs 0.025 and 0.975 percentiles
+      // but only 0.5 was stored → returns null
+      const ci = simulator.getConfidenceInterval(result!, 0.95);
+      expect(ci).toBeNull();
     });
   });
 });

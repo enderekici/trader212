@@ -167,7 +167,7 @@ describe('OrderManager', () => {
       expect(mockTransaction).toHaveBeenCalledOnce();
     });
 
-    it('rejects duplicate buy when position already exists', async () => {
+    it('rejects duplicate buy when position already exists (dry run)', async () => {
       mockSelectChain.get.mockReturnValueOnce({ symbol: 'AAPL', shares: 10 });
 
       const result = await orderManager.executeBuy(makeBuyParams());
@@ -193,6 +193,60 @@ describe('OrderManager', () => {
       expect(tradeInsert.stopLoss).toBe(190); // 200 * (1 - 0.05)
       expect(tradeInsert.takeProfit).toBeCloseTo(220, 5); // 200 * (1 + 0.10)
     });
+
+    it('applies slippage to fill price when paperTrading is true (executeBuy dry run)', async () => {
+      // Covers lines 62-65: paperTrading=true triggers slippage on the buy fill price
+      mockConfigGet.mockImplementation((key: string) => {
+        const defaults: Record<string, unknown> = {
+          'execution.dryRun': true,
+          'execution.orderTimeoutSeconds': 10,
+          'execution.stopLossDelay': 3000,
+          'execution.paperTrading': true,
+          'trading.slippageMarketPct': 0.002, // 0.2% slippage
+        };
+        return defaults[key];
+      });
+
+      mockSelectChain.get.mockReturnValueOnce(undefined); // no existing position
+
+      const capturedValues: Record<string, unknown>[] = [];
+      mockTxInsertChain.values = vi.fn().mockImplementation((val: Record<string, unknown>) => {
+        capturedValues.push(val);
+        return mockTxInsertChain;
+      });
+      mockTxInsertChain.run.mockReturnValue({ lastInsertRowid: 99n });
+
+      const params = makeBuyParams({ price: 100, stopLossPct: 0.05, takeProfitPct: 0.10 });
+      const result = await orderManager.executeBuy(params);
+
+      expect(result.success).toBe(true);
+
+      // Fill price = 100 * (1 + 0.002) = 100.2
+      // Stop loss  = 100.2 * (1 - 0.05) = 95.19
+      // Take profit = 100.2 * (1 + 0.10) = 110.22
+      const tradeInsert = capturedValues[0];
+      expect((tradeInsert.entryPrice as number)).toBeCloseTo(100.2, 5);
+      expect((tradeInsert.stopLoss as number)).toBeCloseTo(95.19, 4);
+      expect((tradeInsert.takeProfit as number)).toBeCloseTo(110.22, 4);
+    });
+
+    it('sets dryTpOrderId to undefined when takeProfitPct is 0 (dry run)', async () => {
+      // Covers line 87 false branch: takeProfitPct > 0 is false → dryTpOrderId = undefined
+      mockSelectChain.get.mockReturnValueOnce(undefined);
+      const capturedValues: Record<string, unknown>[] = [];
+      mockTxInsertChain.values = vi.fn().mockImplementation((val: Record<string, unknown>) => {
+        capturedValues.push(val);
+        return mockTxInsertChain;
+      });
+      mockTxInsertChain.run.mockReturnValue({ lastInsertRowid: 55n });
+
+      const result = await orderManager.executeBuy(makeBuyParams({ takeProfitPct: 0 }));
+
+      expect(result.success).toBe(true);
+      // With takeProfitPct=0, no TP order ID is stored
+      const tradeInsert = capturedValues[0];
+      expect(tradeInsert.takeProfitOrderId).toBeUndefined();
+    });
   });
 
   // ── executeBuy: live ───────────────────────────────────────────────────
@@ -214,6 +268,19 @@ describe('OrderManager', () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toContain('T212 client not initialized');
+    });
+
+    it('rejects duplicate buy when position already exists (live path)', async () => {
+      // Client is set, but position already exists — covers lines 184-188
+      const client = makeMockT212Client();
+      orderManager.setT212Client(client);
+      mockSelectChain.get.mockReturnValueOnce({ symbol: 'AAPL', shares: 5 });
+
+      const result = await orderManager.executeBuy(makeBuyParams());
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Position already exists');
+      expect(client.placeMarketOrder).not.toHaveBeenCalled();
     });
 
     it('places market order, waits for fill, places stop-loss, records trade', async () => {
@@ -607,6 +674,42 @@ describe('OrderManager', () => {
 
       const tradeInsert = capturedValues[0];
       expect(tradeInsert.exitPrice).toBe(140);
+    });
+
+    it('applies slippage when paperTrading config is true (dry run)', async () => {
+      // Covers lines 434-439 where paperTrading=true triggers slippage computation
+      mockConfigGet.mockImplementation((key: string) => {
+        const defaults: Record<string, unknown> = {
+          'execution.dryRun': true,
+          'execution.orderTimeoutSeconds': 10,
+          'execution.stopLossDelay': 3000,
+          'execution.paperTrading': true,
+          'trading.slippageMarketPct': 0.001, // 0.1% slippage
+        };
+        return defaults[key];
+      });
+
+      mockSelectChain.get.mockReturnValueOnce({
+        symbol: 'AAPL',
+        shares: 10,
+        entryPrice: 100,
+        currentPrice: 150,
+        entryTime: '2024-01-01T00:00:00Z',
+      });
+
+      const capturedValues: Record<string, unknown>[] = [];
+      mockTxInsertChain.values = vi.fn().mockImplementation((val: Record<string, unknown>) => {
+        capturedValues.push(val);
+        return mockTxInsertChain;
+      });
+      mockTxInsertChain.run.mockReturnValue({ lastInsertRowid: 50n });
+
+      const result = await orderManager.executeClose(makeCloseParams());
+
+      expect(result.success).toBe(true);
+      const tradeInsert = capturedValues[0];
+      // Exit price should have slippage applied (150 * (1 - 0.001) = 149.85)
+      expect(tradeInsert.exitPrice).toBeCloseTo(149.85, 5);
     });
   });
 

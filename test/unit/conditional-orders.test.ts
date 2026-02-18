@@ -713,6 +713,116 @@ describe('ConditionalOrderManager', () => {
 
 			expect(triggered).toHaveLength(0);
 		});
+
+		it('should not trigger indicator type orders (logs debug, does nothing)', () => {
+			// Line 190: indicator case — break does nothing, isTriggered stays false
+			vi.mocked(repo.getActiveOrders).mockReturnValue([
+				{
+					id: 10,
+					symbol: 'AAPL',
+					triggerType: 'indicator',
+					triggerCondition: JSON.stringify({ indicator: 'RSI', value: 30 }),
+					action: JSON.stringify({ type: 'buy', shares: 5 }),
+					status: 'pending',
+					linkedOrderId: null,
+					ocoGroupId: null,
+					expiresAt: null,
+					createdAt: '2026-02-14T10:00:00.000Z',
+					triggeredAt: null,
+				},
+			]);
+
+			const currentPrices = new Map([['AAPL', 155]]);
+			const triggered = manager.checkTriggers(currentPrices);
+
+			// indicator type never triggers
+			expect(triggered).toHaveLength(0);
+		});
+
+		it('should skip order when action JSON parses to null', () => {
+			// Lines 208-209: action parses to null → logs error, continue
+			vi.mocked(repo.getActiveOrders).mockReturnValue([
+				{
+					id: 11,
+					symbol: 'AAPL',
+					triggerType: 'price_above',
+					triggerCondition: JSON.stringify({ price: 150 }),
+					action: 'null',  // safeJsonParse returns null
+					status: 'pending',
+					linkedOrderId: null,
+					ocoGroupId: null,
+					expiresAt: null,
+					createdAt: '2026-02-14T10:00:00.000Z',
+					triggeredAt: null,
+				},
+			]);
+
+			const currentPrices = new Map([['AAPL', 155]]);
+			const triggered = manager.checkTriggers(currentPrices);
+
+			// Triggered internally but skipped because action is null
+			expect(triggered).toHaveLength(0);
+		});
+
+		it('checkPriceTrigger returns false when triggerType is not price_above or price_below', () => {
+			// Line 238: falls through to return false
+			const order = {
+				id: 12,
+				symbol: 'AAPL',
+				triggerType: 'time' as const,
+				triggerCondition: JSON.stringify({ price: 150 }),
+				action: JSON.stringify({ type: 'buy', shares: 5 }),
+				status: 'pending' as const,
+				linkedOrderId: null,
+				ocoGroupId: null,
+				expiresAt: null,
+				createdAt: '2026-02-14T10:00:00.000Z',
+				triggeredAt: null,
+			};
+
+			const result = manager.checkPriceTrigger(order, 155);
+			expect(result).toBe(false);
+		});
+
+		it('checkPriceTrigger returns false when triggerCondition JSON is invalid', () => {
+			// Line 229: safeJsonParse returns null → early return false
+			const order = {
+				id: 13,
+				symbol: 'AAPL',
+				triggerType: 'price_above' as const,
+				triggerCondition: 'not valid json {{{',
+				action: JSON.stringify({ type: 'buy', shares: 5 }),
+				status: 'pending' as const,
+				linkedOrderId: null,
+				ocoGroupId: null,
+				expiresAt: null,
+				createdAt: '2026-02-14T10:00:00.000Z',
+				triggeredAt: null,
+			};
+
+			const result = manager.checkPriceTrigger(order, 155);
+			expect(result).toBe(false);
+		});
+
+		it('checkTimeTrigger returns false when triggerCondition JSON is invalid', () => {
+			// Line 243: safeJsonParse returns null → early return false
+			const order = {
+				id: 14,
+				symbol: 'AAPL',
+				triggerType: 'time' as const,
+				triggerCondition: 'not valid json {{{',
+				action: JSON.stringify({ type: 'buy', shares: 5 }),
+				status: 'pending' as const,
+				linkedOrderId: null,
+				ocoGroupId: null,
+				expiresAt: null,
+				createdAt: '2026-02-14T10:00:00.000Z',
+				triggeredAt: null,
+			};
+
+			const result = manager.checkTimeTrigger(order);
+			expect(result).toBe(false);
+		});
 	});
 
 	describe('expireOldOrders', () => {

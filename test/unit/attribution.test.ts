@@ -1,5 +1,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as schema from '../../src/db/schema.js';
+
+// Mock dependencies needed for getFactorBreakdown
+vi.mock('../../src/db/index.js', () => ({
+  getDb: vi.fn(),
+}));
+
+vi.mock('../../src/utils/logger.js', () => ({
+  createLogger: () => ({
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+  }),
+}));
+
+import { getDb } from '../../src/db/index.js';
 import {
   PerformanceAttributor,
   computeByDecisionType,
@@ -230,6 +246,39 @@ describe('attribution', () => {
     it('should return null when signal is null', () => {
       expect(getDominantFactor(null)).toBeNull();
     });
+
+    it('should use 0 when aiScore is null (line 124 ?? branch)', () => {
+      const signal = createSignal({
+        technicalScore: 0.5,
+        fundamentalScore: 0.5,
+        sentimentScore: 0.5,
+        aiScore: null as unknown as number, // triggers aiScore ?? 0
+      });
+      // All scores: technical=0.5, fundamental=0.5, sentiment=0.5, ai=0 → maxScore=0.5 < 0.6 → null
+      expect(getDominantFactor(signal)).toBeNull();
+    });
+
+    it('should use 0 when sentimentScore is null (line 123 ?? branch)', () => {
+      const signal = createSignal({
+        technicalScore: 0.5,
+        fundamentalScore: 0.5,
+        sentimentScore: null as unknown as number, // triggers sentimentScore ?? 0
+        aiScore: 0.5,
+      });
+      // All scores: technical=0.5, fundamental=0.5, sentiment=0, ai=0.5 → maxScore=0.5 < 0.6 → null
+      expect(getDominantFactor(signal)).toBeNull();
+    });
+
+    it('should use 0 when technicalScore and fundamentalScore are null (lines 121-122 ?? branch)', () => {
+      const signal = createSignal({
+        technicalScore: null as unknown as number, // triggers technicalScore ?? 0
+        fundamentalScore: null as unknown as number, // triggers fundamentalScore ?? 0
+        sentimentScore: 0.5,
+        aiScore: 0.5,
+      });
+      // All scores: technical=0, fundamental=0, sentiment=0.5, ai=0.5 → maxScore=0.5 < 0.6 → null
+      expect(getDominantFactor(signal)).toBeNull();
+    });
   });
 
   describe('computeFactorAttribution', () => {
@@ -294,6 +343,24 @@ describe('attribution', () => {
       expect(result.technical.tradeCount).toBe(0);
       expect(result.technical.contribution).toBe(0);
     });
+
+    it('should use 0 as fallback when trade.pnl and trade.pnlPct are null (lines 159-160 ?? branches)', () => {
+      const matchedTrades = [
+        {
+          trade: createTrade({
+            pnl: null as unknown as number,
+            pnlPct: null as unknown as number,
+          }),
+          signal: createSignal({ technicalScore: 0.8, fundamentalScore: 0.5, sentimentScore: 0.4, aiScore: 0.5 }),
+          sector: 'Technology',
+        },
+      ];
+
+      const result = computeFactorAttribution(matchedTrades);
+      expect(result.technical.tradeCount).toBe(1);
+      expect(result.technical.contribution).toBe(0); // pnl=null → 0
+      expect(result.technical.avgReturn).toBe(0);   // pnlPct=null → 0
+    });
   });
 
   describe('computeByDecisionType', () => {
@@ -345,6 +412,34 @@ describe('attribution', () => {
     it('should handle empty input', () => {
       const result = computeByDecisionType([]);
 
+      expect(result.BUY.count).toBe(0);
+      expect(result.SELL.count).toBe(0);
+    });
+
+    it('should use 0 as pnl fallback when trade.pnl is null (line 207 ?? branch)', () => {
+      const matchedTrades = [
+        {
+          trade: createTrade({ side: 'BUY', pnl: null as unknown as number }),
+          signal: null,
+          sector: null,
+        },
+      ];
+
+      const result = computeByDecisionType(matchedTrades);
+      expect(result.BUY.count).toBe(1);
+      expect(result.BUY.totalPnl).toBe(0);
+    });
+
+    it('should ignore trades with decision other than BUY/SELL (line 211 false branch)', () => {
+      const matchedTrades = [
+        {
+          trade: createTrade({ pnl: 50 }),
+          signal: createSignal({ decision: 'HOLD' }),
+          sector: null,
+        },
+      ];
+
+      const result = computeByDecisionType(matchedTrades);
       expect(result.BUY.count).toBe(0);
       expect(result.SELL.count).toBe(0);
     });
@@ -415,6 +510,42 @@ describe('attribution', () => {
       const result = computeByExitReason([]);
       expect(Object.keys(result)).toHaveLength(0);
     });
+
+    it('should use 0 as pnl fallback when trade.pnl is null (line 247 ?? branch)', () => {
+      const matchedTrades = [
+        {
+          trade: createTrade({
+            exitReason: 'take_profit',
+            pnl: null as unknown as number,
+            entryTime: '2024-01-15T14:00:00.000Z',
+            exitTime: '2024-01-15T15:00:00.000Z',
+          }),
+          signal: null,
+          sector: null,
+        },
+      ];
+
+      const result = computeByExitReason(matchedTrades);
+      expect(result.take_profit.avgPnl).toBe(0);
+    });
+
+    it('should use 0 holdMinutes when entryTime is null (line 250 false branch)', () => {
+      const matchedTrades = [
+        {
+          trade: createTrade({
+            exitReason: 'stop_loss',
+            pnl: -30,
+            entryTime: null as unknown as string,
+            exitTime: '2024-01-15T15:00:00.000Z',
+          }),
+          signal: null,
+          sector: null,
+        },
+      ];
+
+      const result = computeByExitReason(matchedTrades);
+      expect(result.stop_loss.avgHoldMinutes).toBe(0);
+    });
   });
 
   describe('computeBySector', () => {
@@ -462,6 +593,22 @@ describe('attribution', () => {
 
       expect(result.Unknown).toBeDefined();
       expect(result.Unknown.count).toBe(1);
+    });
+
+    it('should default null pnl and pnlPct to 0', () => {
+      const matchedTrades = [
+        {
+          trade: createTrade({ pnl: null as unknown as number, pnlPct: null as unknown as number }),
+          signal: null,
+          sector: 'Technology',
+        },
+      ];
+
+      const result = computeBySector(matchedTrades);
+
+      expect(result.Technology).toBeDefined();
+      expect(result.Technology.totalPnl).toBe(0);
+      expect(result.Technology.avgReturn).toBe(0);
     });
 
     it('should handle empty input', () => {
@@ -536,6 +683,23 @@ describe('attribution', () => {
       expect(result.midday.count).toBe(0);
       expect(result.afternoon.count).toBe(0);
     });
+
+    it('should use 0 when pnl and pnlPct are null in morning trade (lines 335-336)', () => {
+      const matchedTrades = [
+        {
+          // Morning: 10:00 ET = 15:00 UTC — pnl and pnlPct are null
+          trade: createTrade({ pnl: null as unknown as number, pnlPct: null as unknown as number, entryTime: '2024-01-15T15:00:00.000Z' }),
+          signal: null,
+          sector: null,
+        },
+      ];
+
+      const result = computeByTimeOfDay(matchedTrades);
+
+      expect(result.morning.count).toBe(1);
+      expect(result.morning.totalPnl).toBe(0); // null ?? 0 = 0
+      expect(result.morning.avgReturn).toBe(0); // null ?? 0 = 0
+    });
   });
 
   describe('computeByDayOfWeek', () => {
@@ -576,6 +740,23 @@ describe('attribution', () => {
     it('should handle empty input', () => {
       const result = computeByDayOfWeek([]);
       expect(Object.keys(result)).toHaveLength(0);
+    });
+
+    it('should use 0 when pnl and pnlPct are null (lines 369-370)', () => {
+      const matchedTrades = [
+        {
+          // Monday, Jan 15, 2024 — pnl and pnlPct are null
+          trade: createTrade({ pnl: null as unknown as number, pnlPct: null as unknown as number, entryTime: '2024-01-15T14:00:00.000Z' }),
+          signal: null,
+          sector: null,
+        },
+      ];
+
+      const result = computeByDayOfWeek(matchedTrades);
+
+      expect(result.Monday.count).toBe(1);
+      expect(result.Monday.totalPnl).toBe(0); // null ?? 0 = 0
+      expect(result.Monday.avgReturn).toBe(0); // null ?? 0 = 0
     });
   });
 
@@ -636,6 +817,40 @@ describe('attribution', () => {
       const result = computeFactorCorrelations([]);
 
       expect(result.factors).toEqual(['technical', 'fundamental', 'sentiment', 'ai']);
+      expect(result.matrix[0][0]).toBe(1);
+    });
+
+    it('should treat null scores as 0 (lines 397-400 ?? 0 branches)', () => {
+      // Signals with explicitly null scores → hits the ?? 0 fallback path
+      const matchedTrades = [
+        {
+          trade: createTrade(),
+          signal: createSignal({
+            technicalScore: null,
+            fundamentalScore: null,
+            sentimentScore: null,
+            aiScore: null,
+          }),
+          sector: null,
+        },
+        {
+          trade: createTrade(),
+          signal: createSignal({
+            technicalScore: null,
+            fundamentalScore: null,
+            sentimentScore: null,
+            aiScore: null,
+          }),
+          sector: null,
+        },
+      ];
+
+      const result = computeFactorCorrelations(matchedTrades);
+
+      // All scores are 0 (from ?? 0), so correlation between identical zero vectors is NaN → pearsonCorrelation returns 0
+      expect(result.factors).toEqual(['technical', 'fundamental', 'sentiment', 'ai']);
+      expect(result.matrix).toHaveLength(4);
+      // Diagonal is still 1
       expect(result.matrix[0][0]).toBe(1);
     });
   });
@@ -931,6 +1146,275 @@ describe('attribution', () => {
 
       expect(instance1).toBe(instance2);
       expect(instance1).toBeInstanceOf(PerformanceAttributor);
+    });
+  });
+
+  describe('generateInsights - best sector with totalPnl <= 0 (line 483 false branch)', () => {
+    it('should NOT generate strongest-sector insight when best sector has totalPnl <= 0', () => {
+      const result = {
+        byFactor: {
+          technical: { contribution: 0, accuracy: 0, avgReturn: 0, tradeCount: 0 },
+          fundamental: { contribution: 0, accuracy: 0, avgReturn: 0, tradeCount: 0 },
+          sentiment: { contribution: 0, accuracy: 0, avgReturn: 0, tradeCount: 0 },
+          ai: { contribution: 0, accuracy: 0, avgReturn: 0, tradeCount: 0 },
+        },
+        byDecisionType: {
+          BUY: { count: 0, totalPnl: 0, winRate: 0 },
+          SELL: { count: 0, totalPnl: 0, winRate: 0 },
+        },
+        byExitReason: {},
+        bySector: {
+          Technology: { count: 5, totalPnl: -100, winRate: 0.4, avgReturn: -0.02 },
+          Finance: { count: 3, totalPnl: -200, winRate: 0.3, avgReturn: -0.04 },
+        },
+        byTimeOfDay: {
+          morning: { count: 0, totalPnl: 0, winRate: 0, avgReturn: 0 },
+          midday: { count: 0, totalPnl: 0, winRate: 0, avgReturn: 0 },
+          afternoon: { count: 0, totalPnl: 0, winRate: 0, avgReturn: 0 },
+        },
+        byDayOfWeek: {},
+        factorCorrelations: { factors: [], matrix: [] },
+        insights: [],
+      };
+
+      const insights = generateInsights(result);
+
+      // Best sector is Technology with totalPnl=-100 (not > 0), so no "strongest sector" insight
+      expect(insights.some((i) => i.includes('strongest sector'))).toBe(false);
+      // Worst sector still shows (Finance has totalPnl < 0)
+      expect(insights.some((i) => i.includes('weakest sector'))).toBe(true);
+    });
+  });
+
+  describe('generateInsights - equal BUY/SELL win rates (line 556 false branch)', () => {
+    it('should not generate buy/sell insight when win rates are equal', () => {
+      const result = {
+        byFactor: {
+          technical: { contribution: 0, accuracy: 0, avgReturn: 0, tradeCount: 0 },
+          fundamental: { contribution: 0, accuracy: 0, avgReturn: 0, tradeCount: 0 },
+          sentiment: { contribution: 0, accuracy: 0, avgReturn: 0, tradeCount: 0 },
+          ai: { contribution: 0, accuracy: 0, avgReturn: 0, tradeCount: 0 },
+        },
+        byDecisionType: {
+          BUY: { count: 5, totalPnl: 100, winRate: 0.6 },
+          SELL: { count: 5, totalPnl: 100, winRate: 0.6 }, // equal win rates
+        },
+        byExitReason: {},
+        bySector: {},
+        byTimeOfDay: {
+          morning: { count: 0, totalPnl: 0, winRate: 0, avgReturn: 0 },
+          midday: { count: 0, totalPnl: 0, winRate: 0, avgReturn: 0 },
+          afternoon: { count: 0, totalPnl: 0, winRate: 0, avgReturn: 0 },
+        },
+        byDayOfWeek: {},
+        factorCorrelations: { factors: [], matrix: [] },
+        insights: [],
+      };
+
+      const insights = generateInsights(result);
+
+      // Neither BUY nor SELL beats the other (equal rates), so no such insight
+      expect(insights.some((i) => i.includes('BUY signals perform better'))).toBe(false);
+      expect(insights.some((i) => i.includes('SELL signals perform better'))).toBe(false);
+    });
+  });
+
+  describe('generateInsights - SELL beats BUY (lines 556-557)', () => {
+    it('should generate insight when SELL signals outperform BUY signals', () => {
+      const result = {
+        byFactor: {
+          technical: { contribution: 0, accuracy: 0, avgReturn: 0, tradeCount: 0 },
+          fundamental: { contribution: 0, accuracy: 0, avgReturn: 0, tradeCount: 0 },
+          sentiment: { contribution: 0, accuracy: 0, avgReturn: 0, tradeCount: 0 },
+          ai: { contribution: 0, accuracy: 0, avgReturn: 0, tradeCount: 0 },
+        },
+        byDecisionType: {
+          BUY: { count: 5, totalPnl: 50, winRate: 0.4 },
+          SELL: { count: 5, totalPnl: 200, winRate: 0.8 },
+        },
+        byExitReason: {},
+        bySector: {},
+        byTimeOfDay: {
+          morning: { count: 0, totalPnl: 0, winRate: 0, avgReturn: 0 },
+          midday: { count: 0, totalPnl: 0, winRate: 0, avgReturn: 0 },
+          afternoon: { count: 0, totalPnl: 0, winRate: 0, avgReturn: 0 },
+        },
+        byDayOfWeek: {},
+        factorCorrelations: {
+          factors: [],
+          matrix: [],
+        },
+        insights: [],
+      };
+
+      const insights = generateInsights(result);
+
+      expect(insights.some((i) => i.includes('SELL signals perform better'))).toBe(true);
+    });
+  });
+
+  describe('generateInsights - false branches for diff <= 0.01 and avgPnl <= 0', () => {
+    function makeBaseResult(overrides: Record<string, unknown> = {}) {
+      return {
+        byFactor: {
+          technical: { contribution: 0, accuracy: 0, avgReturn: 0, tradeCount: 0 },
+          fundamental: { contribution: 0, accuracy: 0, avgReturn: 0, tradeCount: 0 },
+          sentiment: { contribution: 0, accuracy: 0, avgReturn: 0, tradeCount: 0 },
+          ai: { contribution: 0, accuracy: 0, avgReturn: 0, tradeCount: 0 },
+        },
+        byDecisionType: {
+          BUY: { count: 0, totalPnl: 0, winRate: 0 },
+          SELL: { count: 0, totalPnl: 0, winRate: 0 },
+        },
+        byExitReason: {},
+        bySector: {},
+        byTimeOfDay: {
+          morning: { count: 0, totalPnl: 0, winRate: 0, avgReturn: 0 },
+          midday: { count: 0, totalPnl: 0, winRate: 0, avgReturn: 0 },
+          afternoon: { count: 0, totalPnl: 0, winRate: 0, avgReturn: 0 },
+        },
+        byDayOfWeek: {},
+        factorCorrelations: { factors: [], matrix: [] },
+        insights: [],
+        ...overrides,
+      };
+    }
+
+    it('should NOT generate weekday insight when diff <= 0.01 (line 509 false branch)', () => {
+      // Both weekdays have identical avgReturn → diff = 0, not > 0.01
+      const result = makeBaseResult({
+        byDayOfWeek: {
+          Monday: { count: 5, totalPnl: 100, winRate: 0.6, avgReturn: 0.005 },
+          Tuesday: { count: 5, totalPnl: 100, winRate: 0.6, avgReturn: 0.005 },
+        },
+      });
+
+      const insights = generateInsights(result);
+
+      expect(insights.some((i) => i.includes('trades outperform'))).toBe(false);
+    });
+
+    it('should NOT generate time-of-day insight when diff <= 0.01 (line 530 false branch)', () => {
+      // All time slots have identical avgReturn → diff = 0, not > 0.01
+      const result = makeBaseResult({
+        byTimeOfDay: {
+          morning:   { count: 5, totalPnl: 100, winRate: 0.6, avgReturn: 0.005 },
+          midday:    { count: 5, totalPnl: 100, winRate: 0.6, avgReturn: 0.005 },
+          afternoon: { count: 5, totalPnl: 100, winRate: 0.6, avgReturn: 0.005 },
+        },
+      });
+
+      const insights = generateInsights(result);
+
+      expect(insights.some((i) => i.includes('trading performs best'))).toBe(false);
+    });
+
+    it('should NOT generate exit reason insight when best avgPnl <= 0 (line 541 false branch)', () => {
+      // The best exit reason has avgPnl = 0 (not > 0)
+      const result = makeBaseResult({
+        byExitReason: {
+          stop_loss: { count: 5, avgPnl: 0, avgHoldMinutes: 60 },
+        },
+      });
+
+      const insights = generateInsights(result);
+
+      expect(insights.some((i) => i.includes('Most profitable exit reason'))).toBe(false);
+    });
+
+    it('should NOT generate weekday insight when days with count=0 are filtered out (line 502 filter)', () => {
+      // Monday and Tuesday have count=0 → filtered out → weekdays.length < 2 → no insight
+      const result = makeBaseResult({
+        byDayOfWeek: {
+          Monday: { count: 0, totalPnl: 0, winRate: 0, avgReturn: 0.05 },
+          Tuesday: { count: 0, totalPnl: 0, winRate: 0, avgReturn: 0.02 },
+          Wednesday: { count: 1, totalPnl: 50, winRate: 1, avgReturn: 0.03 },
+        },
+      });
+
+      const insights = generateInsights(result);
+      // Only Wednesday has count > 0 (1 day), weekdays.length < 2 → no day insight
+      expect(insights.some((i) => i.includes('trades outperform'))).toBe(false);
+    });
+  });
+
+  describe('PerformanceAttributor.getFactorBreakdown (lines 635-668)', () => {
+    it('should return empty result when no closed trades found', () => {
+      const mockDb = {
+        select: vi.fn().mockReturnThis(),
+        from: vi.fn().mockReturnThis(),
+        where: vi.fn().mockReturnThis(),
+        orderBy: vi.fn().mockReturnThis(),
+        limit: vi.fn().mockReturnThis(),
+        all: vi.fn().mockReturnValue([]),
+        get: vi.fn().mockReturnValue(null),
+      };
+      vi.mocked(getDb).mockReturnValue(mockDb as never);
+
+      const attributor = new PerformanceAttributor();
+      const result = attributor.getFactorBreakdown();
+
+      expect(result.byFactor.technical.tradeCount).toBe(0);
+      expect(result.byDecisionType.BUY.count).toBe(0);
+    });
+
+    it('should analyze closed trades from database', () => {
+      const mockTrade = {
+        id: 1,
+        symbol: 'AAPL',
+        t212Ticker: 'AAPL_US_EQ',
+        side: 'BUY',
+        shares: 10,
+        entryPrice: 100,
+        exitPrice: 110,
+        pnl: 100,
+        pnlPct: 0.1,
+        entryTime: '2024-01-15T14:30:00.000Z',
+        exitTime: '2024-01-16T14:30:00.000Z',
+        stopLoss: 95,
+        takeProfit: 115,
+        exitReason: 'take_profit',
+        aiReasoning: null,
+        convictionScore: 0.8,
+        aiModel: 'claude',
+        intendedPrice: 100,
+        slippage: 0,
+        createdAt: '2024-01-15T14:30:00.000Z',
+      };
+
+      const mockSignal = {
+        id: 1,
+        symbol: 'AAPL',
+        timestamp: '2024-01-15T14:25:00.000Z',
+        decision: 'BUY',
+        confidence: 0.8,
+        technicalScore: 0.7,
+        fundamentalScore: 0.0,
+        sentimentScore: 0.0,
+        aiScore: 0.8,
+        price: 100,
+        reasoning: 'Strong momentum',
+        createdAt: '2024-01-15T14:25:00.000Z',
+      };
+
+      const mockDb = {
+        select: vi.fn().mockReturnThis(),
+        from: vi.fn().mockReturnThis(),
+        where: vi.fn().mockReturnThis(),
+        orderBy: vi.fn().mockReturnThis(),
+        limit: vi.fn().mockReturnThis(),
+        all: vi.fn()
+          .mockReturnValueOnce([mockTrade])   // closedTrades
+          .mockReturnValueOnce([mockSignal]),  // allSignals
+        get: vi.fn().mockReturnValue(null),   // fundamentalCache
+      };
+      vi.mocked(getDb).mockReturnValue(mockDb as never);
+
+      const attributor = new PerformanceAttributor();
+      const result = attributor.getFactorBreakdown();
+
+      expect(result.byDecisionType.BUY.count).toBe(1);
+      expect(result.byFactor.technical.tradeCount).toBeGreaterThanOrEqual(0);
     });
   });
 });

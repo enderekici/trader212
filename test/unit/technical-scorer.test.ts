@@ -570,4 +570,59 @@ describe('Technical Scorer', () => {
       expect(result.score).toBe(78);
     });
   });
+
+  describe('Candlestick pattern scoring', () => {
+    it('net bearish (1 bearish) -> 30 base', () => {
+      mockDetectCandlestickPatterns.mockReturnValue({ bullish: [], bearish: ['Hammer'], neutral: [] });
+      const result = analyzeTechnicals(singleCandle);
+      // netBull = -1, cpSignal = max(30 + (-1+1)*5, 15) = max(30, 15) = 30
+      expect(result.score).toBe(30);
+    });
+
+    it('net bearish (3 bearish) -> floored at 15', () => {
+      mockDetectCandlestickPatterns.mockReturnValue({ bullish: [], bearish: ['A', 'B', 'C'], neutral: [] });
+      const result = analyzeTechnicals(singleCandle);
+      // netBull = -3, cpSignal = max(30 + (-3+1)*5, 15) = max(30 - 10, 15) = max(20, 15) = 20
+      expect(result.score).toBe(20);
+    });
+
+    it('net bearish (7 bearish) -> floored at 15', () => {
+      mockDetectCandlestickPatterns.mockReturnValue({ bullish: [], bearish: ['A', 'B', 'C', 'D', 'E', 'F', 'G'], neutral: [] });
+      const result = analyzeTechnicals(singleCandle);
+      // netBull = -7, cpSignal = max(30 + (-7+1)*5, 15) = max(30 - 30, 15) = max(0, 15) = 15
+      expect(result.score).toBe(15);
+    });
+
+    it('equal bullish and bearish -> mixed (50)', () => {
+      mockDetectCandlestickPatterns.mockReturnValue({ bullish: ['Morning Star'], bearish: ['Evening Star'], neutral: [] });
+      const result = analyzeTechnicals(singleCandle);
+      // netBull = 0, cpSignal = 50
+      expect(result.score).toBe(50);
+    });
+
+    it('net bullish (1 bullish, 0 bearish) -> 70 base (line 342)', () => {
+      mockDetectCandlestickPatterns.mockReturnValue({ bullish: ['Hammer'], bearish: [], neutral: [] });
+      const result = analyzeTechnicals(singleCandle);
+      // netBull = 1, cpSignal = min(70 + (1-1)*5, 85) = min(70, 85) = 70
+      expect(result.score).toBe(70);
+    });
+
+    it('net bullish (2 bullish, 0 bearish) -> 75 (line 342)', () => {
+      mockDetectCandlestickPatterns.mockReturnValue({ bullish: ['Hammer', 'Morning Star'], bearish: [], neutral: [] });
+      const result = analyzeTechnicals(singleCandle);
+      // netBull = 2, cpSignal = min(70 + (2-1)*5, 85) = min(75, 85) = 75
+      expect(result.score).toBe(75);
+    });
+
+    it('net bullish (many bullish) -> capped at 85 (line 342)', () => {
+      mockDetectCandlestickPatterns.mockReturnValue({
+        bullish: ['p1', 'p2', 'p3', 'p4', 'p5'],
+        bearish: [],
+        neutral: [],
+      });
+      const result = analyzeTechnicals(singleCandle);
+      // netBull = 5, cpSignal = min(70 + (5-1)*5, 85) = min(90, 85) = 85
+      expect(result.score).toBe(85);
+    });
+  });
 });

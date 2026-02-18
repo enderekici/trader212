@@ -162,6 +162,37 @@ describe('ConsensusEngine', () => {
 
       expect(result).toBeNull();
     });
+
+    it('handles unknown decision type via ?? 0 fallback (lines 65, 83-84)', async () => {
+      // Cast an invalid decision type to bypass TypeScript - adds new key to counts
+      const profiles = [
+        makeProfile({ id: 'a', weight: 1 }),
+        makeProfile({ id: 'b', weight: 1 }),
+        makeProfile({ id: 'c', weight: 1 }),
+      ];
+      pushAdapter(makeDecision({ decision: 'STRONG_BUY' as AIDecision['decision'] }));
+      pushAdapter(makeDecision({ decision: 'BUY' }));
+      pushAdapter(makeDecision({ decision: 'BUY' }));
+
+      const engine = new ConsensusEngine(profiles, 'majority', 2);
+      const result = await engine.analyze(makeContext());
+      expect(result!.decision).toBe('BUY');
+    });
+
+    it('handles unknown decision type in weighted mode via ?? 0 fallback (lines 83-84)', async () => {
+      const profiles = [
+        makeProfile({ id: 'a', weight: 2 }),
+        makeProfile({ id: 'b', weight: 1 }),
+        makeProfile({ id: 'c', weight: 1 }),
+      ];
+      pushAdapter(makeDecision({ decision: 'STRONG_SELL' as AIDecision['decision'] }));
+      pushAdapter(makeDecision({ decision: 'SELL' }));
+      pushAdapter(makeDecision({ decision: 'SELL' }));
+
+      const engine = new ConsensusEngine(profiles, 'weighted', 2);
+      const result = await engine.analyze(makeContext());
+      expect(result!.decision).toBe('SELL');
+    });
   });
 
   describe('weighted mode', () => {
@@ -182,6 +213,41 @@ describe('ConsensusEngine', () => {
 
       expect(result).not.toBeNull();
       expect(result!.decision).toBe('SELL');
+    });
+
+    it('returns null when weighted winner count < minAgree', async () => {
+      const profiles = [
+        makeProfile({ id: 'a', weight: 5 }),
+        makeProfile({ id: 'b', weight: 3 }),
+        makeProfile({ id: 'c', weight: 1 }),
+      ];
+
+      // each model votes differently — no count >= 2
+      pushAdapter(makeDecision({ decision: 'BUY' }));
+      pushAdapter(makeDecision({ decision: 'SELL' }));
+      pushAdapter(makeDecision({ decision: 'HOLD' }));
+
+      const engine = new ConsensusEngine(profiles, 'weighted', 2);
+      const result = await engine.analyze(makeContext());
+
+      expect(result).toBeNull();
+    });
+
+    it('uses weight=1 when profile.weight is undefined', async () => {
+      const profiles = [
+        // weight deliberately omitted → coerced by makeProfile to 1
+        makeProfile({ id: 'a', weight: undefined as unknown as number }),
+        makeProfile({ id: 'b', weight: undefined as unknown as number }),
+      ];
+
+      pushAdapter(makeDecision({ decision: 'BUY', conviction: 80 }));
+      pushAdapter(makeDecision({ decision: 'BUY', conviction: 60 }));
+
+      const engine = new ConsensusEngine(profiles, 'weighted', 2);
+      const result = await engine.analyze(makeContext());
+
+      expect(result).not.toBeNull();
+      expect(result!.decision).toBe('BUY');
     });
   });
 
@@ -241,9 +307,74 @@ describe('ConsensusEngine', () => {
       expect(result!.risks).toEqual(expect.arrayContaining(['risk-X', 'risk-Y', 'risk-Z']));
       expect(result!.risks.length).toBe(3); // no duplicates
     });
+
+    it('uses empty string exitConditions when all models have empty/whitespace exitConditions', async () => {
+      const profiles = [makeProfile({ id: 'a', weight: 1 }), makeProfile({ id: 'b', weight: 1 })];
+
+      pushAdapter(makeDecision({ decision: 'BUY', exitConditions: '   ' }));
+      pushAdapter(makeDecision({ decision: 'BUY', exitConditions: '' }));
+
+      const engine = new ConsensusEngine(profiles, 'unanimous', 1);
+      const result = await engine.analyze(makeContext());
+
+      expect(result).not.toBeNull();
+      expect(result!.exitConditions).toBe('');
+    });
+
+    it('resolves urgency tie by keeping the first (a >= b always wins)', async () => {
+      const profiles = [
+        makeProfile({ id: 'a', weight: 1 }),
+        makeProfile({ id: 'b', weight: 1 }),
+        makeProfile({ id: 'c', weight: 1 }),
+        makeProfile({ id: 'd', weight: 1 }),
+      ];
+
+      // 2 immediate, 2 no_rush — tie goes to immediate (first in reduce)
+      pushAdapter(makeDecision({ decision: 'BUY', urgency: 'immediate' }));
+      pushAdapter(makeDecision({ decision: 'BUY', urgency: 'immediate' }));
+      pushAdapter(makeDecision({ decision: 'BUY', urgency: 'no_rush' }));
+      pushAdapter(makeDecision({ decision: 'BUY', urgency: 'no_rush' }));
+
+      const engine = new ConsensusEngine(profiles, 'majority', 2);
+      const result = await engine.analyze(makeContext());
+
+      expect(result).not.toBeNull();
+      // Tie: both have count 2, reduce keeps a (immediate) since a >= b
+      expect(result!.urgency).toBe('immediate');
+    });
+
+    it('resolves urgency when second value has strictly higher count (b wins via < branch)', async () => {
+      const profiles = [
+        makeProfile({ id: 'a', weight: 1 }),
+        makeProfile({ id: 'b', weight: 1 }),
+        makeProfile({ id: 'c', weight: 1 }),
+      ];
+
+      // 1 immediate + 2 no_rush → no_rush (b) wins because urgencyCounts[a] < urgencyCounts[b]
+      pushAdapter(makeDecision({ decision: 'BUY', urgency: 'immediate' }));
+      pushAdapter(makeDecision({ decision: 'BUY', urgency: 'no_rush' }));
+      pushAdapter(makeDecision({ decision: 'BUY', urgency: 'no_rush' }));
+
+      const engine = new ConsensusEngine(profiles, 'majority', 2);
+      const result = await engine.analyze(makeContext());
+
+      expect(result).not.toBeNull();
+      expect(result!.urgency).toBe('no_rush');
+    });
   });
 
   describe('error handling', () => {
+    it('treats null-returning adapter as a failed model (line 33)', async () => {
+      // pushAdapter(null) → adapter.analyze() resolves null → throw inside Promise → rejected settlement
+      const profiles = [makeProfile({ id: 'a' }), makeProfile({ id: 'b' })];
+      pushAdapter(null); // returns null → triggers line 33 throw
+      pushAdapter(makeDecision({ decision: 'BUY' })); // succeeds
+      const engine = new ConsensusEngine(profiles, 'majority', 1);
+      const result = await engine.analyze(makeContext());
+      expect(result).not.toBeNull();
+      expect(result!.decision).toBe('BUY');
+    });
+
     it('returns null when all model calls fail', async () => {
       const profiles = [makeProfile({ id: 'a' }), makeProfile({ id: 'b' })];
 

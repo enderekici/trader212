@@ -538,6 +538,142 @@ describe('OrderReplacer', () => {
         expect(openUpdate[1].t212OrderId).toBe('6001');
       });
 
+      it('places market order when orderType is neither limit nor stop', async () => {
+        // Covers the else branch (line 412) — falls through to placeMarketOrder
+        const order = makeOrder({
+          id: 10,
+          t212OrderId: '5001',
+          orderType: 'market',
+          requestedPrice: 150,
+        });
+        mockGetOrderById.mockReturnValue(order);
+        mockCreateOrder.mockReturnValue(200);
+
+        mockClient.cancelOrder.mockResolvedValue(undefined);
+        mockClient.getOrder.mockResolvedValue({
+          id: 5001,
+          status: 'CANCELLED',
+          ticker: 'AAPL_US_EQ',
+        });
+        mockClient.placeMarketOrder.mockResolvedValue({ id: 7001 });
+
+        const result = await replacer.replaceOrder(10, 155);
+
+        expect(result.success).toBe(true);
+        expect(mockClient.placeMarketOrder).toHaveBeenCalledWith({
+          ticker: 'AAPL_US_EQ',
+          quantity: 10,
+          timeValidity: 'DAY',
+        });
+      });
+
+      it('returns undefined when positions table query throws in resolveT212Ticker', async () => {
+        // Covers line 516: catch block in the positions table fallback
+        const order = makeOrder({ id: 10, t212OrderId: '5001' });
+        mockGetOrderById.mockReturnValue(order);
+
+        mockClient.cancelOrder.mockResolvedValue(undefined);
+        // Verification fetch: cancelled but no ticker
+        mockClient.getOrder.mockResolvedValue({ status: 'CANCELLED' });
+        // DB query throws — covers the catch { return undefined } at line 516
+        mockDbGet.mockImplementationOnce(() => {
+          throw new Error('DB error');
+        });
+
+        const result = await replacer.replaceOrder(10, 155);
+
+        // Ticker couldn't be resolved (DB threw), so placement fails
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('Could not resolve T212 ticker');
+      });
+
+      it('uses value/quantity fallback when filledValue/filledQuantity are null (extractFillPrice)', async () => {
+        // Covers lines 544-547: extractFillPrice fallback path
+        // This is triggered when cancel fails and final status check returns FILLED
+        // with filledValue=null but value/quantity set
+        mockConfigGet.mockImplementation((key: string) => {
+          const defaults: Record<string, unknown> = {
+            'execution.dryRun': false,
+            'execution.orderReplacement.enabled': true,
+            'execution.orderReplacement.checkIntervalSeconds': 30,
+            'execution.orderReplacement.replaceAfterSeconds': 60,
+            'execution.orderReplacement.priceDeviationPct': 0.005,
+            'execution.orderReplacement.maxReplacements': 3,
+          };
+          return defaults[key];
+        });
+
+        const order = makeOrder({ id: 10, t212OrderId: '5001' });
+        mockGetOrderById.mockReturnValue(order);
+
+        // Cancel fails → check final status
+        mockClient.cancelOrder.mockRejectedValue(new Error('Cannot cancel'));
+        // Final status: FILLED with filledValue=null but value/quantity set
+        mockClient.getOrder.mockResolvedValue({
+          status: 'FILLED',
+          filledValue: null,
+          filledQuantity: null,
+          value: 1500,
+          quantity: 10,
+        });
+
+        const result = await replacer.replaceOrder(10, 155);
+
+        // The fill is detected via the value/quantity fallback
+        expect(result.filledDuringCancel).toBe(true);
+        // Fill price = value / quantity = 1500 / 10 = 150
+        expect(mockUpdateOrderStatus).toHaveBeenCalledWith(
+          10,
+          expect.objectContaining({
+            status: 'filled',
+            filledPrice: 150,
+          }),
+        );
+      });
+
+      it('returns filledDuringCancel=true with null fill price when all price fields are null (extractFillPrice returns null)', async () => {
+        // Covers line 547: extractFillPrice returns null when both
+        // filledValue/filledQuantity AND value/quantity are null
+        mockConfigGet.mockImplementation((key: string) => {
+          const defaults: Record<string, unknown> = {
+            'execution.dryRun': false,
+            'execution.orderReplacement.enabled': true,
+            'execution.orderReplacement.checkIntervalSeconds': 30,
+            'execution.orderReplacement.replaceAfterSeconds': 60,
+            'execution.orderReplacement.priceDeviationPct': 0.005,
+            'execution.orderReplacement.maxReplacements': 3,
+          };
+          return defaults[key];
+        });
+
+        const order = makeOrder({ id: 10, t212OrderId: '5001' });
+        mockGetOrderById.mockReturnValue(order);
+
+        // Cancel fails → check final status
+        mockClient.cancelOrder.mockRejectedValue(new Error('Cannot cancel'));
+        // Final status: FILLED but all price fields are null → extractFillPrice returns null
+        mockClient.getOrder.mockResolvedValue({
+          status: 'FILLED',
+          filledValue: null,
+          filledQuantity: null,
+          value: null,
+          quantity: null,
+        });
+
+        const result = await replacer.replaceOrder(10, 155);
+
+        // Fill detected (status=FILLED) but fill price is null
+        expect(result.filledDuringCancel).toBe(true);
+        // updateOrderStatus called with filledPrice: undefined (null ?? undefined)
+        expect(mockUpdateOrderStatus).toHaveBeenCalledWith(
+          10,
+          expect.objectContaining({
+            status: 'filled',
+            filledPrice: undefined,
+          }),
+        );
+      });
+
       it('places stop order for stop orderType', async () => {
         const order = makeOrder({
           id: 10,
@@ -628,6 +764,63 @@ describe('OrderReplacer', () => {
         );
       });
 
+      it('uses quantity fallback for fillQty when filledQuantity is null during verification FILLED', async () => {
+        // Covers line 357: filledQuantity ?? quantity ?? 0 — filledQuantity=null, quantity=10
+        const order = makeOrder({ id: 10, t212OrderId: '5001' });
+        mockGetOrderById.mockReturnValue(order);
+
+        mockClient.cancelOrder.mockResolvedValue(undefined);
+        // Verification shows FILLED but filledQuantity is null; quantity is set
+        mockClient.getOrder.mockResolvedValue({
+          status: 'FILLED',
+          filledValue: 1500,
+          filledQuantity: null,
+          value: 1500,
+          quantity: 10,
+        });
+
+        const result = await replacer.replaceOrder(10, 155);
+
+        expect(result.filledDuringCancel).toBe(true);
+        // fillQty = null ?? 10 ?? 0 = 10
+        expect(mockUpdateOrderStatus).toHaveBeenCalledWith(
+          10,
+          expect.objectContaining({
+            status: 'filled',
+            filledQuantity: 10,
+          }),
+        );
+      });
+
+      it('uses 0 fallback for fillQty when both filledQuantity and quantity are null during verification FILLED', async () => {
+        // Covers line 357: filledQuantity ?? quantity ?? 0 — both null → 0
+        const order = makeOrder({ id: 10, t212OrderId: '5001' });
+        mockGetOrderById.mockReturnValue(order);
+
+        mockClient.cancelOrder.mockResolvedValue(undefined);
+        // Verification shows FILLED but all qty fields null
+        mockClient.getOrder.mockResolvedValue({
+          status: 'FILLED',
+          filledValue: null,
+          filledQuantity: null,
+          value: null,
+          quantity: null,
+        });
+
+        const result = await replacer.replaceOrder(10, 155);
+
+        expect(result.filledDuringCancel).toBe(true);
+        // fillQty = null ?? null ?? 0 = 0
+        expect(mockUpdateOrderStatus).toHaveBeenCalledWith(
+          10,
+          expect.objectContaining({
+            status: 'filled',
+            filledQuantity: 0,
+            filledPrice: undefined,
+          }),
+        );
+      });
+
       it('retries cancel up to 3 times', async () => {
         const order = makeOrder({ id: 10, t212OrderId: '5001' });
         mockGetOrderById.mockReturnValue(order);
@@ -687,6 +880,25 @@ describe('OrderReplacer', () => {
 
         expect(result.success).toBe(false);
         expect(result.error).toContain('Exchange closed');
+      });
+
+      it('covers line 460 String(err) branch: replaceOrder catch with non-Error thrown', async () => {
+        // Cover the `String(err)` branch in the catch at line 460 (err instanceof Error ? ... : String(err))
+        const order = makeOrder({ id: 10, t212OrderId: '5001' });
+        mockGetOrderById.mockReturnValue(order);
+
+        mockClient.cancelOrder.mockResolvedValue(undefined);
+        mockClient.getOrder.mockResolvedValue({
+          status: 'CANCELLED',
+          ticker: 'AAPL_US_EQ',
+        });
+        // Throw a non-Error (string) — String(err) branch fires
+        mockClient.placeLimitOrder.mockRejectedValue('network-failure-string');
+
+        const result = await replacer.replaceOrder(10, 155);
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('network-failure-string');
       });
 
       it('fails when order status is not CANCELLED after cancel', async () => {
@@ -763,6 +975,27 @@ describe('OrderReplacer', () => {
         expect(result.success).toBe(false);
         expect(result.error).toContain('Could not resolve T212 ticker');
       });
+
+      it('uses "entry" fallback when orderTag is null (live, line 427)', async () => {
+        const order = makeOrder({ id: 10, t212OrderId: '5001', orderTag: null });
+        mockGetOrderById.mockReturnValue(order);
+        mockCreateOrder.mockReturnValue(200);
+
+        mockClient.cancelOrder.mockResolvedValue(undefined);
+        mockClient.getOrder.mockResolvedValue({
+          id: 5001,
+          status: 'CANCELLED',
+          ticker: 'AAPL_US_EQ',
+        });
+        mockClient.placeLimitOrder.mockResolvedValue({ id: 7001 });
+
+        const result = await replacer.replaceOrder(10, 155);
+
+        expect(result.success).toBe(true);
+        expect(mockCreateOrder).toHaveBeenCalledWith(
+          expect.objectContaining({ orderTag: 'entry' }),
+        );
+      });
     });
   });
 
@@ -824,6 +1057,35 @@ describe('OrderReplacer', () => {
       const result = await replacer.processOpenOrders();
       expect(result.replaced).toBe(1);
     });
+
+    it('breaks circular reference chain to prevent infinite loop (line 480)', async () => {
+      const order = makeOrder({
+        id: 5,
+        requestedPrice: 150,
+        createdAt: new Date(Date.now() - 120_000).toISOString(),
+      });
+      mockGetOpenOrders.mockReturnValue([order]);
+      mockGetQuote.mockResolvedValue({ price: 160 });
+
+      // Simulate self-referential chain: findOrderReplacedBy(5) returns an order with id=5
+      // This triggers the `if (parentOrder.id === currentId) break` guard
+      mockFindOrderReplacedBy.mockReturnValue(makeOrder({ id: 5 }));
+
+      mockConfigGet.mockImplementation((key: string) => {
+        const defaults: Record<string, unknown> = {
+          'execution.dryRun': true,
+          'execution.orderReplacement.replaceAfterSeconds': 60,
+          'execution.orderReplacement.priceDeviationPct': 0.005,
+          'execution.orderReplacement.maxReplacements': 3,
+        };
+        return defaults[key];
+      });
+
+      // Should not hang — the break prevents infinite loop
+      const result = await replacer.processOpenOrders();
+      // depth=1 due to the break, which is below maxReplacements=3, so it gets replaced
+      expect(result.replaced).toBe(1);
+    });
   });
 
   // ── Replacement chain verification ──────────────────────────────────
@@ -883,6 +1145,28 @@ describe('OrderReplacer', () => {
         accountType: 'ISA',
       });
     });
+
+    it('uses "entry" fallback when orderTag is null (dry-run, line 231)', async () => {
+      mockConfigGet.mockImplementation((key: string) => {
+        const defaults: Record<string, unknown> = {
+          'execution.dryRun': true,
+          'execution.orderReplacement.priceDeviationPct': 0.005,
+          'execution.orderReplacement.maxReplacements': 3,
+        };
+        return defaults[key];
+      });
+
+      const order = makeOrder({ id: 8, orderTag: null });
+      mockGetOrderById.mockReturnValue(order);
+      mockCreateOrder.mockReturnValue(55);
+
+      const result = await replacer.replaceOrder(8, 160);
+
+      expect(result.success).toBe(true);
+      expect(mockCreateOrder).toHaveBeenCalledWith(
+        expect.objectContaining({ orderTag: 'entry' }),
+      );
+    });
   });
 
   // ── getCurrentPrice ─────────────────────────────────────────────────
@@ -929,7 +1213,7 @@ describe('OrderReplacer', () => {
       expect(result.error).toContain('Failed to cancel');
     });
 
-    it('handles exception in processOpenOrders for individual orders', async () => {
+      it('handles exception in processOpenOrders for individual orders', async () => {
       const order1 = makeOrder({
         id: 1,
         requestedPrice: 150,
@@ -967,6 +1251,39 @@ describe('OrderReplacer', () => {
       // First order errored, second replaced
       expect(result.errors.length).toBe(1);
       expect(result.replaced).toBe(1);
+    });
+
+    it('covers line 148 String(err) branch: processOpenOrders catch with non-Error thrown', async () => {
+      // Cover the `String(err)` branch in the catch at line 148 (err instanceof Error ? ... : String(err))
+      const order = makeOrder({
+        id: 1,
+        requestedPrice: 150,
+        createdAt: new Date(Date.now() - 120_000).toISOString(),
+      });
+      mockGetOpenOrders.mockReturnValue([order]);
+      mockGetQuote.mockResolvedValue({ price: 200 }); // big deviation
+
+      // Make getOrderById throw a non-Error (string) — propagates through replaceOrder to catch at line 147
+      mockGetOrderById.mockImplementationOnce(() => {
+        // eslint-disable-next-line @typescript-eslint/no-throw-literal
+        throw 'non-error string thrown';
+      });
+
+      mockConfigGet.mockImplementation((key: string) => {
+        const defaults: Record<string, unknown> = {
+          'execution.dryRun': true,
+          'execution.orderReplacement.replaceAfterSeconds': 60,
+          'execution.orderReplacement.priceDeviationPct': 0.005,
+          'execution.orderReplacement.maxReplacements': 3,
+        };
+        return defaults[key];
+      });
+
+      const result = await replacer.processOpenOrders();
+
+      // Error message uses String(err) since thrown value is not an Error instance
+      expect(result.errors.length).toBe(1);
+      expect(result.errors[0]).toContain('non-error string thrown');
     });
   });
 

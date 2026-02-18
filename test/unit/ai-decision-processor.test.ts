@@ -314,6 +314,24 @@ That concludes my analysis.`;
       expect(result).toBeNull();
     });
 
+    it('skips toUpperCase when decision field is not a string (line 38 false branch)', () => {
+      // decision is a number, not a string — normalizeDecisionFields should skip toUpperCase
+      const input = {
+        decision: 42, // not a string — line 38: typeof normalized.decision === 'string' is false
+        conviction: 75,
+        reasoning: 'test',
+        risks: ['risk'],
+        suggestedStopLossPct: 0.05,
+        suggestedPositionSizePct: 0.08,
+        suggestedTakeProfitPct: 0.15,
+        urgency: 'immediate',
+        exitConditions: 'test',
+      };
+      // A non-string decision will fail Zod validation → null
+      const result = processAIDecision(JSON.stringify(input));
+      expect(result).toBeNull();
+    });
+
     it('returns null when configManager.get throws', () => {
       vi.mocked(configManager.get).mockImplementation((key: string) => {
         if (key === 'risk.minStopLossPct') throw 'config not found';

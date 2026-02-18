@@ -49,6 +49,9 @@ function makeFullContext(): AIContext {
       volumeRatio: 1.15,
       support: 145.50,
       resistance: 155.50,
+      candlestickBullish: null,
+      candlestickBearish: null,
+      candlestickNeutral: null,
       score: 65,
     },
     fundamental: {
@@ -290,6 +293,37 @@ describe('buildAnalysisPrompt', () => {
       const { user } = buildAnalysisPrompt(ctx);
       expect(user).toContain('Sector Exposure:\n  (none)');
     });
+
+    it('shows "no stop" when both stopLoss and trailingStop are null (line 190/192 false branch)', () => {
+      // Cover the `'no stop'` path: trailingStop=null AND stopLoss=null
+      const ctx = makeFullContext();
+      ctx.portfolio.existingPositions = [
+        { symbol: 'TSLA', pnlPct: 0.03, entryPrice: 200.00, currentPrice: 206.00, shares: 5, stopLoss: null, trailingStop: null, holdDays: 2, dcaCount: 0, partialExitCount: 0 },
+      ];
+      const { user } = buildAnalysisPrompt(ctx);
+      expect(user).toContain('no stop');
+    });
+
+    it('shows partial-exit count in extras when partialExitCount > 0 (line 195 true branch)', () => {
+      // Cover `if (pos.partialExitCount > 0)` TRUE branch
+      const ctx = makeFullContext();
+      ctx.portfolio.existingPositions = [
+        { symbol: 'NVDA', pnlPct: 0.15, entryPrice: 500.00, currentPrice: 575.00, shares: 8, stopLoss: 480.00, trailingStop: null, holdDays: 10, dcaCount: 0, partialExitCount: 2 },
+      ];
+      const { user } = buildAnalysisPrompt(ctx);
+      expect(user).toContain('partial-exit×2');
+    });
+
+    it('shows sector without value pct when sector missing from sectorExposureValue (line 205 false branch)', () => {
+      // Cover `valuePct !== undefined` FALSE branch: sector exists in sectorExposure but NOT in sectorExposureValue
+      const ctx = makeFullContext();
+      ctx.portfolio.sectorExposure = { Energy: 1 };
+      ctx.portfolio.sectorExposureValue = {}; // Energy not present → valuePct = undefined → no pct string
+      const { user } = buildAnalysisPrompt(ctx);
+      expect(user).toContain('Energy: 1 position(s)');
+      // Should NOT include "(X% of portfolio)" after Energy
+      expect(user).not.toContain('Energy: 1 position(s) (');
+    });
   });
 
   describe('user prompt - risk constraints', () => {
@@ -496,6 +530,52 @@ describe('buildAnalysisPrompt', () => {
       expect(user).toContain('1Y +28.5%');
     });
 
+    it('renders relativeVolume and averageVolume when provided (lines 90-91)', () => {
+      const ctx = makeFullContext();
+      ctx.webResearch = {
+        pegRatio: null,
+        analystTargetPrice: null,
+        analystConsensus: null,
+        analystCount: null,
+        shortInterestPct: null,
+        institutionalOwnershipPct: null,
+        epsEstimateNextQ: null,
+        revenueEstimateNextQ: null,
+        perfWeek: 0.01, // non-null so hasAnyData is true and section renders
+        perfMonth: null,
+        perfQuarter: null,
+        perfYear: null,
+        relativeVolume: 1.85,
+        averageVolume: 35_000_000,
+      };
+      const { user } = buildAnalysisPrompt(ctx);
+      expect(user).toContain('Relative Volume: 1.85x');
+      expect(user).toContain('Average Volume: $35.00M');
+    });
+
+    it('renders negative perfQuarter and perfYear with minus sign (lines 83, 86 false branches)', () => {
+      const ctx = makeFullContext();
+      ctx.webResearch = {
+        pegRatio: null,
+        analystTargetPrice: null,
+        analystConsensus: null,
+        analystCount: null,
+        shortInterestPct: null,
+        institutionalOwnershipPct: null,
+        epsEstimateNextQ: null,
+        revenueEstimateNextQ: null,
+        perfWeek: null,
+        perfMonth: null,
+        perfQuarter: -0.05,
+        perfYear: -0.15,
+        relativeVolume: null,
+        averageVolume: null,
+      };
+      const { user } = buildAnalysisPrompt(ctx);
+      expect(user).toContain('1Q -5.0%');
+      expect(user).toContain('1Y -15.0%');
+    });
+
     it('calculates upside percentage from target price', () => {
       const ctx = makeFullContext();
       ctx.currentPrice = 100;
@@ -515,6 +595,28 @@ describe('buildAnalysisPrompt', () => {
       };
       const { user } = buildAnalysisPrompt(ctx);
       expect(user).toContain('Analyst Target Price: $120.00 (+20.0%)');
+    });
+
+    it('shows negative upside when analyst target is below current price (line 52 false branch)', () => {
+      const ctx = makeFullContext();
+      ctx.currentPrice = 100;
+      ctx.webResearch = {
+        pegRatio: null,
+        analystTargetPrice: 80,
+        analystConsensus: null,
+        analystCount: null,
+        shortInterestPct: null,
+        institutionalOwnershipPct: null,
+        epsEstimateNextQ: null,
+        revenueEstimateNextQ: null,
+        perfWeek: null,
+        perfMonth: null,
+        perfQuarter: null,
+        perfYear: null,
+      } as any;
+      const { user } = buildAnalysisPrompt(ctx);
+      expect(user).toContain('Analyst Target Price: $80.00 (-20.0%)');
+      expect(user).not.toContain('Analyst Target Price: $80.00 (+-20.0%)');
     });
 
     it('omits section when webResearch is undefined', () => {
@@ -604,6 +706,51 @@ describe('buildAnalysisPrompt', () => {
       const { user } = buildAnalysisPrompt(ctx);
       expect(user).toContain('Revenue Estimate (next Q): $500.0M');
     });
+
+    it('formats revenue in raw dollars when less than 1M (line 69 false branch)', () => {
+      const ctx = makeFullContext();
+      ctx.webResearch = {
+        pegRatio: null,
+        analystTargetPrice: null,
+        analystConsensus: null,
+        analystCount: null,
+        shortInterestPct: null,
+        institutionalOwnershipPct: null,
+        epsEstimateNextQ: null,
+        revenueEstimateNextQ: 500_000, // < 1e6 → raw $ format
+        perfWeek: null,
+        perfMonth: null,
+        perfQuarter: null,
+        perfYear: null,
+        relativeVolume: null,
+        averageVolume: null,
+      };
+      const { user } = buildAnalysisPrompt(ctx);
+      expect(user).toContain('Revenue Estimate (next Q): $500000');
+    });
+
+    it('shows upside as +0.0% when currentPrice is 0 (line 50 false branch)', () => {
+      const ctx = makeFullContext();
+      ctx.currentPrice = 0;
+      ctx.webResearch = {
+        pegRatio: null,
+        analystTargetPrice: 120,
+        analystConsensus: null,
+        analystCount: null,
+        shortInterestPct: null,
+        institutionalOwnershipPct: null,
+        epsEstimateNextQ: null,
+        revenueEstimateNextQ: null,
+        perfWeek: null,
+        perfMonth: null,
+        perfQuarter: null,
+        perfYear: null,
+        relativeVolume: null,
+        averageVolume: null,
+      };
+      const { user } = buildAnalysisPrompt(ctx);
+      expect(user).toContain('Analyst Target Price: $120.00 (+0.0%)');
+    });
   });
 
   describe('historical signal rsi/macdHistogram null handling', () => {
@@ -623,6 +770,200 @@ describe('buildAnalysisPrompt', () => {
       const { user } = buildAnalysisPrompt(ctx);
       expect(user).toContain('RSI: N/A');
       expect(user).toContain('MACD-H: N/A');
+    });
+  });
+
+  describe('regime section', () => {
+    it('includes MARKET REGIME section when context.regime is set', () => {
+      const ctx = makeFullContext();
+      ctx.regime = {
+        regime: 'trending_up',
+        confidence: 0.85,
+        spyTrend: 'up',
+        volatilityPctile: 30,
+        newEntriesAllowed: true,
+        positionSizeMultiplier: 1.0,
+      };
+      const { user } = buildAnalysisPrompt(ctx);
+      expect(user).toContain('MARKET REGIME:');
+      expect(user).toContain('Trending Up (Bull)');
+      expect(user).toContain('85% confidence');
+      expect(user).toContain('SPY Trend: up');
+    });
+
+    it('omits MARKET REGIME section when context.regime is not set', () => {
+      const ctx = makeFullContext();
+      // regime not set
+      const { user } = buildAnalysisPrompt(ctx);
+      expect(user).not.toContain('MARKET REGIME:');
+    });
+  });
+
+  describe('multi-timeframe section', () => {
+    it('includes MULTI-TIMEFRAME ANALYSIS when multiTimeframe is set', () => {
+      const ctx = makeFullContext();
+      ctx.multiTimeframe = {
+        compositeScore: 72,
+        alignment: 'bullish',
+        timeframeScores: { weekly: 70, monthly: 75 },
+      };
+      const { user } = buildAnalysisPrompt(ctx);
+      expect(user).toContain('MULTI-TIMEFRAME ANALYSIS:');
+      expect(user).toContain('Composite Score: 72/100');
+      expect(user).toContain('Alignment: bullish');
+    });
+
+    it('adds CAUTION note when alignment is mixed', () => {
+      const ctx = makeFullContext();
+      ctx.multiTimeframe = {
+        compositeScore: 50,
+        alignment: 'mixed',
+        timeframeScores: { weekly: 60, monthly: 40 },
+      };
+      const { user } = buildAnalysisPrompt(ctx);
+      expect(user).toContain('Alignment: mixed — CAUTION: conflicting timeframe signals');
+    });
+
+    it('omits MULTI-TIMEFRAME ANALYSIS when not set', () => {
+      const ctx = makeFullContext();
+      const { user } = buildAnalysisPrompt(ctx);
+      expect(user).not.toContain('MULTI-TIMEFRAME ANALYSIS:');
+    });
+  });
+
+  describe('social sentiment section', () => {
+    it('shows bearish label when overallScore < -0.2', () => {
+      const ctx = makeFullContext();
+      ctx.socialSentiment = {
+        overallScore: -0.5,
+        buzzScore: 30,
+        mentionCount: 100,
+        trendDirection: 'down',
+      };
+      const { user } = buildAnalysisPrompt(ctx);
+      expect(user).toContain('SOCIAL SENTIMENT:');
+      expect(user).toContain('bearish');
+    });
+
+    it('shows bullish label when overallScore > 0.2 (line 141 true branch)', () => {
+      const ctx = makeFullContext();
+      ctx.socialSentiment = {
+        overallScore: 0.5,
+        buzzScore: 75,
+        mentionCount: 500,
+        trendDirection: 'up',
+      };
+      const { user } = buildAnalysisPrompt(ctx);
+      expect(user).toContain('SOCIAL SENTIMENT:');
+      expect(user).toContain('bullish');
+    });
+
+    it('shows neutral label when overallScore is between -0.2 and 0.2', () => {
+      const ctx = makeFullContext();
+      ctx.socialSentiment = {
+        overallScore: 0.1,
+        buzzScore: 50,
+        mentionCount: 200,
+        trendDirection: 'sideways',
+      };
+      const { user } = buildAnalysisPrompt(ctx);
+      expect(user).toContain('neutral');
+    });
+
+    it('omits SOCIAL SENTIMENT when not set', () => {
+      const ctx = makeFullContext();
+      const { user } = buildAnalysisPrompt(ctx);
+      expect(user).not.toContain('SOCIAL SENTIMENT:');
+    });
+  });
+
+  describe('regime crash label (line 105)', () => {
+    it('shows "Market Crash (Risk-Off)" label when regime is crash', () => {
+      const ctx = makeFullContext();
+      ctx.regime = {
+        regime: 'crash',
+        confidence: 0.95,
+        spyTrend: 'down',
+        volatilityPctile: 95,
+        newEntriesAllowed: false,
+        positionSizeMultiplier: 0.25,
+      };
+      const { user } = buildAnalysisPrompt(ctx);
+      expect(user).toContain('Market Crash (Risk-Off)');
+    });
+
+    it('falls back to raw regime name when regime is not in regimeLabels (line 110 ?? branch)', () => {
+      // Cover `regimeLabels[rg.regime] ?? rg.regime` TRUE branch — unknown regime name
+      const ctx = makeFullContext();
+      ctx.regime = {
+        regime: 'unknown_custom_regime' as any,
+        confidence: 0.7,
+        spyTrend: 'up',
+        volatilityPctile: 50,
+        newEntriesAllowed: true,
+        positionSizeMultiplier: 1.0,
+      };
+      const { user } = buildAnalysisPrompt(ctx);
+      expect(user).toContain('MARKET REGIME:');
+      expect(user).toContain('unknown_custom_regime');
+    });
+  });
+
+  describe('candlestick patterns in buildAnalysisPrompt (line 282)', () => {
+    it('includes candlestick line when candlestickBullish is set', () => {
+      const ctx = makeFullContext();
+      ctx.technical.candlestickBullish = 'Hammer, Engulfing';
+      ctx.technical.candlestickBearish = null;
+      ctx.technical.candlestickNeutral = null;
+      const { user } = buildAnalysisPrompt(ctx);
+      expect(user).toContain('Candlestick Patterns:');
+      expect(user).toContain('Bullish [Hammer, Engulfing]');
+    });
+
+    it('includes candlestick line when candlestickBearish is set', () => {
+      const ctx = makeFullContext();
+      ctx.technical.candlestickBullish = null;
+      ctx.technical.candlestickBearish = 'ShootingStar';
+      ctx.technical.candlestickNeutral = null;
+      const { user } = buildAnalysisPrompt(ctx);
+      expect(user).toContain('Bearish [ShootingStar]');
+    });
+
+    it('includes candlestick line when candlestickNeutral is set', () => {
+      const ctx = makeFullContext();
+      ctx.technical.candlestickBullish = null;
+      ctx.technical.candlestickBearish = null;
+      ctx.technical.candlestickNeutral = 'Doji';
+      const { user } = buildAnalysisPrompt(ctx);
+      expect(user).toContain('Neutral [Doji]');
+    });
+
+    it('omits candlestick line when all candlestick fields are null', () => {
+      const ctx = makeFullContext();
+      ctx.technical.candlestickBullish = null;
+      ctx.technical.candlestickBearish = null;
+      ctx.technical.candlestickNeutral = null;
+      const { user } = buildAnalysisPrompt(ctx);
+      expect(user).not.toContain('Candlestick Patterns:');
+    });
+  });
+
+  describe('spyChange1d = 0 null path in buildMarketSection (line 355)', () => {
+    it('shows N/A for SPY change when spyChange1d is 0 in buildResearchDataPrompt', () => {
+      const data = new Map<string, ResearchSymbolData>();
+      data.set('AAPL', makeResearchSymbol());
+
+      const marketCtx: MarketContext = {
+        spyPrice: 450.50,
+        spyChange1d: 0,
+        vixLevel: 15.25,
+        marketTrend: 'neutral',
+      };
+
+      const result = buildResearchDataPrompt(data, marketCtx);
+      // spyChange1d = 0 is falsy → fmtPct(null) → 'N/A'
+      expect(result).toContain('SPY: $450.50');
+      expect(result).toContain('N/A');
     });
   });
 });
@@ -729,6 +1070,20 @@ describe('buildResearchDataPrompt', () => {
       expect(result).toContain('Resistance: 155.50');
     });
 
+    it('includes candlestick patterns in detailed mode when patterns are present', () => {
+      const data = new Map<string, ResearchSymbolData>();
+      const sym = makeResearchSymbol();
+      // Add candlestick patterns to the technical data
+      (sym.technical as any).candlestickPatterns = { bullish: ['Hammer', 'Engulfing'], bearish: ['ShootingStar'], neutral: [] };
+      data.set('AAPL', sym);
+
+      const result = buildResearchDataPrompt(data);
+
+      expect(result).toContain('Candlestick:');
+      expect(result).toContain('Bullish [Hammer, Engulfing]');
+      expect(result).toContain('Bearish [ShootingStar]');
+    });
+
     it('includes full fundamental metrics in detailed mode', () => {
       const data = new Map<string, ResearchSymbolData>();
       data.set('AAPL', makeResearchSymbol());
@@ -772,6 +1127,48 @@ describe('buildResearchDataPrompt', () => {
       expect(result).toContain('=== MSFT ===');
       expect(result).toContain('=== NVDA ===');
       expect(result).not.toContain('--- AAPL ---');
+    });
+
+    it('omits sector/mcap line when sector is null in detailed mode (line 382)', () => {
+      const data = new Map<string, ResearchSymbolData>();
+      data.set('AAPL', makeResearchSymbol({ sector: null }));
+
+      const result = buildResearchDataPrompt(data);
+      expect(result).toContain('=== AAPL ===');
+      expect(result).not.toContain('Sector:');
+    });
+
+    it('shows negative change1dPct without + prefix in detailed mode (line 380 false branch)', () => {
+      const data = new Map<string, ResearchSymbolData>();
+      data.set('AAPL', makeResearchSymbol({ change1dPct: -2.5 }));
+
+      const result = buildResearchDataPrompt(data);
+      expect(result).toContain('1d: -2.50%');
+      expect(result).not.toContain('1d: +-2.50%');
+    });
+
+    it('shows negative change5dPct without + prefix in detailed mode (line 380 nested ternary false branch)', () => {
+      const data = new Map<string, ResearchSymbolData>();
+      // change5dPct is negative (non-null), change1mPct is positive (non-null)
+      data.set('AAPL', makeResearchSymbol({ change5dPct: -2.1, change1mPct: 3.4 }));
+
+      const result = buildResearchDataPrompt(data);
+      expect(result).toContain('5d: -2.10%');
+      expect(result).toContain('1m: +3.40%');
+      expect(result).not.toMatch(/5d: \+-/);
+    });
+
+    it('includes neutral candlestick patterns in detailed mode (line 410 cpNeut.length > 0)', () => {
+      const data = new Map<string, ResearchSymbolData>();
+      data.set('AAPL', makeResearchSymbol({
+        technical: {
+          ...makeResearchSymbol().technical!,
+          candlestickPatterns: { bullish: [], bearish: [], neutral: ['Doji'] },
+        },
+      }));
+
+      const result = buildResearchDataPrompt(data);
+      expect(result).toContain('Neutral [Doji]');
     });
   });
 
@@ -845,6 +1242,137 @@ describe('buildResearchDataPrompt', () => {
       expect(result).toContain(`"${'A'.repeat(60)}"`);
       expect(result).not.toContain(`"${'A'.repeat(61)}"`);
     });
+
+    it('omits sector/mcap line when sector is null in condensed mode (line 453)', () => {
+      const data = new Map<string, ResearchSymbolData>();
+      for (const sym of ['AAPL', 'MSFT', 'NVDA', 'GOOGL']) {
+        data.set(sym, makeResearchSymbol({ sector: null }));
+      }
+
+      const result = buildResearchDataPrompt(data);
+      // No sector line in condensed format
+      expect(result).not.toContain('Technology');
+      expect(result).toContain('--- AAPL ---');
+    });
+
+    it('omits earnings when daysToEarnings is null in condensed mode (line 481)', () => {
+      const data = new Map<string, ResearchSymbolData>();
+      for (const sym of ['AAPL', 'MSFT', 'NVDA', 'GOOGL']) {
+        data.set(sym, makeResearchSymbol({ daysToEarnings: null }));
+      }
+
+      const result = buildResearchDataPrompt(data);
+      expect(result).not.toContain('Earnings:');
+    });
+
+    it('omits insider line when insiderNetBuying is 0 in condensed mode (lines 482-483)', () => {
+      const data = new Map<string, ResearchSymbolData>();
+      for (const sym of ['AAPL', 'MSFT', 'NVDA', 'GOOGL']) {
+        data.set(sym, makeResearchSymbol({ insiderNetBuying: 0 }));
+      }
+
+      const result = buildResearchDataPrompt(data);
+      expect(result).not.toContain('Insider:');
+    });
+
+    it('includes insider line when insiderNetBuying is non-zero in condensed mode (line 483)', () => {
+      const data = new Map<string, ResearchSymbolData>();
+      for (const sym of ['AAPL', 'MSFT', 'NVDA', 'GOOGL']) {
+        data.set(sym, makeResearchSymbol({ insiderNetBuying: 7 }));
+      }
+
+      const result = buildResearchDataPrompt(data);
+      expect(result).toContain('Insider: +7');
+    });
+
+    it('shows N/A for change5dPct and change1mPct when null in condensed mode (line 451 ternaries)', () => {
+      const data = new Map<string, ResearchSymbolData>();
+      for (const sym of ['AAPL', 'MSFT', 'NVDA', 'GOOGL']) {
+        data.set(sym, makeResearchSymbol({ change5dPct: null, change1mPct: null }));
+      }
+
+      const result = buildResearchDataPrompt(data);
+      expect(result).toContain('5d: N/A');
+      expect(result).toContain('1m: N/A');
+    });
+
+    it('shows negative change1dPct without + prefix in condensed mode (line 451 false branch)', () => {
+      const data = new Map<string, ResearchSymbolData>();
+      for (const sym of ['AAPL', 'MSFT', 'NVDA', 'GOOGL']) {
+        data.set(sym, makeResearchSymbol({ change1dPct: -2.5 }));
+      }
+
+      const result = buildResearchDataPrompt(data);
+      expect(result).toContain('1d: -2.50%');
+      expect(result).not.toMatch(/1d: \+-/);
+    });
+
+    it('covers negative change5dPct and positive change1mPct in condensed mode (line 451 remaining branches)', () => {
+      const data = new Map<string, ResearchSymbolData>();
+      for (const sym of ['AAPL', 'MSFT', 'NVDA', 'GOOGL']) {
+        data.set(sym, makeResearchSymbol({ change5dPct: -1.5, change1mPct: 2.0 }));
+      }
+      const result = buildResearchDataPrompt(data);
+      expect(result).toContain('5d: -1.50%');
+      expect(result).toContain('1m: +2.00%');
+    });
+
+    it('omits technical line when d.technical is null in condensed mode (lines 456-461)', () => {
+      const data = new Map<string, ResearchSymbolData>();
+      for (const sym of ['AAPL', 'MSFT', 'NVDA', 'GOOGL']) {
+        data.set(sym, makeResearchSymbol({ technical: null }));
+      }
+
+      const result = buildResearchDataPrompt(data);
+      expect(result).not.toContain('Tech(');
+    });
+
+    it('omits fundamentals line when d.fundamentals is null in condensed mode (lines 464-469)', () => {
+      const data = new Map<string, ResearchSymbolData>();
+      for (const sym of ['AAPL', 'MSFT', 'NVDA', 'GOOGL']) {
+        data.set(sym, makeResearchSymbol({ fundamentals: null, fundamentalScore: 0 }));
+      }
+
+      const result = buildResearchDataPrompt(data);
+      expect(result).not.toContain('Fund(');
+    });
+
+    it('omits headlines in sentiment line when headlines empty in condensed mode (line 473 false branch)', () => {
+      const data = new Map<string, ResearchSymbolData>();
+      for (const sym of ['AAPL', 'MSFT', 'NVDA', 'GOOGL']) {
+        data.set(sym, makeResearchSymbol({ headlines: [] }));
+      }
+
+      const result = buildResearchDataPrompt(data);
+      // Should still have sentiment score line but no quoted headlines
+      expect(result).toContain('Sent(60)');
+      expect(result).not.toContain('"AAPL beats');
+    });
+
+    it('shows negative change5dPct and change1mPct with sign in condensed mode (line 451 nested ternaries)', () => {
+      const data = new Map<string, ResearchSymbolData>();
+      for (const sym of ['AAPL', 'MSFT', 'NVDA', 'GOOGL']) {
+        data.set(sym, makeResearchSymbol({ change5dPct: -3.1, change1mPct: -7.2 }));
+      }
+
+      const result = buildResearchDataPrompt(data);
+      expect(result).toContain('5d: -3.10%');
+      expect(result).toContain('1m: -7.20%');
+      // Ensure no spurious + prefix
+      expect(result).not.toMatch(/5d: \+-/);
+      expect(result).not.toMatch(/1m: \+-/);
+    });
+
+    it('shows negative insiderNetBuying without + prefix in condensed mode (line 483 false branch)', () => {
+      const data = new Map<string, ResearchSymbolData>();
+      for (const sym of ['AAPL', 'MSFT', 'NVDA', 'GOOGL']) {
+        data.set(sym, makeResearchSymbol({ insiderNetBuying: -5 }));
+      }
+
+      const result = buildResearchDataPrompt(data);
+      expect(result).toContain('Insider: -5');
+      expect(result).not.toContain('Insider: +-5');
+    });
   });
 
   describe('market context section', () => {
@@ -889,6 +1417,31 @@ describe('buildResearchDataPrompt', () => {
 
       expect(result).toContain('MARKET CONDITIONS:');
       expect(result).toContain('Regime: Trending Up (Bull) (85% conf)');
+    });
+
+    it('uses raw regime string when regime key is unknown (line 369 ?? false branch)', () => {
+      const data = new Map<string, ResearchSymbolData>();
+      data.set('AAPL', makeResearchSymbol());
+
+      const regime = {
+        regime: 'custom_unknown_regime' as unknown as RegimeAnalysis['regime'],
+        confidence: 0.70,
+        details: {
+          spyTrend: 'flat' as const,
+          volatilityPctile: 50,
+          adjustments: {
+            newEntriesAllowed: true,
+            positionSizeMultiplier: 1.0,
+            stopLossMultiplier: 1.0,
+            entryThresholdAdjustment: 0,
+          },
+        },
+      } as RegimeAnalysis;
+
+      const result = buildResearchDataPrompt(data, null, regime);
+
+      // Unknown regime key → falls through to regime.regime raw string
+      expect(result).toContain('Regime: custom_unknown_regime (70% conf)');
     });
 
     it('omits market section when no context or regime', () => {

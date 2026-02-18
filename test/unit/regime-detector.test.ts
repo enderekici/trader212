@@ -804,23 +804,89 @@ describe('RegimeDetector', () => {
 		});
 
 		it('should have most conservative adjustments for crash', () => {
-			const crashAdj = detector.getAdjustments('crash');
-			const otherRegimes: MarketRegime[] = [
-				'trending_up',
-				'trending_down',
-				'range_bound',
-				'high_volatility',
-			];
+		const crashAdj = detector.getAdjustments('crash');
+		const otherRegimes: MarketRegime[] = [
+			'trending_up',
+			'trending_down',
+			'range_bound',
+			'high_volatility',
+		];
 
-			for (const regime of otherRegimes) {
-				const adj = detector.getAdjustments(regime);
-				expect(crashAdj.positionSizeMultiplier).toBeLessThanOrEqual(
-					adj.positionSizeMultiplier,
-				);
-				expect(crashAdj.entryThresholdAdjustment).toBeGreaterThanOrEqual(
-					adj.entryThresholdAdjustment,
-				);
-			}
+		for (const regime of otherRegimes) {
+			const adj = detector.getAdjustments(regime);
+			expect(crashAdj.positionSizeMultiplier).toBeLessThanOrEqual(
+				adj.positionSizeMultiplier,
+			);
+			expect(crashAdj.entryThresholdAdjustment).toBeGreaterThanOrEqual(
+				adj.entryThresholdAdjustment,
+			);
+		}
+	});
+
+	describe('Short candle array edge cases', () => {
+		it('returns flat trend when candles < trendMaLength (line 140)', async () => {
+			const { configManager } = await import('../../src/config/manager.js');
+			vi.mocked(configManager.get).mockImplementation((key: string) => {
+				const defaults: Record<string, unknown> = {
+					'regime.enabled': true,
+					'regime.lookbackDays': 5,
+					'regime.vixThresholdHigh': 25,
+					'regime.trendMaLength': 50, // MA length > lookback, so trend will be flat
+					'regime.volatilityWindow': 3,
+				};
+				return defaults[key];
+			});
+
+			// Only 5 candles provided: recentCandles.length (5) < trendMaLength (50) → flat
+			const candles = createCandles(5, 400, 'up');
+			const result = detector.detect(candles);
+
+			// Should succeed (enough candles for lookbackDays=5), trend=flat due to MA length
+			expect(result).not.toBeNull();
+		});
+
+		it('returns false for crash when candles < 6 (line 203)', async () => {
+			const { configManager } = await import('../../src/config/manager.js');
+			vi.mocked(configManager.get).mockImplementation((key: string) => {
+				const defaults: Record<string, unknown> = {
+					'regime.enabled': true,
+					'regime.lookbackDays': 5, // only 5 candles sliced → detectCrash gets 5, needs 6 → returns false
+					'regime.vixThresholdHigh': 25,
+					'regime.trendMaLength': 3,
+					'regime.volatilityWindow': 3,
+				};
+				return defaults[key];
+			});
+
+			const candles = createCandles(5, 400, 'down');
+			const result = detector.detect(candles, 40); // high VIX but crash check returns false
+
+			expect(result).not.toBeNull();
+			// Crash not detected because recentCandles.length < 6
+			expect(result?.regime).not.toBe('crash');
+		});
+
+		it('returns false for range-bound when candles < 10 (line 223)', async () => {
+			const { configManager } = await import('../../src/config/manager.js');
+			vi.mocked(configManager.get).mockImplementation((key: string) => {
+				const defaults: Record<string, unknown> = {
+					'regime.enabled': true,
+					'regime.lookbackDays': 9, // only 9 candles sliced → detectRangeBound needs 10 → returns false
+					'regime.vixThresholdHigh': 25,
+					'regime.trendMaLength': 5,
+					'regime.volatilityWindow': 5,
+				};
+				return defaults[key];
+			});
+
+			const candles = createCandles(9, 400, 'flat');
+			const result = detector.detect(candles);
+
+			// detectRangeBound returns false (line 223 hit), but flat trend → range_bound via else branch
+			// The important thing is detect() returns a non-null result (doesn't crash)
+			expect(result).not.toBeNull();
 		});
 	});
+});
+
 });

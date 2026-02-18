@@ -420,6 +420,26 @@ describe('YahooFinanceClient', () => {
       expect(f!.analystSell).toBe(3);  // 2 + 1
     });
 
+    it('analystBuy and analystSell default missing trend fields to 0 via ?? 0 (lines 171-174)', async () => {
+      mockYfQuoteSummary.mockResolvedValueOnce({
+        financialData: {},
+        defaultKeyStatistics: {},
+        summaryDetail: {},
+        summaryProfile: {},
+        recommendationTrend: {
+          trend: [
+            // All four fields missing: strongBuy, buy, strongSell, sell are undefined
+            // Each resolves via `?? 0` fallback to 0
+            { hold: 8 },
+          ],
+        },
+      });
+
+      const f = await client.getFundamentals('AAPL');
+      expect(f!.analystBuy).toBe(0);   // (undefined ?? 0) + (undefined ?? 0) = 0 + 0
+      expect(f!.analystSell).toBe(0);  // (undefined ?? 0) + (undefined ?? 0) = 0 + 0
+    });
+
     it('analystBuy and analystSell are null when no recommendationTrend', async () => {
       mockYfQuoteSummary.mockResolvedValueOnce({
         financialData: {},
@@ -886,6 +906,31 @@ describe('YahooFinanceClient', () => {
       mockAxiosGet.mockRejectedValueOnce(new Error('Network error'));
       const candles = await client.getIntradayCandles('AAPL');
       expect(candles).toEqual([]);
+    });
+  });
+
+  describe('getFundamentals - rawVal object without raw key', () => {
+    it('returns null when value is an object without a raw key', async () => {
+      // The rawVal helper returns null for objects that don't have 'raw' key (line 156)
+      mockYfQuoteSummary.mockResolvedValueOnce({
+        financialData: {
+          // Pass an object without a 'raw' key — should fall through to return null
+          revenueGrowth: { notRaw: 0.2 },
+          profitMargins: { someOtherKey: 0.3 },
+        },
+        defaultKeyStatistics: {
+          forwardPE: { anotherKey: 25 },
+        },
+        summaryDetail: {},
+        summaryProfile: {},
+      });
+
+      const f = await client.getFundamentals('AAPL');
+      expect(f).not.toBeNull();
+      // All fields that used rawVal with non-raw objects should be null
+      expect(f!.revenueGrowthYoY).toBeNull();
+      expect(f!.profitMargin).toBeNull();
+      expect(f!.forwardPE).toBeNull();
     });
   });
 });

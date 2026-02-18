@@ -180,6 +180,18 @@ describe('PerformanceTracker', () => {
       expect(metrics.maxDrawdown).toBeGreaterThan(0);
     });
 
+    it('uses entryTime fallback in sort when exitTime is null (line 320 ?? branch)', () => {
+      mockTradesAll.mockReturnValueOnce([
+        { symbol: 'A', pnl: 100, pnlPct: 0.05, entryTime: '2025-01-02', exitTime: null, exitPrice: 105 },
+        { symbol: 'B', pnl: -50, pnlPct: -0.025, entryTime: '2025-01-01', exitTime: null, exitPrice: 97.5 },
+      ]);
+
+      const metrics = tracker.getMetrics();
+
+      // exitTime is null → falls back to entryTime for sort ordering (line 320)
+      expect(metrics.totalTrades).toBe(2);
+    });
+
     it('handles zero standard deviation (same returns)', () => {
       mockTradesAll.mockReturnValueOnce([
         { symbol: 'A', pnl: 100, pnlPct: 0.05, entryTime: '2025-01-01', exitTime: '2025-01-02', exitPrice: 105 },
@@ -210,6 +222,17 @@ describe('PerformanceTracker', () => {
 
       const metrics = tracker.getMetrics();
 
+      expect(metrics.avgHoldDuration).toBe('N/A');
+    });
+
+    it('skips hold duration when entry/exit times are invalid (NaN) dates (line 376 false branch)', () => {
+      mockTradesAll.mockReturnValueOnce([
+        { symbol: 'A', pnl: 100, pnlPct: 0.05, entryTime: 'not-a-date', exitTime: 'also-not-a-date', exitPrice: 105 },
+      ]);
+
+      const metrics = tracker.getMetrics();
+
+      // Invalid date strings → NaN timestamps → if (!isNaN && !isNaN) is false → holdCount stays 0 → avgHoldDuration = N/A
       expect(metrics.avgHoldDuration).toBe('N/A');
     });
 
@@ -247,6 +270,24 @@ describe('PerformanceTracker', () => {
 
       expect(metrics.totalTrades).toBe(1);
       expect(metrics.winRate).toBe(0);
+    });
+
+    it('uses ?? 0 fallback for null pnlPct in sort comparator and best/worst trade (lines 386-390)', () => {
+      // Two trades with null pnlPct — forces the sort comparator to run with null values
+      // and forces the best/worst trade ?? 0 fallbacks at lines 388 and 391
+      mockTradesAll.mockReturnValueOnce([
+        { symbol: 'A', pnl: null, pnlPct: null, entryTime: '2025-01-01', exitTime: '2025-01-02', exitPrice: 105 },
+        { symbol: 'B', pnl: null, pnlPct: null, entryTime: '2025-01-02', exitTime: '2025-01-03', exitPrice: 110 },
+      ]);
+
+      const metrics = tracker.getMetrics();
+
+      expect(metrics.totalTrades).toBe(2);
+      // Both trades have pnlPct: null → ?? 0 used in sort and in best/worst trade pnlPct
+      expect(metrics.bestTrade).not.toBeNull();
+      expect(metrics.bestTrade?.pnlPct).toBe(0); // null ?? 0
+      expect(metrics.worstTrade).not.toBeNull();
+      expect(metrics.worstTrade?.pnlPct).toBe(0); // null ?? 0
     });
 
     it('calculates Sharpe ratio from daily metrics when >= 5 data points', () => {
@@ -432,6 +473,27 @@ describe('PerformanceTracker', () => {
       expect(result).toHaveLength(1);
       expect(result[0].sector).toBe('Unknown');
     });
+
+    it('handles null pnl and pnlPct in sector breakdown (lines 443-445)', () => {
+      mockTradesAll.mockReturnValueOnce([
+        { symbol: 'AAPL', pnl: null, pnlPct: null, exitPrice: 105 },
+        { symbol: 'GOOG', pnl: 50, pnlPct: 0.025, exitPrice: 102 },
+      ]);
+
+      (tradesChain.get as ReturnType<typeof vi.fn>)
+        .mockReturnValueOnce({ sector: 'Technology' })
+        .mockReturnValueOnce({ sector: 'Technology' });
+
+      const result = tracker.getPerSectorBreakdown();
+
+      expect(result).toHaveLength(1);
+      expect(result[0].sector).toBe('Technology');
+      expect(result[0].trades).toBe(2);
+      // pnl: null ?? 0 = 0, so total = 0 + 50 = 50
+      expect(result[0].totalPnl).toBe(50);
+      // wins: (null ?? 0) > 0 = false (1 win from GOOG), 1 out of 2
+      expect(result[0].winRate).toBe(0.5);
+    });
   });
 
   // ── generateDailySummary ───────────────────────────────────────────────
@@ -499,6 +561,48 @@ describe('PerformanceTracker', () => {
       const summary = tracker.generateDailySummary();
 
       expect(summary).toContain('Trades today: 0');
+    });
+
+    it('shows N/A for expectancy when no closed trades (line 492)', () => {
+      // generateDailySummary calls:
+      // 1. todayTrades (today's closed trades)
+      // 2. openPositions (for unrealized P&L display)
+      // 3. getMetrics() internally: closedTrades → empty → returns early (no dailyMetrics/openPositions calls)
+      // Total: 3 all() calls
+      mockTradesAll
+        .mockReturnValueOnce([
+          { symbol: 'AAPL', side: 'BUY', pnl: 100, pnlPct: 0.05, exitPrice: 105 },
+        ]) // todayTrades
+        .mockReturnValueOnce([]) // openPositions (summary)
+        .mockReturnValueOnce([]); // closedTrades in getMetrics → empty → early return → expectancy=null
+
+      const summary = tracker.generateDailySummary();
+
+      expect(summary).toContain('Expectancy: N/A');
+    });
+
+    it('shows formatted expectancy when closed trades exist (line 492 true branch)', () => {
+      // generateDailySummary calls:
+      // 1. todayTrades
+      // 2. openPositions (summary)
+      // 3+4+5. getMetrics(): closedTrades (non-empty), dailyMetrics, openPositions (for unrealized)
+      // Total: 5 all() calls
+      mockTradesAll
+        .mockReturnValueOnce([
+          { symbol: 'AAPL', side: 'BUY', pnl: 100, pnlPct: 0.05, exitPrice: 105 },
+        ]) // todayTrades
+        .mockReturnValueOnce([]) // openPositions (summary)
+        .mockReturnValueOnce([
+          { symbol: 'AAPL', pnl: 100, pnlPct: 0.05, entryTime: '2025-01-01', exitTime: '2025-01-02', exitPrice: 105 },
+        ]) // closedTrades in getMetrics → non-empty → expectancy computed
+        .mockReturnValueOnce([]) // dailyMetrics in getMetrics
+        .mockReturnValueOnce([]); // openPositions in getMetrics
+
+      const summary = tracker.generateDailySummary();
+
+      // expectancy != null → formatCurrency branch executes (line 492 true branch)
+      expect(summary).not.toContain('Expectancy: N/A');
+      expect(summary).toContain('Expectancy:');
     });
   });
 
@@ -590,6 +694,33 @@ describe('PerformanceTracker', () => {
       await tracker.saveDailyMetrics();
 
       expect(insertChain.run).toHaveBeenCalled();
+    });
+
+    it('calculates Calmar ratio when dailyReturns >= 5 and maxDrawdown > 0 (line 353)', () => {
+      // closedTrades with a peak then loss (to produce maxDrawdown > 0)
+      mockTradesAll.mockReturnValueOnce([
+        { symbol: 'A', pnl: 200, pnlPct: 0.10, entryTime: '2025-01-01', exitTime: '2025-01-02', exitPrice: 110 },
+        { symbol: 'B', pnl: -150, pnlPct: -0.07, entryTime: '2025-01-02', exitTime: '2025-01-03', exitPrice: 93 },
+      ]);
+      // dailyMetrics with 6+ rows and varying portfolio values to produce dailyReturns >= 5
+      mockTradesAll.mockReturnValueOnce([
+        { portfolioValue: 10800, date: '2025-01-08' },
+        { portfolioValue: 10600, date: '2025-01-07' },
+        { portfolioValue: 10400, date: '2025-01-06' },
+        { portfolioValue: 10200, date: '2025-01-05' },
+        { portfolioValue: 10100, date: '2025-01-04' },
+        { portfolioValue: 10000, date: '2025-01-03' },
+      ]);
+      // positions (empty, no unrealized P&L)
+      mockTradesAll.mockReturnValueOnce([]);
+
+      const metrics = tracker.getMetrics();
+
+      // maxDrawdown > 0 (peak=200, then -150 → cum=50, drawdown=(200-50)/200=0.75)
+      expect(metrics.maxDrawdown).toBeGreaterThan(0);
+      // calmarRatio should be non-null and computed
+      expect(metrics.calmarRatio).not.toBeNull();
+      expect(typeof metrics.calmarRatio).toBe('number');
     });
   });
 });

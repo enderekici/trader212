@@ -55,6 +55,7 @@ vi.mock('drizzle-orm', () => ({
 
 import { ConfigManager, configManager } from '../../src/config/manager.js';
 import { CONFIG_DEFAULTS } from '../../src/config/defaults.js';
+import { validateConfigValue } from '../../src/config/schema-validator.js';
 
 describe('ConfigManager', () => {
   let manager: ConfigManager;
@@ -127,6 +128,13 @@ describe('ConfigManager', () => {
       expect(result).toBe('demo');
     });
 
+    it('falls back to CONFIG_DEFAULTS when DB row has unparseable JSON', () => {
+      // Row exists but JSON.parse throws — should catch and fall back to default
+      mockGet.mockReturnValue({ key: 't212.environment', value: 'not-valid-json{{' });
+      const result = manager.get<string>('t212.environment');
+      expect(result).toBe('demo');
+    });
+
     it('throws Error for unknown config key', () => {
       mockGet.mockReturnValue(undefined);
       expect(() => manager.get('nonexistent.key')).toThrow('Config key not found: nonexistent.key');
@@ -171,6 +179,11 @@ describe('ConfigManager', () => {
       mockGet.mockReturnValue({ key: 'test.key', value: '"old"' });
       await manager.set('test.key', 'new');
       expect(mockUpdate).toHaveBeenCalled();
+    });
+
+    it('throws when validateConfigValue returns invalid', async () => {
+      vi.mocked(validateConfigValue).mockReturnValueOnce({ valid: false, error: 'bad value' });
+      await expect(manager.set('test.key', 'bad')).rejects.toThrow('Invalid value for config key "test.key": bad value');
     });
 
     it('inserts new config if it does not exist', async () => {

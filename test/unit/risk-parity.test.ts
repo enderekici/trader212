@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OHLCVCandle } from '../../src/data/yahoo-finance.js';
 import type { PositionInfo } from '../../src/execution/risk-parity.js';
-import { RiskParitySizer } from '../../src/execution/risk-parity.js';
+import { getRiskParitySizer, RiskParitySizer } from '../../src/execution/risk-parity.js';
 
 // Mock config manager
 const mockConfigGet = vi.fn();
@@ -513,6 +513,146 @@ describe('RiskParitySizer', () => {
     });
   });
 
+  describe('getRiskParitySizer singleton', () => {
+    it('should return the same instance on repeated calls', async () => {
+      const { getRiskParitySizer } = await import('../../src/execution/risk-parity.js');
+      const a = getRiskParitySizer();
+      const b = getRiskParitySizer();
+      expect(a).toBe(b);
+    });
+  });
+
+  describe('getVolatility - recentCandles < 2 branch (line 145)', () => {
+    it('should return 0 when lookbackDays=1 produces only 1 recent candle', () => {
+      // 3 candles but lookbackDays=1 → slice(-1) → 1 candle → recentCandles.length < 2
+      const candles: OHLCVCandle[] = [
+        { date: '2024-01-01', open: 100, high: 102, low: 99, close: 101, volume: 1000 },
+        { date: '2024-01-02', open: 101, high: 103, low: 100, close: 102, volume: 1000 },
+        { date: '2024-01-03', open: 102, high: 104, low: 101, close: 103, volume: 1000 },
+      ];
+
+      const vol = sizer.getVolatility(candles, 1);
+      expect(vol).toBe(0);
+    });
+  });
+
+  describe('calculatePositionSize - uncapped branch (lines 97, 106)', () => {
+    it('should NOT cap position when risk parity size is within maxPositionSizePct', () => {
+      // Use extreme volatility: with targetVol=0.15 and very high symbolVol,
+      // positionSizeDollars = (targetContrib * portfolioValue) / symbolVol will be tiny → no cap
+      const highVolCandles: OHLCVCandle[] = [];
+      let price = 100;
+      for (let i = 0; i < 30; i++) {
+        // 10% daily swings → ~158% annualized vol → position = 0.15/158% = very small
+        price = price * (1 + (i % 2 === 0 ? 0.1 : -0.09));
+        if (price <= 0) price = 1;
+        highVolCandles.push({
+          date: new Date(Date.now() - (30 - i) * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+          open: price,
+          high: price * 1.05,
+          low: price * 0.95,
+          close: price,
+          volume: 1000000,
+        });
+      }
+
+      const result = sizer.calculatePositionSize('VOLATILE', highVolCandles, 10000, []);
+
+      // With extreme volatility, risk-parity position should be tiny (not capped)
+      expect(result.reason).toContain('Risk parity sizing:');
+      expect(result.reason).not.toContain('capped');
+    });
+  });
+
+  describe('suggestRebalance - totalValue=0 branch (line 231)', () => {
+    it('should return empty array when all positions have zero value', () => {
+      const positions: PositionInfo[] = [
+        { symbol: 'AAPL', shares: 0, currentPrice: 0, entryPrice: 0 },
+      ];
+
+      const candles = new Map<string, OHLCVCandle[]>();
+      candles.set('AAPL', generateCandles(30, 100, 0.02));
+
+      const actions = sizer.suggestRebalance(positions, candles);
+      expect(actions).toHaveLength(0);
+    });
+  });
+
+  describe('suggestRebalance - zero volatility skip branch (line 245)', () => {
+    it('should skip position with zero volatility (flat price candles)', () => {
+      // Two positions: AAPL with valid vol, FLAT with zero vol
+      const positions: PositionInfo[] = [
+        { symbol: 'AAPL', shares: 10, currentPrice: 100, entryPrice: 95 },
+        { symbol: 'FLAT', shares: 10, currentPrice: 100, entryPrice: 100 },
+      ];
+
+      const candles = new Map<string, OHLCVCandle[]>();
+      candles.set('AAPL', generateCandles(30, 100, 0.02));
+
+      // FLAT candles all-identical prices → volatility = 0
+      const flatCandles: OHLCVCandle[] = Array.from({ length: 30 }, (_, i) => ({
+        date: new Date(Date.now() - (30 - i) * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        open: 100,
+        high: 100,
+        low: 100,
+        close: 100,
+        volume: 1000,
+      }));
+      candles.set('FLAT', flatCandles);
+
+      const actions = sizer.suggestRebalance(positions, candles);
+
+      // FLAT should be skipped (vol=0), only AAPL appears
+      expect(actions).toHaveLength(1);
+      expect(actions[0].symbol).toBe('AAPL');
+    });
+  });
+
+  describe('suggestRebalance - hold action branch (line 262)', () => {
+    it('should produce hold action when deviation is within 2% threshold', () => {
+      // To trigger "hold", we need |targetPct - currentPct| < 0.02.
+      // With 2 equal-weight positions (currentPct = 0.5 each):
+      //   targetContribution = targetVol / sqrt(2)
+      //   targetPct = targetContribution / symbolVol
+      // For targetPct = 0.5: symbolVol = targetContribution / 0.5 = targetVol / sqrt(2) / 0.5 = targetVol * sqrt(2)
+      // With targetVol = 0.15: symbolVol = 0.15 * sqrt(2) ≈ 0.21213
+      // Daily stdDev = 0.21213 / sqrt(252) ≈ 0.013367
+      // Use alternating +r / -r returns for exact stdDev = r:
+      const r = (0.15 * Math.sqrt(2)) / Math.sqrt(252); // ≈ 0.013367
+      const holdCandles: OHLCVCandle[] = [];
+      let price = 100;
+      for (let i = 0; i < 25; i++) {
+        const ret = i % 2 === 0 ? r : -r;
+        price = price * (1 + ret);
+        holdCandles.push({
+          date: `2024-01-${String(i + 1).padStart(2, '0')}`,
+          open: price,
+          high: price * 1.001,
+          low: price * 0.999,
+          close: price,
+          volume: 1000,
+        });
+      }
+
+      const positions: PositionInfo[] = [
+        { symbol: 'AAPL', shares: 50, currentPrice: 100, entryPrice: 95 }, // $5000 (50%)
+        { symbol: 'MSFT', shares: 50, currentPrice: 100, entryPrice: 95 }, // $5000 (50%)
+      ];
+
+      const candles = new Map<string, OHLCVCandle[]>();
+      candles.set('AAPL', holdCandles);
+      candles.set('MSFT', holdCandles); // same candles → same vol → same targetPct
+
+      const actions = sizer.suggestRebalance(positions, candles);
+
+      // With identical vol and equal weight, both should be hold (deviation ≈ 0 < 2%)
+      expect(actions).toHaveLength(2);
+      for (const action of actions) {
+        expect(action.action).toBe('hold');
+      }
+    });
+  });
+
   describe('Edge Cases', () => {
     it('should handle very high number of positions', () => {
       const candles = generateCandles(30, 100, 0.02);
@@ -567,6 +707,88 @@ describe('RiskParitySizer', () => {
 
       expect(Number.isInteger(result.shares)).toBe(true);
       expect(result.shares).toBeGreaterThanOrEqual(0);
+    });
+  });
+
+  describe('suggestRebalance - zero volatility skip', () => {
+    it('should skip a position when getVolatility returns 0 (all identical prices)', () => {
+      // Create candles where all closes are identical — returns are all 0, stddev = 0
+      const flatCandles: OHLCVCandle[] = [];
+      for (let i = 0; i < 30; i++) {
+        flatCandles.push({
+          date: new Date(Date.now() - (30 - i) * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+          open: 100,
+          high: 100,
+          low: 100,
+          close: 100,
+          volume: 1000,
+        });
+      }
+
+      const positions: PositionInfo[] = [
+        { symbol: 'FLAT', shares: 10, currentPrice: 100, entryPrice: 95 },
+        { symbol: 'NORMAL', shares: 10, currentPrice: 100, entryPrice: 95 },
+      ];
+
+      const candles = new Map<string, OHLCVCandle[]>();
+      candles.set('FLAT', flatCandles);
+      candles.set('NORMAL', generateCandles(30, 100, 0.02));
+
+      const actions = sizer.suggestRebalance(positions, candles);
+
+      // FLAT should be skipped (zero volatility), NORMAL should appear
+      expect(actions.every((a) => a.symbol !== 'FLAT')).toBe(true);
+      expect(actions.some((a) => a.symbol === 'NORMAL')).toBe(true);
+    });
+
+    it('should return action=hold when positions are already at target weight', () => {
+      // Use the same engineered candles as the hold-action test: symbolVol = targetVol*sqrt(2)
+      // so that targetPct = 0.5 = currentPct → deviation = 0 → hold
+      const r = (0.15 * Math.sqrt(2)) / Math.sqrt(252);
+      const holdCandles: OHLCVCandle[] = [];
+      let price = 100;
+      for (let i = 0; i < 25; i++) {
+        const ret = i % 2 === 0 ? r : -r;
+        price = price * (1 + ret);
+        holdCandles.push({
+          date: `2024-02-${String(i + 1).padStart(2, '0')}`,
+          open: price,
+          high: price * 1.001,
+          low: price * 0.999,
+          close: price,
+          volume: 1000,
+        });
+      }
+
+      // Both positions identical in size and price → equal current weights
+      const positions: PositionInfo[] = [
+        { symbol: 'AA', shares: 50, currentPrice: 100, entryPrice: 95 },
+        { symbol: 'BB', shares: 50, currentPrice: 100, entryPrice: 95 },
+      ];
+
+      const candles = new Map<string, OHLCVCandle[]>();
+      candles.set('AA', holdCandles);
+      candles.set('BB', holdCandles); // same candles → same volatility → same targetPct
+
+      const actions = sizer.suggestRebalance(positions, candles);
+
+      // Both have equal current weights (50/50) and equal volatility (equal target)
+      // → deviation ≈ 0 < 2% → action = 'hold'
+      const holdActions = actions.filter((a) => a.action === 'hold');
+      expect(holdActions.length).toBe(2);
+    });
+  });
+
+  describe('getRiskParitySizer singleton', () => {
+    it('should return the same instance on subsequent calls', () => {
+      const first = getRiskParitySizer();
+      const second = getRiskParitySizer();
+      expect(first).toBe(second);
+    });
+
+    it('should return a RiskParitySizer instance', () => {
+      const instance = getRiskParitySizer();
+      expect(instance).toBeInstanceOf(RiskParitySizer);
     });
   });
 });

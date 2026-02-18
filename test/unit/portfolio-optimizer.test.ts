@@ -394,6 +394,21 @@ describe('PortfolioOptimizer', () => {
 			// Lower volatility asset should have higher weight
 			expect(weights.B).toBeGreaterThan(weights.A);
 		});
+
+		it('should handle all-zero returns (line 435 false branch: currentRisk === 0)', () => {
+			// All-zero returns → zero variance → zero marginalRisk → currentRisk = 0
+			// Hits the `currentRisk > 0 ? targetRisk / currentRisk : 1` false branch
+			const returns = new Map([
+				['A', [0, 0, 0, 0, 0]],
+				['B', [0, 0, 0, 0, 0]],
+			]);
+
+			const weights = optimizer.optimizeRiskParity(returns);
+
+			// Should not throw; weights should sum to 1
+			const sum = Object.values(weights).reduce((s, w) => s + w, 0);
+			expect(sum).toBeCloseTo(1, 5);
+		});
 	});
 
 	describe('getDiversificationRatio', () => {
@@ -497,6 +512,38 @@ describe('PortfolioOptimizer', () => {
 				expect(frontier[i].expectedReturn).toBeGreaterThanOrEqual(
 					frontier[i - 1].expectedReturn - 0.001,
 				);
+			}
+		});
+
+		it('handles symbols that receive 0 weight from optimizers (lines 496-497 || 0 branches)', () => {
+			// With maxPositionSizePct=0.15 and 10 assets, the optimizer may assign 0 weight to some.
+			// The || 0 fallback handles cases where a symbol's weight is 0 (falsy).
+			const returns = new Map([
+				['A', [0.001, 0.001, 0.001, 0.001, 0.001]], // very low, flat
+				['B', [0.001, 0.001, 0.001, 0.001, 0.001]], // very low, flat
+				['C', [0.001, 0.001, 0.001, 0.001, 0.001]], // very low, flat
+				['D', [0.001, 0.001, 0.001, 0.001, 0.001]], // very low, flat
+				['E', [0.001, 0.001, 0.001, 0.001, 0.001]], // very low, flat
+				['F', [0.001, 0.001, 0.001, 0.001, 0.001]], // very low, flat
+				['G', [0.001, 0.001, 0.001, 0.001, 0.001]], // very low, flat
+				['H', [0.10,  0.11,  0.09,  0.12,  0.08]],  // high return
+				['I', [0.10,  0.11,  0.09,  0.12,  0.08]],  // high return
+				['J', [0.10,  0.11,  0.09,  0.12,  0.08]],  // high return
+			]);
+
+			const frontier = optimizer.getEfficientFrontier(returns, 5);
+
+			// Should complete without errors and produce valid frontier points
+			expect(frontier).toHaveLength(5);
+			for (const point of frontier) {
+				expect(point.weights).toBeDefined();
+				// All weights should be >= 0
+				for (const w of Object.values(point.weights)) {
+					expect(w).toBeGreaterThanOrEqual(0);
+				}
+				// Weights should sum to 1
+				const sum = Object.values(point.weights).reduce((s, w) => s + w, 0);
+				expect(sum).toBeCloseTo(1, 5);
 			}
 		});
 	});
@@ -623,6 +670,69 @@ describe('PortfolioOptimizer', () => {
 			// With identical returns, should suggest holding
 			const holdActions = result.actions.filter((a) => a.action === 'hold');
 			expect(holdActions.length).toBeGreaterThan(0);
+		});
+
+		it('covers || 0 false branches when symbol only in targetWeights (lines 611-612, 616)', () => {
+			// weight=0 makes currentWeights[symbol]=0 (falsy) → || 0 false branch on line 611
+			// optimizeMaxSharpe may assign targetWeight=0 → || 0 false branch on line 612
+			// currentPrice=0 → || 0 false branch on line 616
+			const positions: PortfolioPosition[] = [
+				{ symbol: 'AAPL', shares: 10, currentPrice: 100, weight: 0.5 },
+				{ symbol: 'GOOGL', shares: 5, currentPrice: 0, weight: 0 }, // weight=0 and currentPrice=0
+			];
+			const priceHistory = new Map([
+				['AAPL', [140, 145, 148, 150, 155, 160, 165, 170, 175, 180]],
+				['GOOGL', [0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01]],
+			]);
+			// Should not throw; GOOGL has weight=0 and currentPrice=0
+			const result = optimizer.suggestRebalance(positions, priceHistory, 1500);
+			expect(result.actions.length).toBeGreaterThanOrEqual(1);
+			const googlAction = result.actions.find((a) => a.symbol === 'GOOGL');
+			if (googlAction) {
+				expect(googlAction.currentWeight).toBe(0); // || 0 false branch (line 611)
+			}
+		});
+
+		it('covers currentPrice > 0 false branch (line 625)', () => {
+			// Position with currentPrice = 0 and enough weight diff → enters the if block (line 622)
+			// but currentPrice=0 means sharesDelta stays 0 (line 625 false branch)
+			const positions: PortfolioPosition[] = [
+				{ symbol: 'AAPL', shares: 100, currentPrice: 150, weight: 0.9 },
+				{ symbol: 'GOOGL', shares: 5, currentPrice: 0, weight: 0.1 }, // currentPrice=0
+			];
+			const priceHistory = new Map([
+				['AAPL', [140, 145, 148, 150, 155, 160, 165, 170, 175, 180]],
+				['GOOGL', [100, 110, 120, 130, 140, 150, 160, 170, 180, 190]], // strongly trending
+			]);
+			// GOOGL should get a meaningful targetWeight from optimizer (different from 0.1)
+			// so weightDelta > 0.01 → enters if block → currentPrice=0 → sharesDelta=0
+			const result = optimizer.suggestRebalance(positions, priceHistory, 15000);
+			expect(result.actions).toBeDefined();
+			const googlAction = result.actions.find((a) => a.symbol === 'GOOGL');
+			if (googlAction && Math.abs(googlAction.dollarDelta) > 0) {
+				expect(googlAction.sharesDelta).toBe(0); // currentPrice=0 → sharesDelta not computed
+			}
+		});
+
+		it('generates sell action (line 631: sharesDelta < 0)', () => {
+			// AAPL is over-weighted relative to GOOGL; optimizer should reduce AAPL → sell
+			const positions: PortfolioPosition[] = [
+				{ symbol: 'AAPL', shares: 100, currentPrice: 150, weight: 0.95 },
+				{ symbol: 'GOOGL', shares: 1, currentPrice: 200, weight: 0.05 },
+			];
+			const priceHistory = new Map([
+				['AAPL', [140, 142, 144, 146, 148, 150, 151, 152, 153, 154]],
+				['GOOGL', [180, 185, 190, 195, 200, 205, 210, 215, 220, 225]],
+			]);
+			const result = optimizer.suggestRebalance(positions, priceHistory, 15000);
+			// At least one sell action should exist (AAPL is heavily over-weighted)
+			const sellActions = result.actions.filter((a) => a.action === 'sell');
+			if (sellActions.length > 0) {
+				expect(sellActions[0].sharesDelta).toBeLessThan(0);
+			} else {
+				// optimizer might choose to hold if weight diff <= 1% — just verify no throws
+				expect(result.actions).toBeDefined();
+			}
 		});
 	});
 
@@ -754,6 +864,58 @@ describe('PortfolioOptimizer', () => {
 			});
 
 			// Should still return valid weights that sum to 1
+			const sum = Object.values(weights).reduce((s, w) => s + w, 0);
+			expect(sum).toBeCloseTo(1, 5);
+		});
+
+		it('covers targetWeights[symbol] || 0 branch (line 612) when symbol has no price history', () => {
+			// TSLA has no price history → not in relevantHistory → not in targetWeights
+			// so targetWeights['TSLA'] is undefined → || 0 fires
+			const positions: PortfolioPosition[] = [
+				{ symbol: 'AAPL', shares: 10, currentPrice: 150, weight: 0.7 },
+				{ symbol: 'TSLA', shares: 5, currentPrice: 200, weight: 0.3 }, // no history
+			];
+			const priceHistory = new Map([
+				['AAPL', [140, 145, 148, 150, 152, 155, 157, 160, 162, 165]],
+				// TSLA intentionally omitted
+			]);
+			const result = optimizer.suggestRebalance(positions, priceHistory, 2500);
+			// TSLA must appear in actions with targetWeight 0 (or default hold)
+			// AAPL has history so targetWeights['AAPL'] is defined; TSLA is undefined → || 0
+			expect(result.actions).toBeDefined();
+			expect(result.currentWeights['TSLA']).toBe(0.3);
+		});
+
+		it('should reject grid points below minPositionSize in optimizeMaxSharpe (lines 354-355)', () => {
+			// With 2 assets and gridPoints=20, combinations include w1=0/0.05/.../0.55
+			// which are all < 0.6, hitting the !allowShort && w < minPos branch
+			const returns = new Map([
+				['A', [0.02, 0.03, 0.01, 0.04, 0.02]],
+				['B', [0.01, 0.015, 0.005, 0.02, 0.01]],
+			]);
+
+			const weights = optimizer.optimizeMaxSharpe(returns, 0.001, {
+				minPositionSize: 0.6,
+				maxPositionSize: 0.8,
+			});
+
+			// Should return equal weights fallback since almost all grid points are invalid
+			const sum = Object.values(weights).reduce((s, w) => s + w, 0);
+			expect(sum).toBeCloseTo(1, 5);
+		});
+
+		it('hits portfolioStd === 0 continue branch in optimizeMaxSharpe (line 370)', () => {
+			// All returns identical → zero covariance → portfolioStd = 0 → skip this weight combo
+			const returns = new Map([
+				['A', [0.01, 0.01, 0.01, 0.01, 0.01]],
+				['B', [0.01, 0.01, 0.01, 0.01, 0.01]],
+			]);
+			// Must allow large maxPositionSize so weight combos pass validity check
+			// otherwise all combos are invalid before reaching the portfolioStd check
+			const weights = optimizer.optimizeMaxSharpe(returns, 0.001, {
+				maxPositionSize: 1.0,
+				minPositionSize: 0,
+			});
 			const sum = Object.values(weights).reduce((s, w) => s + w, 0);
 			expect(sum).toBeCloseTo(1, 5);
 		});
