@@ -4,7 +4,6 @@ import { createLogger } from '../../utils/logger.js';
 import {
   type BollingerResult,
   type CandlestickPatterns,
-  type IchimokuResult,
   calcADL,
   calcADX,
   calcATR,
@@ -28,6 +27,7 @@ import {
   calcVWAP,
   calcWilliamsR,
   detectCandlestickPatterns,
+  type IchimokuResult,
   type MACDResult,
   type StochasticResult,
   type SupportResistance,
