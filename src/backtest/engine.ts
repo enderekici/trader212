@@ -489,7 +489,7 @@ export class BacktestEngine {
 
     // Max drawdown from cumulative trade P&Ls
     const tradePnls = trades.map((t) => ({ pnl: t.pnl, exitTime: t.exitTime }));
-    const drawdownResult = calculateMaxDrawdown(tradePnls);
+    const drawdownResult = calculateMaxDrawdown(tradePnls, config.initialCapital);
 
     // Calmar ratio
     const calmarRatio =

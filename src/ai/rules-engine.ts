@@ -78,7 +78,7 @@ export class RulesEngine implements AIAgent {
     // Use config defaults for stop/target/size
     let stopLossPct = 0.05;
     let positionSizePct = 0.1;
-    const takeProfitPct = 0.15;
+    let takeProfitPct = 0.2;
     try {
       stopLossPct = configManager.get<number>('risk.defaultStopLossPct');
     } catch {
@@ -86,6 +86,11 @@ export class RulesEngine implements AIAgent {
     }
     try {
       positionSizePct = configManager.get<number>('risk.maxPositionSizePct');
+    } catch {
+      /* use defaults */
+    }
+    try {
+      takeProfitPct = configManager.get<number>('risk.defaultTakeProfitPct');
     } catch {
       /* use defaults */
     }

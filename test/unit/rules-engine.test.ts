@@ -428,7 +428,7 @@ describe('RulesEngine', () => {
 
       expect(result!.suggestedStopLossPct).toBe(0.05);
       expect(result!.suggestedPositionSizePct).toBe(0.1);
-      expect(result!.suggestedTakeProfitPct).toBe(0.15);
+      expect(result!.suggestedTakeProfitPct).toBe(0.20);
     });
 
     it('sets urgency to "no_rush" for all decisions', async () => {

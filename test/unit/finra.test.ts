@@ -48,7 +48,8 @@ describe('FinraClient', () => {
       expect(entry.shortVolume).toBe(1000000);
       expect(entry.totalVolume).toBe(2000000);
       expect(entry.shortVolumePct).toBeCloseTo(50, 1);
-      expect(entry.date).toBe('2026-02-18');
+      const today = new Date().toISOString().slice(0, 10);
+      expect(entry.date).toBe(today);
       expect(entry.fetchedAt).toBeTruthy();
     });
 

@@ -1,6 +1,21 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { Candle } from '../../src/backtest/types.js';
 
+// Mock node:fs to prevent reading real cache files
+vi.mock('node:fs', () => ({
+  default: {
+    existsSync: vi.fn().mockReturnValue(false),
+    readFileSync: vi.fn(),
+    mkdirSync: vi.fn(),
+    writeFileSync: vi.fn(),
+  },
+  // Named exports if needed
+  existsSync: vi.fn().mockReturnValue(false),
+  readFileSync: vi.fn(),
+  mkdirSync: vi.fn(),
+  writeFileSync: vi.fn(),
+}));
+
 // Mock the logger
 vi.mock('../../src/utils/logger.js', () => ({
   createLogger: () => ({

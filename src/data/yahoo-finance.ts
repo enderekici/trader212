@@ -88,7 +88,10 @@ export class YahooFinanceClient {
 
       const result = data?.chart?.result?.[0];
       if (!result?.timestamp || !result?.indicators?.quote?.[0]) {
-        log.warn({ symbol }, 'No historical data returned');
+        log.warn(
+          { symbol, data: JSON.stringify(data).substring(0, 500) },
+          'No historical data returned - Unexpected structure',
+        );
         return [];
       }
 
@@ -305,7 +308,7 @@ export class YahooFinanceClient {
 
       const result = data?.chart?.result?.[0];
       if (!result?.timestamp || !result?.indicators?.quote?.[0]) {
-        log.warn({ symbol }, 'No intraday data returned');
+        log.warn({ symbol }, 'No historical data returned');
         return [];
       }
 
