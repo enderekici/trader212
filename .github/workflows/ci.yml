@@ -168,9 +168,8 @@ jobs:
             type=sha
 
       # Single build+push step (replaces the old load-then-push double build).
-      # PRs: build amd64, load locally (for smoke test), no push.
-      # Branch pushes: build amd64, push directly — no QEMU, ~2× faster.
-      # Tags: build amd64+arm64 via QEMU, push — only for releases.
+      # PRs: load locally (for smoke test), no push.
+      # Pushes: build amd64+arm64 via QEMU, push directly.
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -182,7 +181,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image }}
-          platforms: ${{ github.ref_type == 'tag' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+          platforms: linux/amd64,linux/arm64
 
       # Smoke test only on PRs where the image is loaded into the local daemon
       - name: Smoke test
