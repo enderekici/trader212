@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1
+
 # Stage 1: production dependencies (cached independently of src changes)
 FROM node:24-alpine AS deps
 WORKDIR /app
