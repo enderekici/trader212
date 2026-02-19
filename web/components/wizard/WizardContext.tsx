@@ -51,7 +51,7 @@ const defaultFormData: WizardFormData = {
   telegramEnabled: false,
   telegramBotToken: '',
   telegramChatId: '',
-  strategyProfile: 'balanced',
+  strategyProfile: 'Balanced',
 };
 
 interface Props {

@@ -2,11 +2,11 @@
 import { useWizard } from '../WizardContext';
 
 const PROFILES = [
-  { id: 'conservative', label: 'Conservative', desc: 'Low risk, smaller positions, tight stops' },
-  { id: 'balanced', label: 'Balanced (Recommended)', desc: 'Moderate risk, balanced approach' },
-  { id: 'aggressive', label: 'Aggressive', desc: 'Higher risk tolerance, larger positions' },
-  { id: 'scalper', label: 'Scalper', desc: 'Short-term trades, quick entries/exits' },
-  { id: 'swing', label: 'Swing Trader', desc: 'Multi-day holds, trend following' },
+  { id: 'Conservative', label: 'Conservative', desc: 'Low risk, smaller positions, tight stops' },
+  { id: 'Balanced', label: 'Balanced (Recommended)', desc: 'Moderate risk, balanced approach' },
+  { id: 'Aggressive', label: 'Aggressive', desc: 'Higher risk tolerance, larger positions' },
+  { id: 'Scalp', label: 'Scalper', desc: 'Short-term trades, quick entries/exits' },
+  { id: 'Swing', label: 'Swing Trader', desc: 'Multi-day holds, trend following' },
 ];
 
 export function StrategyProfileStep() {
