@@ -1,5 +1,8 @@
 # syntax=docker/dockerfile:1
-FROM node:24-alpine AS builder
+
+# Build stage: always runs on amd64 (fast, native — no QEMU).
+# Next.js standalone output is pure JS, so it's architecture-independent.
+FROM --platform=linux/amd64 node:24-alpine AS builder
 WORKDIR /app
 COPY web/package*.json ./
 RUN npm ci
@@ -7,6 +10,8 @@ COPY web/ .
 # Persist Next.js build cache across CI runs via BuildKit cache mount
 RUN --mount=type=cache,target=/app/.next/cache npm run build
 
+# Runtime stage: uses the target platform's base image (amd64 or arm64).
+# Only copies JS files — no native compilation needed.
 FROM node:24-alpine
 WORKDIR /app
 ENV NODE_ENV=production
