@@ -2501,7 +2501,7 @@ describe('api/routes', () => {
         if (key === 'ai.provider') return 'anthropic';
         return null;
       });
-      const handler = findHandler(routes, 'get', '/setup/status');
+      const handler = findHandler(routes, 'get', '/api/setup/status');
       const res = mockRes();
       handler(mockReq(), res);
       expect(res.json).toHaveBeenCalledWith({ configured: true });
@@ -2513,7 +2513,7 @@ describe('api/routes', () => {
         if (key === 'ai.provider') return 'ollama';
         return null;
       });
-      const handler = findHandler(routes, 'get', '/setup/status');
+      const handler = findHandler(routes, 'get', '/api/setup/status');
       const res = mockRes();
       handler(mockReq(), res);
       expect(res.json).toHaveBeenCalledWith({ configured: true });
@@ -2521,7 +2521,7 @@ describe('api/routes', () => {
 
     it('returns configured: false when nothing is set up', () => {
       mockConfigManager.get.mockReturnValue(null);
-      const handler = findHandler(routes, 'get', '/setup/status');
+      const handler = findHandler(routes, 'get', '/api/setup/status');
       const res = mockRes();
       handler(mockReq(), res);
       expect(res.json).toHaveBeenCalledWith({ configured: false });
@@ -2529,7 +2529,7 @@ describe('api/routes', () => {
 
     it('handles errors', () => {
       mockConfigManager.get.mockImplementation(() => { throw new Error('fail'); });
-      const handler = findHandler(routes, 'get', '/setup/status');
+      const handler = findHandler(routes, 'get', '/api/setup/status');
       const res = mockRes();
       handler(mockReq(), res);
       expect(res.status).toHaveBeenCalledWith(500);
@@ -3005,7 +3005,7 @@ describe('api/routes', () => {
     it('returns list of profiles', () => {
       mockListProfiles.mockReturnValueOnce([{ name: 'conservative' }, { name: 'aggressive' }]);
 
-      const handler = findHandler(routes, 'get', '/strategy-profiles');
+      const handler = findHandler(routes, 'get', '/api/strategy-profiles');
       const res = mockRes();
       handler(mockReq(), res);
 
@@ -3015,7 +3015,7 @@ describe('api/routes', () => {
     it('handles errors', () => {
       mockGetStrategyProfileManager.mockImplementationOnce(() => { throw new Error('fail'); });
 
-      const handler = findHandler(routes, 'get', '/strategy-profiles');
+      const handler = findHandler(routes, 'get', '/api/strategy-profiles');
       const res = mockRes();
       handler(mockReq(), res);
 
@@ -3026,7 +3026,7 @@ describe('api/routes', () => {
   // ── POST /strategy-profiles/:name/activate ────────────────────────────
   describe('POST /strategy-profiles/:name/activate', () => {
     it('activates a strategy profile', async () => {
-      const handler = findHandler(routes, 'post', '/strategy-profiles/:name/activate');
+      const handler = findHandler(routes, 'post', '/api/strategy-profiles/:name/activate');
       const res = mockRes();
       await handler(mockReq({ params: { name: 'conservative' } }), res);
 
@@ -3037,7 +3037,7 @@ describe('api/routes', () => {
     it('handles errors', async () => {
       mockApplyProfile.mockRejectedValueOnce(new Error('fail'));
 
-      const handler = findHandler(routes, 'post', '/strategy-profiles/:name/activate');
+      const handler = findHandler(routes, 'post', '/api/strategy-profiles/:name/activate');
       const res = mockRes();
       await handler(mockReq({ params: { name: 'conservative' } }), res);
 

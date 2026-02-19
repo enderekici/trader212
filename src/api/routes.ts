@@ -1074,7 +1074,7 @@ export function createRouter(): Router {
   });
 
   // ── Strategy Profiles ────────────────────────────────────────────
-  router.get('/strategy-profiles', (_req, res) => {
+  router.get('/api/strategy-profiles', (_req, res) => {
     try {
       const manager = getStrategyProfileManager();
       res.json(manager.listProfiles());
@@ -1084,7 +1084,7 @@ export function createRouter(): Router {
     }
   });
 
-  router.post('/strategy-profiles/:name/activate', async (req, res) => {
+  router.post('/api/strategy-profiles/:name/activate', async (req, res) => {
     try {
       const manager = getStrategyProfileManager();
       const name = req.params.name;
@@ -1503,7 +1503,7 @@ export function createRouter(): Router {
     }
   });
 
-  router.get('/setup/status', (_req, res) => {
+  router.get('/api/setup/status', (_req, res) => {
     try {
       const modelsJson = configManager.get<string>('ai.models');
       const models = safeJsonParse<{ enabled: boolean }[]>(modelsJson, []);

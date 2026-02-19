@@ -16,8 +16,8 @@ export function ReviewStep() {
       const tasks: Promise<unknown>[] = [
         api.updateConfig('execution.dryRun', formData.dryRun),
         api.updateConfig('ai.provider', formData.aiProvider),
-        api.updateConfig('risk.maxPositionSizePct', formData.maxPositionSizePct),
-        api.updateConfig('risk.dailyLossLimitPct', formData.dailyLossLimitPct),
+        api.updateConfig('risk.maxPositionSizePct', formData.maxPositionSizePct / 100),
+        api.updateConfig('risk.dailyLossLimitPct', formData.dailyLossLimitPct / 100),
         api.updateConfig('pairlist.mode', formData.pairlistMode),
         api.updateConfig('telegram.enabled', formData.telegramEnabled),
       ];
