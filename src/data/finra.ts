@@ -50,13 +50,12 @@ export class FinraClient {
           existing.totalVolume += totalVol;
           existing.shortVolumePct = (existing.shortVolume / existing.totalVolume) * 100;
         } else {
-          const rawDate = parts[0]; // YYYYMMDD from the data row
           map.set(sym, {
             symbol: sym,
             shortVolume: shortVol,
             totalVolume: totalVol,
             shortVolumePct: (shortVol / totalVol) * 100,
-            date: `${rawDate.slice(0, 4)}-${rawDate.slice(4, 6)}-${rawDate.slice(6, 8)}`,
+            date: `${dateStr.slice(0, 4)}-${dateStr.slice(4, 6)}-${dateStr.slice(6, 8)}`,
             fetchedAt: new Date().toISOString(),
           });
         }

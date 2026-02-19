@@ -422,9 +422,15 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
   },
   {
     key: 'risk.defaultStopLossPct',
-    value: '0.07',
+    value: '0.04',
     category: 'risk',
     description: 'Default stop-loss % when ATR unavailable',
+  },
+  {
+    key: 'risk.defaultTakeProfitPct',
+    value: '0.20',
+    category: 'risk',
+    description: 'Default take-profit %',
   },
 
   // Execution
@@ -1178,7 +1184,7 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
   // AI — Conviction Gate
   {
     key: 'ai.minConvictionScore',
-    value: '45',
+    value: '55',
     category: 'ai',
     description: 'Min AI conviction to execute a BUY',
   },
@@ -1186,7 +1192,7 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
   // AI — Rules Engine
   {
     key: 'ai.rules.buyTechMin',
-    value: '45',
+    value: '55',
     category: 'ai',
     description: 'Rules engine: min technical score for BUY',
   },

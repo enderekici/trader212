@@ -22,10 +22,11 @@ export interface DrawdownResult {
 /**
  * Calculates max and current drawdown from a series of trade P&Ls.
  * Similar to FreqTrade's approach: cumulative profit series + rolling high watermark.
- * @param trades Array of { pnl, exitTime } sorted by close date
+ * @param startingCapital Optional starting capital to calculate drawdown against total equity (defaults to 0 for P&L-only drawdown)
  */
 export function calculateMaxDrawdown(
   trades: Array<{ pnl: number; exitTime: string | null }>,
+  startingCapital = 0,
 ): DrawdownResult {
   if (trades.length === 0) {
     return {
@@ -38,8 +39,8 @@ export function calculateMaxDrawdown(
     };
   }
 
-  let peak = 0;
-  let cumulative = 0;
+  let peak = startingCapital;
+  let cumulative = startingCapital;
   let maxDrawdown = 0;
   let maxDrawdownPct = 0;
   let peakDate: string | null = null;

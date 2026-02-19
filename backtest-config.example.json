@@ -1,0 +1,16 @@
+{
+  "startDate": "2023-01-01",
+  "endDate": "2026-01-31",
+  "initialCapital": 50000,
+  "resultsFile": "./data/backtest_results/grid_search.csv",
+  "symbols": ["AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "TSLA", "META", "AMD"],
+  "grid": {
+    "entryThreshold": [0.55, 0.60],
+    "stopLossPct": [0.03, 0.04, 0.05],
+    "takeProfitPct": [0.15, 0.20],
+    "trailingStop": [false, true],
+    "maxPositions": [10, 20],
+    "maxPositionSizePct": [0.05, 0.10],
+    "roiTable": [null, { "60": 0.02, "240": 0.05, "1440": 0.10 }]
+  }
+}

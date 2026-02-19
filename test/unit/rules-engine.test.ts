@@ -427,9 +427,9 @@ describe('RulesEngine', () => {
       const ctx = makeContext({ techScore: 75, fundScore: 70, sentScore: 65 });
       const result = await engine.analyze(ctx);
 
-      expect(result!.suggestedStopLossPct).toBe(0.07);
-      expect(result!.suggestedPositionSizePct).toBe(0.15);
-      expect(result!.suggestedTakeProfitPct).toBe(0.25);
+      expect(result!.suggestedStopLossPct).toBe(0.05);
+      expect(result!.suggestedPositionSizePct).toBe(0.1);
+      expect(result!.suggestedTakeProfitPct).toBe(0.20);
     });
 
     it('sets urgency to "no_rush" for all decisions', async () => {
