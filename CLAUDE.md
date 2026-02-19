@@ -1,5 +1,10 @@
 # CLAUDE.md
 
+## WARNING
+Obey the following instructions:
+- Never commit secrets (API keys, tokens) to the repository.
+- Never commit anything without full ci(linter etc.) run and all tests passing.
+
 ## Project Overview
 Autonomous AI trading bot for Trading212. ESM TypeScript, Node.js 24+.
 
