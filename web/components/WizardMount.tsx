@@ -7,6 +7,14 @@ export function WizardMount() {
 
   useEffect(() => {
     const done = localStorage.getItem('setup_complete');
+    const force = localStorage.getItem('setup_force');
+
+    if (force) {
+      localStorage.removeItem('setup_force');
+      setShow(true);
+      return;
+    }
+
     if (done) return;
 
     fetch('/api/setup/status')

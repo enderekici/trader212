@@ -4,6 +4,7 @@ import { BookOpen } from 'lucide-react';
 export function SetupGuideButton() {
   function handleClick() {
     localStorage.removeItem('setup_complete');
+    localStorage.setItem('setup_force', 'true');
     window.location.reload();
   }
 
