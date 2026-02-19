@@ -8,6 +8,10 @@ on:
     branches: [main, develop]
   workflow_dispatch:
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
@@ -29,7 +33,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: node_modules
-          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          key: node-modules-${{ runner.os }}-node24-${{ hashFiles('package-lock.json') }}
 
       - name: Install dependencies
         if: steps.cache-nm.outputs.cache-hit != 'true'
@@ -61,7 +65,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: node_modules
-          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          key: node-modules-${{ runner.os }}-node24-${{ hashFiles('package-lock.json') }}
 
       - name: Install dependencies
         if: steps.cache-nm.outputs.cache-hit != 'true'
@@ -96,11 +100,18 @@ jobs:
         uses: actions/cache@v4
         with:
           path: web/node_modules
-          key: web-node-modules-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}
+          key: web-node-modules-${{ runner.os }}-node24-${{ hashFiles('web/package-lock.json') }}
 
       - name: Install dependencies
         if: steps.cache-nm.outputs.cache-hit != 'true'
         run: npm ci
+
+      - name: Cache Next.js build
+        uses: actions/cache@v4
+        with:
+          path: web/.next/cache
+          key: nextjs-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}-${{ hashFiles('web/**/*.ts', 'web/**/*.tsx') }}
+          restore-keys: nextjs-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}-
 
       - name: Typecheck
         run: npx tsc --noEmit
@@ -128,9 +139,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # QEMU only needed for multi-platform (arm64) builds, which run on tags only
       - uses: docker/setup-qemu-action@v3
-        if: github.ref_type == 'tag'
         with:
           platforms: arm64
 
