@@ -69,11 +69,15 @@ const YF_HEADERS = {
 const yf = new yahooFinance();
 
 export class YahooFinanceClient {
-  async getHistoricalData(symbol: string, days?: number): Promise<OHLCVCandle[]> {
+  async getHistoricalData(
+    symbol: string,
+    days?: number,
+    endDateMs?: number,
+  ): Promise<OHLCVCandle[]> {
     try {
       const lookback = days ?? configManager.get<number>('analysis.historicalDays');
-      const period1 = Math.floor((Date.now() - lookback * 24 * 60 * 60 * 1000) / 1000);
-      const period2 = Math.floor(Date.now() / 1000);
+      const period2 = endDateMs ? Math.floor(endDateMs / 1000) : Math.floor(Date.now() / 1000);
+      const period1 = Math.floor(period2 - lookback * 24 * 60 * 60);
 
       const { data } = await axios.get(`${YAHOO_CHART_URL}/${encodeURIComponent(symbol)}`, {
         params: {

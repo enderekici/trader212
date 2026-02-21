@@ -28,7 +28,7 @@ export class BacktestDataLoader {
 
     log.info({ symbol, startDate, endDate, lookbackDays: totalDays }, 'Loading OHLCV data');
 
-    const rawCandles = await this.yahooClient.getHistoricalData(symbol, totalDays);
+    const rawCandles = await this.yahooClient.getHistoricalData(symbol, totalDays, end.getTime());
 
     if (rawCandles.length === 0) {
       log.warn({ symbol }, 'No data returned from Yahoo Finance');
@@ -64,8 +64,16 @@ export class BacktestDataLoader {
     // Load all symbols in parallel
     const entries = await Promise.all(
       symbols.map(async (symbol) => {
-        const candles = await this.loadOHLCV(symbol, startDate, endDate);
-        return { symbol, candles };
+        try {
+          const candles = await this.loadOHLCV(symbol, startDate, endDate);
+          return { symbol, candles };
+        } catch (error) {
+          log.error(
+            { symbol, err: error instanceof Error ? error.message : String(error) },
+            'Failed to load OHLCV data for symbol, skipping.',
+          );
+          return { symbol, candles: [] };
+        }
       }),
     );
 
