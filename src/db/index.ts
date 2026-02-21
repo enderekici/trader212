@@ -88,6 +88,8 @@ function createTables(sqlite: InstanceType<typeof Database>) {
       extraIndicators TEXT, newsHeadlines TEXT
     );
 
+    CREATE INDEX IF NOT EXISTS idx_signals_symbol ON signals(symbol, timestamp);
+
     CREATE TABLE IF NOT EXISTS positions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       symbol TEXT NOT NULL UNIQUE,
@@ -100,6 +102,7 @@ function createTables(sqlite: InstanceType<typeof Database>) {
       convictionScore REAL, stopOrderId TEXT, takeProfitOrderId TEXT, aiExitConditions TEXT,
       accountType TEXT NOT NULL CHECK(accountType IN ('INVEST','ISA')),
       dcaCount INTEGER DEFAULT 0, totalInvested REAL, partialExitCount INTEGER DEFAULT 0,
+      version INTEGER DEFAULT 1,
       updatedAt TEXT
     );
 
@@ -270,7 +273,8 @@ function createTables(sqlite: InstanceType<typeof Database>) {
       accountType TEXT NOT NULL CHECK(accountType IN ('INVEST','ISA')),
       createdAt TEXT NOT NULL,
       updatedAt TEXT,
-      filledAt TEXT
+      filledAt TEXT,
+      version INTEGER DEFAULT 1
     );
     CREATE INDEX IF NOT EXISTS idx_orders_trade ON orders(tradeId);
     CREATE INDEX IF NOT EXISTS idx_orders_position ON orders(positionId);
@@ -375,6 +379,18 @@ function createTables(sqlite: InstanceType<typeof Database>) {
   // Idempotent column migrations
   try {
     sqlite.exec(`ALTER TABLE ai_research ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'`);
+  } catch {
+    // Column already exists — ignore
+  }
+
+  try {
+    sqlite.exec(`ALTER TABLE positions ADD COLUMN version INTEGER DEFAULT 1`);
+  } catch {
+    // Column already exists — ignore
+  }
+
+  try {
+    sqlite.exec(`ALTER TABLE orders ADD COLUMN version INTEGER DEFAULT 1`);
   } catch {
     // Column already exists — ignore
   }

@@ -153,7 +153,7 @@ describe('ConditionalOrderManager', () => {
 
 		it('should create order with expiration', () => {
 			vi.mocked(repo.getActiveOrders).mockReturnValue([]);
-			const expiresAt = '2026-02-20T10:00:00.000Z';
+			const expiresAt = '2027-02-20T10:00:00.000Z';
 
 			vi.mocked(repo.createConditionalOrder).mockReturnValue({
 				id: 4,

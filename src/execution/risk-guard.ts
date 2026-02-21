@@ -110,18 +110,57 @@ export class RiskGuard {
     return { allowed: true };
   }
 
+  /**
+   * Graduated loss response instead of binary emergency stop.
+   * Returns a response tier indicating the appropriate action:
+   *   - 'normal': 0-1% daily loss, no restrictions
+   *   - 'reduce': 1-2% daily loss, reduce position size by 50%
+   *   - 'pause_day': 2-3% daily loss, pause trading for rest of day
+   *   - 'emergency': >3% daily loss, emergency stop
+   */
   checkDailyLoss(portfolio: PortfolioState): boolean {
-    const dailyLossLimitPct = configManager.get<number>('risk.dailyLossLimitPct');
-    const shouldPause = portfolio.todayPnlPct < -dailyLossLimitPct;
+    const response = this.getGraduatedLossResponse(portfolio);
+    return response === 'pause_day' || response === 'emergency';
+  }
 
-    if (shouldPause) {
+  getGraduatedLossResponse(
+    portfolio: PortfolioState,
+  ): 'normal' | 'reduce' | 'pause_day' | 'emergency' {
+    const lossPct = Math.abs(Math.min(0, portfolio.todayPnlPct));
+
+    if (lossPct > 0.03) {
       log.warn(
-        { todayPnlPct: portfolio.todayPnlPct, limit: -dailyLossLimitPct },
-        'Daily loss limit breached — trading should pause',
+        { todayPnlPct: portfolio.todayPnlPct, tier: 'emergency' },
+        'Graduated loss: EMERGENCY STOP — daily loss > 3%',
       );
+      return 'emergency';
     }
+    if (lossPct > 0.02) {
+      log.warn(
+        { todayPnlPct: portfolio.todayPnlPct, tier: 'pause_day' },
+        'Graduated loss: PAUSE DAY — daily loss 2-3%',
+      );
+      return 'pause_day';
+    }
+    if (lossPct > 0.01) {
+      log.warn(
+        { todayPnlPct: portfolio.todayPnlPct, tier: 'reduce' },
+        'Graduated loss: REDUCE SIZE 50% — daily loss 1-2%',
+      );
+      return 'reduce';
+    }
+    return 'normal';
+  }
 
-    return shouldPause;
+  /**
+   * Weekly loss check — >5% weekly loss triggers emergency stop requiring manual restart.
+   */
+  checkWeeklyLoss(weeklyPnlPct: number): boolean {
+    if (weeklyPnlPct < -0.05) {
+      log.warn({ weeklyPnlPct }, 'Weekly loss > 5% — emergency stop, manual restart required');
+      return true;
+    }
+    return false;
   }
 
   checkDrawdown(portfolio: PortfolioState): boolean {
@@ -149,12 +188,8 @@ export class RiskGuard {
 
   /**
    * Calculates a position size multiplier based on consecutive losing trades.
-   * Every `streakReductionThreshold` consecutive losses, the multiplier is reduced
-   * by `streakReductionFactor`. For example, with threshold=3 and factor=0.5:
-   *   - 0-2 consecutive losses: 1.0 (no reduction)
-   *   - 3-5 consecutive losses: 0.5
-   *   - 6-8 consecutive losses: 0.25
-   *   - etc.
+   * Uses exponential reduction: multiplier = 0.8^streak for streak >= 5.
+   * For streaks below 5, uses the configurable threshold/factor system.
    * Returns 1.0 if no reduction is needed.
    */
   getLosingStreakMultiplier(): number {
@@ -201,9 +236,18 @@ export class RiskGuard {
         return 1.0;
       }
 
-      // Calculate how many full threshold groups of losses
-      const streakMultiples = Math.floor(consecutiveLosses / threshold);
-      const multiplier = factor ** streakMultiples;
+      // Exponential reduction for long streaks (>=5 consecutive losses)
+      let multiplier: number;
+      if (consecutiveLosses >= 5) {
+        multiplier = 0.8 ** consecutiveLosses;
+      } else {
+        // Standard threshold-based reduction for shorter streaks
+        const streakMultiples = Math.floor(consecutiveLosses / threshold);
+        multiplier = factor ** streakMultiples;
+      }
+
+      // Floor at 10% to avoid effectively zero position sizes
+      multiplier = Math.max(multiplier, 0.1);
 
       log.warn(
         { consecutiveLosses, threshold, factor, multiplier },
@@ -215,5 +259,15 @@ export class RiskGuard {
       log.error({ err }, 'Failed to compute losing streak multiplier');
       return 1.0;
     }
+  }
+
+  /**
+   * Get position size multiplier combining graduated daily loss and streak responses.
+   */
+  getPositionSizeMultiplier(portfolio: PortfolioState): number {
+    const streakMult = this.getLosingStreakMultiplier();
+    const dailyResponse = this.getGraduatedLossResponse(portfolio);
+    const dailyMult = dailyResponse === 'reduce' ? 0.5 : 1.0;
+    return streakMult * dailyMult;
   }
 }

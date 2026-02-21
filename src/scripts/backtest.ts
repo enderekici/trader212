@@ -176,7 +176,9 @@ async function runBacktest() {
     fs.mkdirSync(resultsDir, { recursive: true });
   }
 
-  console.log(`\n📥 Pre-loading market data${downloadOnly ? ' (downloading from Yahoo)' : ' (from cache)'}...`);
+  console.log(
+    `\n📥 Pre-loading market data${downloadOnly ? ' (downloading from Yahoo)' : ' (from cache)'}...`,
+  );
   const dataLoader = new BacktestDataLoader();
   const allData = new Map();
   const symbols = runConfig.symbols ?? [];

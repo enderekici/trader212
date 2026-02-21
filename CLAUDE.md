@@ -75,7 +75,7 @@ Autonomous AI trading bot for Trading212. ESM TypeScript, Node.js 24+.
     - `decision-processor.ts` - Parse + validate AI JSON responses
     - `market-research.ts` - MarketResearcher: scheduled AI research for stock discovery
     - `self-improvement.ts` - AI self-improvement system: analyzes past decisions, identifies patterns, updates strategies
-    - `rules-engine.ts` - RulesEngine: deterministic threshold-based decisions (zero-cost, backtest-reproducible)
+    - `rules-engine.ts` - RulesEngine: regime-weighted 4-strategy consensus (mean-reversion, trend-following, momentum, breakout) with fundamental quality/value/growth scoring, volatility risk adjustment, ATR-based stop/take-profit (zero-cost, no LLM calls, backtest-reproducible)
     - `consensus.ts` - ConsensusEngine: multi-model consensus voting (majority/weighted/unanimous modes) across multiple OpenAI-compat profiles
     - `adapters/` - Provider adapters
       - `anthropic.ts` - Anthropic Claude adapter (@anthropic-ai/sdk)
@@ -85,7 +85,7 @@ Autonomous AI trading bot for Trading212. ESM TypeScript, Node.js 24+.
     - `order-manager.ts` - OrderManager: executeBuy(), executeClose(), dry-run simulation
     - `order-replacer.ts` - Order modification and replacement logic
     - `order-sync.ts` - Sync orders with Trading212 API
-    - `risk-guard.ts` - RiskGuard: validateTrade(), checkDailyLoss(), checkDrawdown()
+    - `risk-guard.ts` - RiskGuard: validateTrade(), checkDailyLoss() (graduated 4-tier response: normal/reduce/pause_day/emergency), checkDrawdown(), checkWeeklyLoss(), getLosingStreakMultiplier() (exponential 0.8^streak for streaks>=5), getPositionSizeMultiplier()
     - `trade-planner.ts` - TradePlanner: createPlan(), approvePlan(), rejectPlan(), formatPlanMessage()
     - `approval-manager.ts` - ApprovalManager: processNewPlan() (auto/manual), checkExpiredPlans()
     - `position-tracker.ts` - PositionTracker: updatePositions(), updateTrailingStops(), checkExitConditions(), syncWithT212()
@@ -101,6 +101,7 @@ Autonomous AI trading bot for Trading212. ESM TypeScript, Node.js 24+.
   - `src/analysis/` - Analysis engines
     - `analyzer.ts` - Main analysis orchestrator
     - `technical/indicators.ts` - 25+ technical indicators computation
+    - `technical/strategies.ts` - 4 modular strategy scorers for backtesting: scoreMeanReversion(), scoreTrendFollowing(), scoreMomentum(), scoreBreakout() — each returns { strategy, direction, strength, confidence, reasons }
     - `technical/scorer.ts` - analyzeTechnicals(), scoreTechnicals()
     - `fundamental/scorer.ts` - scoreFundamentals()
     - `sentiment/scorer.ts` - scoreSentiment()
@@ -121,7 +122,7 @@ Autonomous AI trading bot for Trading212. ESM TypeScript, Node.js 24+.
     - `health-metrics.ts` - System health monitoring (API latency, error rates, queue depths)
   - `src/api/` - HTTP + WebSocket
     - `server.ts` - ApiServer: Express app setup, CORS whitelist, JSON parsing, auth middleware, rate limiting, starts HTTP + WS
-    - `routes.ts` - All REST endpoint definitions (60+ endpoints), Zod input validation on mutation endpoints
+    - `routes.ts` - All REST endpoint definitions (70+ endpoints), Zod input validation on mutation endpoints
     - `websocket.ts` - WebSocketManager: broadcast(), 10 event types
     - `webhooks.ts` - Webhook system for external integrations (Discord, Slack, custom endpoints)
     - `middleware/auth.ts` - Bearer token auth middleware (`API_SECRET_KEY` env var); skips `/api/status`; disabled if no key set
@@ -130,8 +131,8 @@ Autonomous AI trading bot for Trading212. ESM TypeScript, Node.js 24+.
     - `trading212/errors.ts` - Trading212 error handling
   - `src/backtest/` - Backtesting engine
     - `engine.ts` - Backtesting engine: runs strategies on historical data (with slippage/spread modeling)
-    - `data-loader.ts` - Historical data loader for backtests
-    - `reporter.ts` - Backtest result reporting and visualization
+    - `data-loader.ts` - Historical data loader for backtests (supports cacheOnly mode for offline backtests, endDateMs for date range filtering)
+    - `reporter.ts` - Backtest result reporting, visualization, and profitability gates (6 acceptance criteria: WF OOS CAGR>0%, profit factor>=1.4, Sharpe>=1.2, max DD<=12%, Monte Carlo P25>0, win rate>=55%)
     - `types.ts` - Backtest-specific type definitions
     - `walk-forward.ts` - Walk-forward analysis: rolling train/test windows for out-of-sample validation
   - `src/utils/` - Utilities
@@ -173,7 +174,7 @@ Autonomous AI trading bot for Trading212. ESM TypeScript, Node.js 24+.
     - `websocket.ts` - WebSocket client for real-time updates
     - `types.ts` - TypeScript types for API responses
 - `data/` - SQLite database (gitignored)
-- `test/` - Vitest tests (91 unit + 21 integration test files, 2648 tests total)
+- `test/` - Vitest tests (94 test files, 3153 tests total)
 
 ## Key Conventions
 - ESM modules with .js import extensions in source files
@@ -201,6 +202,7 @@ Key flows:
 - **AI Self-Improvement**: analyzes past decisions, identifies patterns (e.g., "overtrading tech stocks" or "poor exits in volatile conditions"), generates insights, updates internal strategies
 - **Model Performance Tracking**: records every AI prediction in `model_performance` table; daily evaluation job compares predicted direction to actual price movement (1d, 5d, 10d); computes per-model accuracy, buy/sell/hold accuracy, avg returns
 - **Portfolio Correlation Analysis**: Pearson correlation on daily returns between positions; warns when new trade is highly correlated (> `risk.maxCorrelation`) with existing positions; full matrix endpoint for dashboard
+- **Graduated Loss Response**: RiskGuard uses 4-tier daily loss response instead of binary stop: normal (0-1% loss), reduce (1-2%, halves position size), pause_day (2-3%, pauses trading), emergency (>3%, full stop). Weekly >5% loss triggers emergency stop requiring manual restart. Losing streak >=5 uses exponential reduction (0.8^streak, floor 10%)
 - **Emergency Stop / Circuit Breaker**: POST `/api/control/emergency-stop` closes all positions and pauses bot; also triggers on daily loss limit breach via `riskGuard.checkDailyLoss()`; header bar has a red STOP button
 - **Conditional Orders**: supports OCO (One-Cancels-Other), Bracket (entry + SL + TP), Trailing Stop, If-Then orders
 - **DCA (Dollar-Cost Averaging)**: builds positions over time with configurable intervals and amounts
@@ -209,7 +211,7 @@ Key flows:
 - **Strategy Profiles**: pre-configured strategy sets (conservative, balanced, aggressive, scalper, swing) that can be activated with one click
 - **Tax-Loss Harvesting**: automatically identifies candidates for tax-loss harvesting; tracks wash sales; supports FIFO/LIFO/HIFO
 - **Trade Journal**: records notes, tags, mood, and lessons for each trade; generates insights on common mistakes and patterns
-- **Backtesting**: full backtesting engine with historical data loader, reporting, transaction cost modeling (slippage/spread), and walk-forward out-of-sample validation
+- **Backtesting**: full backtesting engine with historical data loader (cacheOnly offline mode), reporting with 6 profitability gates, transaction cost modeling (slippage/spread), and walk-forward out-of-sample validation
 - **Webhooks**: send trade notifications and alerts to Discord, Slack, or custom endpoints
 - **Market Regime Detection**: identifies bull/bear/sideways market regimes and adjusts strategy parameters accordingly
 - **Performance Attribution**: breaks down returns by alpha, beta, sector contributions, and factor exposures
@@ -217,8 +219,8 @@ Key flows:
 - **Web Research** (optional): Finviz/StockAnalysis scraping via Steer headless browser; requires external Steer instance at `STEER_URL`, gracefully skipped if unavailable
 
 ## Database
-SQLite via better-sqlite3 + drizzle-orm. 25 tables:
-- **Core**: `config`, `positions`, `trades`, `signals`, `orders`
+SQLite via better-sqlite3 + drizzle-orm. WAL mode enabled. 25 tables:
+- **Core**: `config`, `positions` (version column for optimistic locking), `trades`, `signals` (indexed on symbol+timestamp), `orders` (version column for optimistic locking)
 - **Caching**: `priceCache`, `newsCache`, `fundamentalCache`, `earningsCalendar`, `insiderTransactions`
 - **AI/Analysis**: `aiResearch`, `researchWatchlist`, `modelPerformance`, `auditLog`
 - **Execution**: `tradePlans`, `conditionalOrders`, `pairLocks`
@@ -242,7 +244,7 @@ Five options selected at runtime via `ai.provider` config key:
 - `anthropic` - Anthropic Claude adapter (default)
 - `ollama` - Ollama adapter for local inference
 - `openai-compatible` - OpenAI-compatible adapter (any OpenAI-compatible API)
-- `rules` - Deterministic threshold-based rules engine (zero cost, no LLM calls, backtest-reproducible)
+- `rules` - Deterministic 4-strategy consensus engine: regime-weighted scoring across mean-reversion, trend-following, momentum, and breakout strategies with fundamental quality/value/growth modifiers (zero cost, no LLM calls, backtest-reproducible)
 - `consensus` - Multi-model consensus engine: aggregates votes across multiple OpenAI-compatible model profiles (configured via `ai.models` config key as JSON array of profiles)
 
 Market research uses the same provider via `src/ai/market-research.ts` (except `rules` which doesn't support `rawChat`).

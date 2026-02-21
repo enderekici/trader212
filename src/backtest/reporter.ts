@@ -1,5 +1,112 @@
 import { formatCurrency, formatPercent, round } from '../utils/helpers.js';
-import type { BacktestResult } from './types.js';
+import type { BacktestResult, WalkForwardResult } from './types.js';
+
+export interface ProfitabilityGateResult {
+  approved: boolean;
+  failedGates: string[];
+  passedGates: string[];
+}
+
+/**
+ * Evaluate 6 profitability gates against backtest results.
+ * All gates must pass for the strategy to be approved.
+ *
+ * Gates:
+ *  1. Walk-forward OOS CAGR > 0%
+ *  2. Profit factor >= 1.4
+ *  3. Sharpe ratio >= 1.2
+ *  4. Max drawdown <= 12%
+ *  5. Monte Carlo 25th percentile > 0 (requires mcPercentile25 in metrics)
+ *  6. Rolling 90-day win rate >= 55%
+ */
+export function evaluateProfitabilityGates(
+  result: BacktestResult,
+  walkForward?: WalkForwardResult,
+  monteCarloP25?: number,
+): ProfitabilityGateResult {
+  const failedGates: string[] = [];
+  const passedGates: string[] = [];
+  const { metrics } = result;
+
+  // Gate 1: Walk-forward OOS CAGR > 0%
+  if (walkForward) {
+    const oosCagr = walkForward.aggregateMetrics.avgTestReturn;
+    if (oosCagr > 0) {
+      passedGates.push(`Walk-forward OOS return ${formatPercent(oosCagr)} > 0%`);
+    } else {
+      failedGates.push(`Walk-forward OOS return ${formatPercent(oosCagr)} <= 0%`);
+    }
+  } else {
+    failedGates.push('Walk-forward OOS data not available');
+  }
+
+  // Gate 2: Profit factor >= 1.4
+  if (metrics.profitFactor != null && metrics.profitFactor >= 1.4) {
+    passedGates.push(`Profit factor ${metrics.profitFactor.toFixed(2)} >= 1.4`);
+  } else {
+    failedGates.push(
+      `Profit factor ${metrics.profitFactor != null ? metrics.profitFactor.toFixed(2) : 'N/A'} < 1.4`,
+    );
+  }
+
+  // Gate 3: Sharpe ratio >= 1.2
+  if (metrics.sharpeRatio != null && metrics.sharpeRatio >= 1.2) {
+    passedGates.push(`Sharpe ratio ${metrics.sharpeRatio.toFixed(2)} >= 1.2`);
+  } else {
+    failedGates.push(
+      `Sharpe ratio ${metrics.sharpeRatio != null ? metrics.sharpeRatio.toFixed(2) : 'N/A'} < 1.2`,
+    );
+  }
+
+  // Gate 4: Max drawdown <= 12%
+  if (metrics.maxDrawdownPct <= 0.12) {
+    passedGates.push(`Max drawdown ${formatPercent(metrics.maxDrawdownPct)} <= 12%`);
+  } else {
+    failedGates.push(`Max drawdown ${formatPercent(metrics.maxDrawdownPct)} > 12%`);
+  }
+
+  // Gate 5: Monte Carlo 25th percentile > 0
+  if (monteCarloP25 != null && monteCarloP25 > 0) {
+    passedGates.push(`Monte Carlo P25 ${formatPercent(monteCarloP25)} > 0%`);
+  } else if (monteCarloP25 != null) {
+    failedGates.push(`Monte Carlo P25 ${formatPercent(monteCarloP25)} <= 0%`);
+  } else {
+    failedGates.push('Monte Carlo P25 data not available');
+  }
+
+  // Gate 6: Win rate >= 55% (using overall backtest win rate as proxy for rolling 90-day)
+  if (metrics.winRate >= 0.55) {
+    passedGates.push(`Win rate ${formatPercent(metrics.winRate)} >= 55%`);
+  } else {
+    failedGates.push(`Win rate ${formatPercent(metrics.winRate)} < 55%`);
+  }
+
+  return {
+    approved: failedGates.length === 0,
+    failedGates,
+    passedGates,
+  };
+}
+
+/**
+ * Format profitability gate results for console/Telegram output.
+ */
+export function formatGateResults(gates: ProfitabilityGateResult): string {
+  const lines: string[] = [];
+  lines.push(`=== Profitability Gates: ${gates.approved ? 'APPROVED' : 'REJECTED'} ===`);
+  lines.push('');
+  for (const g of gates.passedGates) {
+    lines.push(`  [PASS] ${g}`);
+  }
+  for (const g of gates.failedGates) {
+    lines.push(`  [FAIL] ${g}`);
+  }
+  lines.push('');
+  lines.push(
+    `Result: ${gates.passedGates.length}/${gates.passedGates.length + gates.failedGates.length} gates passed`,
+  );
+  return lines.join('\n');
+}
 
 /**
  * Generate a text summary suitable for console output or Telegram.

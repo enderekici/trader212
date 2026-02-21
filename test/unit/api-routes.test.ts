@@ -146,7 +146,6 @@ vi.mock('../../src/analysis/correlation.js', () => ({
   }),
 }));
 
-<<<<<<< HEAD
 const mockGetSnapshot = vi.fn(() => ({
   status: 'healthy',
   uptime: 100,

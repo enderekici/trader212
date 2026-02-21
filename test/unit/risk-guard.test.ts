@@ -241,11 +241,12 @@ describe('RiskGuard', () => {
       expect(result).toBe(true);
     });
 
-    it('returns false when daily loss is within limit', () => {
+    it('returns true when daily loss exceeds 2% (pause_day tier)', () => {
+      // -3% loss: lossPct=0.03, 0.03 > 0.02 → pause_day → true
       const result = guard.checkDailyLoss(
         makePortfolio({ todayPnlPct: -0.03 }),
       );
-      expect(result).toBe(false);
+      expect(result).toBe(true);
     });
 
     it('returns false when portfolio is profitable today', () => {
@@ -255,10 +256,18 @@ describe('RiskGuard', () => {
       expect(result).toBe(false);
     });
 
-    it('returns true when exactly at the limit boundary', () => {
-      // todayPnlPct = -0.05, limit = 0.05 => -0.05 < -0.05 is false
+    it('returns true for emergency tier at -5% loss', () => {
+      // -5% loss: lossPct=0.05, 0.05 > 0.03 → emergency → true
       const result = guard.checkDailyLoss(
         makePortfolio({ todayPnlPct: -0.05 }),
+      );
+      expect(result).toBe(true);
+    });
+
+    it('returns false when daily loss is within normal tier (<= 1%)', () => {
+      // -0.5% loss: lossPct=0.005, all thresholds pass → normal → false
+      const result = guard.checkDailyLoss(
+        makePortfolio({ todayPnlPct: -0.005 }),
       );
       expect(result).toBe(false);
     });
@@ -394,8 +403,8 @@ describe('RiskGuard', () => {
       expect(result).toBe(0.5);
     });
 
-    it('returns factor^2 when consecutive losses reach 2x threshold', () => {
-      // 6 consecutive losses with threshold=3, factor=0.5 -> 0.5^2 = 0.25
+    it('uses exponential reduction for streaks >= 5', () => {
+      // 6 consecutive losses with streak >= 5 -> 0.8^6 = 0.262144
       mockAll.mockReturnValueOnce([
         { pnl: -50, exitPrice: 145, entryPrice: 150 },
         { pnl: -30, exitPrice: 147, entryPrice: 150 },
@@ -406,7 +415,7 @@ describe('RiskGuard', () => {
         { pnl: 100, exitPrice: 160, entryPrice: 150 },
       ]);
       const result = guard.getLosingStreakMultiplier();
-      expect(result).toBe(0.25);
+      expect(result).toBeCloseTo(0.8 ** 6, 5);
     });
 
     it('uses exitPrice vs entryPrice when pnl is null', () => {
@@ -485,8 +494,8 @@ describe('RiskGuard', () => {
       expect(result).toBe(1.0);
     });
 
-    it('handles all losses with no wins', () => {
-      // 9 consecutive losses with threshold=3, factor=0.5 -> 0.5^3 = 0.125
+    it('handles all losses with no wins (exponential reduction)', () => {
+      // 9 consecutive losses with streak >= 5 -> 0.8^9 = 0.1342...
       mockAll.mockReturnValueOnce([
         { pnl: -50, exitPrice: 145, entryPrice: 150 },
         { pnl: -30, exitPrice: 147, entryPrice: 150 },
@@ -499,7 +508,7 @@ describe('RiskGuard', () => {
         { pnl: -45, exitPrice: 145.5, entryPrice: 150 },
       ]);
       const result = guard.getLosingStreakMultiplier();
-      expect(result).toBe(0.125);
+      expect(result).toBeCloseTo(0.8 ** 9, 5);
     });
   });
 });

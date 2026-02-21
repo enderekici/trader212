@@ -76,7 +76,7 @@ describe('BacktestDataLoader', () => {
       const loader = new BacktestDataLoader();
       const result = await loader.loadOHLCV('AAPL', '2024-06-01', '2024-06-30');
 
-      expect(mockGetHistoricalData).toHaveBeenCalledWith('AAPL', expect.any(Number));
+      expect(mockGetHistoricalData).toHaveBeenCalledWith('AAPL', expect.any(Number), expect.any(Number));
       expect(result.length).toBeGreaterThan(0);
       // All returned candles should be <= endDate
       for (const c of result) {
