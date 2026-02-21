@@ -51,7 +51,7 @@ export class BacktestDataLoader {
     // OR: we can just check if we have data up to endDate.
 
     const start = new Date(startDate);
-    // const end = new Date(endDate); // Unused
+    const end = new Date(endDate);
 
     // Add 250 trading days (~365 calendar days) of lookback for indicator warmup
     const lookbackStart = new Date(start);
@@ -67,15 +67,14 @@ export class BacktestDataLoader {
       return [];
     } else {
       // 3. Fetch from API if no cache
-      // Calculate days from NOW to the lookback start
-      const now = new Date();
+      // Calculate days from lookback start to end date
       const totalDays = Math.ceil(
-        (now.getTime() - lookbackStart.getTime()) / (1000 * 60 * 60 * 24),
+        (end.getTime() - lookbackStart.getTime()) / (1000 * 60 * 60 * 24),
       );
 
       log.info({ symbol, startDate, endDate, lookbackDays: totalDays }, 'Fetching from Yahoo');
 
-      const rawCandles = await this.yahooClient.getHistoricalData(symbol, totalDays);
+      const rawCandles = await this.yahooClient.getHistoricalData(symbol, totalDays, end.getTime());
 
       if (rawCandles.length === 0) {
         log.warn({ symbol }, 'No data returned from Yahoo Finance');
@@ -121,8 +120,16 @@ export class BacktestDataLoader {
     // Load all symbols in parallel
     const entries = await Promise.all(
       symbols.map(async (symbol) => {
-        const candles = await this.loadOHLCV(symbol, startDate, endDate, cacheOnly);
-        return { symbol, candles };
+        try {
+          const candles = await this.loadOHLCV(symbol, startDate, endDate, cacheOnly);
+          return { symbol, candles };
+        } catch (error) {
+          log.error(
+            { symbol, err: error instanceof Error ? error.message : String(error) },
+            'Failed to load OHLCV data for symbol, skipping.',
+          );
+          return { symbol, candles: [] };
+        }
       }),
     );
 
