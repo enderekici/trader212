@@ -176,10 +176,14 @@ async function runBacktest() {
     fs.mkdirSync(resultsDir, { recursive: true });
   }
 
-  console.log('\n📥 Pre-loading market data...');
+  console.log(`\n📥 Pre-loading market data${downloadOnly ? ' (downloading from Yahoo)' : ' (from cache)'}...`);
   const dataLoader = new BacktestDataLoader();
   const allData = new Map();
   const symbols = runConfig.symbols ?? [];
+
+  // In normal backtest mode, only use cached data (no network calls).
+  // In download-only mode, fetch from Yahoo and save to cache.
+  const cacheOnly = !downloadOnly;
 
   // Batch loading
   const BATCH_SIZE = 20;
@@ -187,13 +191,14 @@ async function runBacktest() {
   for (let i = 0; i < symbols.length; i += BATCH_SIZE) {
     const batch = symbols.slice(i, i + BATCH_SIZE);
     process.stdout.write(
-      `   Fetching batch ${Math.ceil((i + 1) / BATCH_SIZE)}/${Math.ceil(symbols.length / BATCH_SIZE)}... `,
+      `   Loading batch ${Math.ceil((i + 1) / BATCH_SIZE)}/${Math.ceil(symbols.length / BATCH_SIZE)}... `,
     );
     try {
       const batchData = await dataLoader.loadMultiple(
         batch,
         runConfig.startDate,
         runConfig.endDate,
+        cacheOnly,
       );
       for (const [key, val] of batchData) {
         allData.set(key, val);
@@ -202,8 +207,7 @@ async function runBacktest() {
     } catch (error) {
       console.log(`Failed: ${error instanceof Error ? error.message : String(error)}`);
     }
-    // Small delay to be nice to API
-    await sleep(250);
+    if (!cacheOnly) await sleep(250);
   }
 
   console.log(`\n✅ Data loaded for ${allData.size} symbols.`);

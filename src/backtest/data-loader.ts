@@ -20,10 +20,16 @@ export class BacktestDataLoader {
   /**
    * Load OHLCV data from Yahoo Finance for a single symbol.
    * Checks local JSON cache first. If not found or stale, fetches from API and saves to cache.
+   * When cacheOnly is true, skips network fetches — returns empty if no cache.
    * Adds lookback padding (250 trading days) before startDate so that
    * technical indicators have enough history from day one.
    */
-  async loadOHLCV(symbol: string, startDate: string, endDate: string): Promise<Candle[]> {
+  async loadOHLCV(
+    symbol: string,
+    startDate: string,
+    endDate: string,
+    cacheOnly = false,
+  ): Promise<Candle[]> {
     const cacheFile = path.join(CACHE_DIR, `${symbol}.json`);
     let candles: Candle[] = [];
 
@@ -56,6 +62,9 @@ export class BacktestDataLoader {
       // Check if cache covers enough history?
       // For now, let's just use what we have in cache if it exists.
       // This enables the "download once, run offline" workflow.
+    } else if (cacheOnly) {
+      log.debug({ symbol }, 'No cache file, skipping (cache-only mode)');
+      return [];
     } else {
       // 3. Fetch from API if no cache
       // Calculate days from NOW to the lookback start
@@ -105,13 +114,14 @@ export class BacktestDataLoader {
     symbols: string[],
     startDate: string,
     endDate: string,
+    cacheOnly = false,
   ): Promise<Map<string, Candle[]>> {
     const result = new Map<string, Candle[]>();
 
     // Load all symbols in parallel
     const entries = await Promise.all(
       symbols.map(async (symbol) => {
-        const candles = await this.loadOHLCV(symbol, startDate, endDate);
+        const candles = await this.loadOHLCV(symbol, startDate, endDate, cacheOnly);
         return { symbol, candles };
       }),
     );
