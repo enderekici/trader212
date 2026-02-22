@@ -1,3 +1,4 @@
+import { calcATR } from '../analysis/technical/indicators.js';
 import type { OHLCVCandle } from '../data/yahoo-finance.js';
 import { getRoiThreshold } from '../execution/roi-table.js';
 import {
@@ -116,23 +117,32 @@ export class BacktestEngine {
 
       // b. Generate entry signals (only if we have room for more positions)
       if (this.positions.size < config.maxPositions) {
-        const signals = this.generateSignals(date, allData);
+        // Portfolio heat check: skip new entries if heat exceeds limit
+        const heatLimit = config.maxPortfolioHeatPct;
+        const heatExceeded = heatLimit != null && this.computePortfolioHeat(prices) >= heatLimit;
 
-        // c. Execute entries for top signals
-        for (const signal of signals) {
-          if (this.positions.size >= config.maxPositions) break;
-          if (this.positions.has(signal.symbol)) continue;
+        if (!heatExceeded) {
+          const signals = this.generateSignals(date, allData);
 
-          // Entry at next day's open to avoid look-ahead bias
-          const nextDayIdx = i + 1;
-          if (nextDayIdx >= tradingDates.length) break;
-          const nextDate = tradingDates[nextDayIdx];
-          const nextDayPrices = dateIndexed.get(nextDate);
-          if (!nextDayPrices) continue;
-          const nextDayCandle = nextDayPrices.get(signal.symbol);
-          if (!nextDayCandle) continue;
+          // c. Execute entries for top signals
+          for (const signal of signals) {
+            if (this.positions.size >= config.maxPositions) break;
+            if (this.positions.has(signal.symbol)) continue;
 
-          this.executeEntry(signal, nextDayCandle.open, nextDate);
+            // Re-check heat after each entry
+            if (heatLimit != null && this.computePortfolioHeat(prices) >= heatLimit) break;
+
+            // Entry at next day's open to avoid look-ahead bias
+            const nextDayIdx = i + 1;
+            if (nextDayIdx >= tradingDates.length) break;
+            const nextDate = tradingDates[nextDayIdx];
+            const nextDayPrices = dateIndexed.get(nextDate);
+            if (!nextDayPrices) continue;
+            const nextDayCandle = nextDayPrices.get(signal.symbol);
+            if (!nextDayCandle) continue;
+
+            this.executeEntry(signal, nextDayCandle.open, nextDate);
+          }
         }
       }
 
@@ -195,7 +205,27 @@ export class BacktestEngine {
       // Update trailing stop
       if (this.config.trailingStop && candle.high > position.highWaterMark) {
         position.highWaterMark = candle.high;
-        const newTrailingStop = position.highWaterMark * (1 - this.config.stopLossPct);
+
+        let trailPct = this.config.stopLossPct;
+
+        // Dynamic trailing stops: tighten trail based on unrealized profit tiers
+        if (this.config.dynamicTrailingStops) {
+          const unrealizedPct =
+            (position.highWaterMark - position.entryPrice) / position.entryPrice;
+          const tiers = this.config.dynamicTrailingTiers ?? [
+            { profitPct: 0.05, trailPct: 0.05 },
+            { profitPct: 0.1, trailPct: 0.03 },
+          ];
+          // Apply last matching tier (sorted ascending by profitPct)
+          const sortedTiers = [...tiers].sort((a, b) => a.profitPct - b.profitPct);
+          for (const tier of sortedTiers) {
+            if (unrealizedPct >= tier.profitPct) {
+              trailPct = tier.trailPct;
+            }
+          }
+        }
+
+        const newTrailingStop = position.highWaterMark * (1 - trailPct);
         if (position.trailingStop == null || newTrailingStop > position.trailingStop) {
           position.trailingStop = newTrailingStop;
           // Update stop-loss to trailing stop if it's higher
@@ -261,10 +291,19 @@ export class BacktestEngine {
 
       if (normalizedScore >= this.config.entryThreshold) {
         const lastCandle = candlesUpToDate[candlesUpToDate.length - 1];
+        let atr: number | undefined;
+        if (this.config.atrPositionSizing) {
+          const highs = candlesUpToDate.map((c) => c.high);
+          const lows = candlesUpToDate.map((c) => c.low);
+          const cls = candlesUpToDate.map((c) => c.close);
+          const atrVal = calcATR(highs, lows, cls, 14);
+          if (atrVal != null) atr = atrVal;
+        }
         signals.push({
           symbol,
           score: normalizedScore,
           price: lastCandle.close,
+          atr,
         });
       }
     }
@@ -281,7 +320,18 @@ export class BacktestEngine {
 
     const equity = this.computeEquityFromCash();
     const maxPositionValue = this.config.maxPositionSizePct * equity;
-    const positionValue = Math.min(maxPositionValue, this.cash);
+
+    let positionValue: number;
+    if (this.config.atrPositionSizing && signal.atr != null && signal.atr > 0) {
+      // ATR-based: risk budget = equity * riskPerTradePct, shares = budget / (ATR * multiplier)
+      const riskPct = this.config.riskPerTradePct ?? 0.01;
+      const atrMult = this.config.atrSizingMultiplier ?? 2.0;
+      const riskBudget = equity * riskPct;
+      const atrShares = Math.floor(riskBudget / (signal.atr * atrMult));
+      positionValue = Math.min(atrShares * adjustedEntryPrice, maxPositionValue, this.cash);
+    } else {
+      positionValue = Math.min(maxPositionValue, this.cash);
+    }
 
     if (positionValue <= 0) return;
 
@@ -309,6 +359,7 @@ export class BacktestEngine {
       takeProfit,
       highWaterMark: adjustedEntryPrice,
       technicalScore: signal.score,
+      atrAtEntry: signal.atr,
     };
 
     this.positions.set(signal.symbol, position);
@@ -402,6 +453,26 @@ export class BacktestEngine {
       positionValue += position.entryPrice * position.shares;
     }
     return this.cash + positionValue;
+  }
+
+  /**
+   * Portfolio heat = sum of (positionValue/equity * distanceToStop) for all positions.
+   * Measures total portfolio risk as a fraction of equity.
+   */
+  private computePortfolioHeat(prices: Map<string, Candle>): number {
+    const equity = this.computeEquity(prices);
+    if (equity <= 0) return 0;
+
+    let heat = 0;
+    for (const [symbol, position] of this.positions) {
+      const candle = prices.get(symbol);
+      const currentPrice = candle ? candle.close : position.entryPrice;
+      const posValue = currentPrice * position.shares;
+      const distanceToStop =
+        currentPrice > 0 ? (currentPrice - position.stopLoss) / currentPrice : 0;
+      heat += (posValue / equity) * Math.max(0, distanceToStop);
+    }
+    return heat;
   }
 
   private buildResult(): BacktestResult {

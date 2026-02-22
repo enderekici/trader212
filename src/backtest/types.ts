@@ -13,6 +13,15 @@ export interface BacktestConfig {
   entryThreshold: number;
   slippagePct?: number;
   spreadBps?: number;
+  // ATR-based position sizing
+  atrPositionSizing?: boolean;
+  riskPerTradePct?: number; // default 0.01 = 1%
+  atrSizingMultiplier?: number; // default 2.0
+  // Dynamic trailing stops
+  dynamicTrailingStops?: boolean;
+  dynamicTrailingTiers?: { profitPct: number; trailPct: number }[];
+  // Portfolio heat limit
+  maxPortfolioHeatPct?: number; // e.g. 0.06 = 6%
 }
 
 export interface BacktestTrade {
@@ -40,6 +49,7 @@ export interface BacktestPosition {
   takeProfit?: number;
   highWaterMark: number;
   technicalScore: number;
+  atrAtEntry?: number;
 }
 
 export interface BacktestResult {
@@ -88,6 +98,7 @@ export interface EntrySignal {
   symbol: string;
   score: number;
   price: number;
+  atr?: number;
 }
 
 export interface WalkForwardWindow {

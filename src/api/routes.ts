@@ -83,6 +83,19 @@ const backtestSchema = z.object({
   entryThreshold: z.number().min(0).max(1).default(0.6),
   slippagePct: z.number().min(0).max(0.1).optional(),
   spreadBps: z.number().min(0).max(100).optional(),
+  // ATR-based position sizing
+  atrPositionSizing: z.boolean().optional(),
+  riskPerTradePct: z.number().min(0.001).max(0.1).optional(),
+  atrSizingMultiplier: z.number().min(0.5).max(10).optional(),
+  // Dynamic trailing stops
+  dynamicTrailingStops: z.boolean().optional(),
+  dynamicTrailingTiers: z
+    .array(
+      z.object({ profitPct: z.number().min(0).max(1), trailPct: z.number().min(0.001).max(0.5) }),
+    )
+    .optional(),
+  // Portfolio heat limit
+  maxPortfolioHeatPct: z.number().min(0.01).max(1).optional(),
   walkForward: z
     .object({
       windows: z.number().int().min(2).max(20).default(5),

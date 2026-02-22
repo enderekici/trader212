@@ -157,6 +157,10 @@ const COMBOS: Combo[] = [
   // Aggressive filter: high threshold + tight stops
   { label: 'Top30 / entry0.60 / SL7',   symbolCount: 30,  entryThreshold: 0.60, stopLossPct: 0.07, takeProfitPct: 0.15, maxPositions: 10, maxPositionSizePct: 0.25 },
   { label: 'Top30 / entry0.60 / SL8',   symbolCount: 30,  entryThreshold: 0.60, stopLossPct: 0.08, takeProfitPct: 0.18, maxPositions: 10, maxPositionSizePct: 0.25 },
+
+  // More positions / smaller size (diversification)
+  { label: 'Top30 / entry0.50 / SL8 / 8pos',  symbolCount: 30,  entryThreshold: 0.50, stopLossPct: 0.08, takeProfitPct: 0.18, maxPositions: 8, maxPositionSizePct: 0.20 },
+  { label: 'Top50 / entry0.50 / SL8 / 8pos',  symbolCount: 50,  entryThreshold: 0.50, stopLossPct: 0.08, takeProfitPct: 0.18, maxPositions: 8, maxPositionSizePct: 0.20 },
 ];
 
 // ── Main ────────────────────────────────────────────────────────────────
@@ -185,7 +189,7 @@ async function main() {
   const scoreFn = await loadMultiScorer();
   const simulator = createMonteCarloSimulator();
 
-  const backtestStart = '2022-06-01';
+  const backtestStart = '2018-01-01';
   const backtestEnd = '2026-02-19';
 
   // Results table
