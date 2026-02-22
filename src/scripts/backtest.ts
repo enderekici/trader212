@@ -36,14 +36,14 @@ const DEFAULT_CONFIG: BacktestRunConfig = {
   endDate: '2026-01-31',
   initialCapital: 50000,
   resultsFile: './data/backtest_results/latest_results.csv',
-  // Default Grid: "World Class" configuration
+  // Default Grid: Best Sharpe config from Rust grid search (45.2% return, PF 3.64, Sharpe 1.69, MaxDD 10.5%)
   grid: {
-    entryThreshold: [0.55],
-    stopLossPct: [0.04],
+    entryThreshold: [0.3],
+    stopLossPct: [0.12],
     takeProfitPct: [0.2],
     trailingStop: [false],
-    maxPositions: [20],
-    maxPositionSizePct: [0.05],
+    maxPositions: [10],
+    maxPositionSizePct: [0.25],
     roiTable: [null], // Disabled by default
   },
 };
@@ -51,25 +51,6 @@ const DEFAULT_CONFIG: BacktestRunConfig = {
 // --- Helper Functions ---
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-const toCsvLine = (config: BacktestConfig, metrics: BacktestMetrics) => {
-  const roiDesc = config.roiTable ? 'Active' : 'None';
-  return [
-    config.entryThreshold,
-    config.stopLossPct,
-    config.takeProfitPct ?? 'Trailing',
-    config.trailingStop,
-    config.maxPositions,
-    config.maxPositionSizePct,
-    roiDesc,
-    metrics.totalTrades,
-    (metrics.winRate * 100).toFixed(2),
-    (metrics.returnPct * 100).toFixed(2),
-    metrics.profitFactor?.toFixed(2) ?? '0.00',
-    metrics.sharpeRatio?.toFixed(2) ?? '0.00',
-    (metrics.maxDrawdownPct * 100).toFixed(2),
-  ].join(',');
-};
 
 function printResultTable(result: { metrics: BacktestMetrics }) {
   const m = result.metrics;
@@ -100,6 +81,7 @@ function parseArgs() {
   const args = process.argv.slice(2);
   const config: Partial<BacktestRunConfig> = {};
   let downloadOnly = false;
+  let strategy: 'legacy' | 'multi' | 'both' = 'both';
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -126,10 +108,17 @@ function parseArgs() {
       config.initialCapital = Number(args[++i]);
     } else if (arg === '--symbols') {
       config.symbols = args[++i].split(',').map((s) => s.trim());
+    } else if (arg === '--strategy') {
+      const val = args[++i];
+      if (val === 'legacy' || val === 'multi' || val === 'both') {
+        strategy = val;
+      } else {
+        console.error(`Invalid strategy: ${val}. Use 'legacy', 'multi', or 'both'.`);
+      }
     }
   }
 
-  return { config, downloadOnly };
+  return { config, downloadOnly, strategy };
 }
 
 // --- Main Pipeline ---
@@ -146,7 +135,7 @@ async function runBacktest() {
   await configManager.seedDefaults();
 
   // Parse arguments and merge with default config
-  const { config: argConfig, downloadOnly } = parseArgs();
+  const { config: argConfig, downloadOnly, strategy: strategyMode } = parseArgs();
   const runConfig: BacktestRunConfig = {
     ...DEFAULT_CONFIG,
     ...argConfig,
@@ -219,6 +208,13 @@ async function runBacktest() {
     return;
   }
 
+  // Determine which strategies to run
+  const strategiesToRun: ('legacy' | 'multi')[] =
+    strategyMode === 'both' ? ['legacy', 'multi'] : [strategyMode];
+
+  console.log(
+    `   Strategy: ${strategyMode === 'both' ? 'Legacy + Multi-Strategy (comparison)' : strategyMode === 'multi' ? 'Multi-Strategy Consensus' : 'Legacy Weighted Average'}`,
+  );
   console.log(`   Starting Simulation...`);
 
   // Override loader to use memory cache
@@ -231,7 +227,7 @@ async function runBacktest() {
   };
 
   const header =
-    'Entry Threshold,Stop Loss,Take Profit,Trailing Stop,Max Pos,Size %,ROI,Trades,Win Rate %,Return %,Profit Factor,Sharpe Ratio,Max Drawdown %';
+    'Strategy,Entry Threshold,Stop Loss,Take Profit,Trailing Stop,Max Pos,Size %,ROI,Trades,Win Rate %,Return %,Profit Factor,Sharpe Ratio,Max Drawdown %';
 
   const grid = {
     entryThreshold: runConfig.grid.entryThreshold ?? [0.55],
@@ -252,91 +248,103 @@ async function runBacktest() {
     grid.maxPositionSizePct.length === 1 &&
     grid.roiTable.length === 1;
 
-  // Reset results file for a clean run if single config, otherwise append
-  // Actually, if we are running a new backtest, we probably want to clear previous results unless explicitly appending?
-  // Let's stick to the previous logic: if single run, overwrite. If grid, check if exists.
-  if (isSingleRun) {
-    fs.writeFileSync(runConfig.resultsFile, `${header}\n`);
-  } else if (!fs.existsSync(runConfig.resultsFile)) {
-    fs.writeFileSync(runConfig.resultsFile, `${header}\n`);
-  }
+  fs.writeFileSync(runConfig.resultsFile, `${header}\n`);
 
-  let bestResult: { config: BacktestConfig; metrics: BacktestMetrics } | null = null;
-  const totalCombinations =
-    grid.entryThreshold.length *
-    grid.stopLossPct.length *
-    grid.takeProfitPct.length *
-    grid.trailingStop.length *
-    grid.maxPositions.length *
-    grid.maxPositionSizePct.length *
-    grid.roiTable.length;
+  // Store results for comparison
+  const comparisonResults: { strategy: string; metrics: BacktestMetrics }[] = [];
 
-  let runCount = 0;
+  for (const currentStrategy of strategiesToRun) {
+    const strategyLabel = currentStrategy === 'multi' ? 'Multi-Strategy' : 'Legacy';
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`  ${strategyLabel} Scorer`);
+    console.log(`${'='.repeat(60)}`);
 
-  for (const entryThreshold of grid.entryThreshold) {
-    for (const stopLossPct of grid.stopLossPct) {
-      for (const takeProfitPct of grid.takeProfitPct) {
-        for (const trailingStop of grid.trailingStop) {
-          for (const maxPositions of grid.maxPositions) {
-            for (const maxPositionSizePct of grid.maxPositionSizePct) {
-              for (const roiTable of grid.roiTable) {
-                // Skip invalid combinations if necessary, though current logic handles it
-                // Note: In previous code, we had logic to skip undefined TP if not trailing.
-                // The grid types here assume numbers, so let's check for "undefined" or handling trailing separately if needed.
-                // For now, trailingStop implies we might not use fixed TP, but the grid has TP values.
-                // If the user wants trailing stop ONLY, they might set TP to a very high value or we need logic.
-                // The engine logic usually prioritizes TP if set.
+    let bestResult: { config: BacktestConfig; metrics: BacktestMetrics } | null = null;
+    const totalCombinations =
+      grid.entryThreshold.length *
+      grid.stopLossPct.length *
+      grid.takeProfitPct.length *
+      grid.trailingStop.length *
+      grid.maxPositions.length *
+      grid.maxPositionSizePct.length *
+      grid.roiTable.length;
 
-                runCount++;
-                if (totalCombinations > 1) {
-                  console.log(
-                    `\n▶ Run ${runCount}/${totalCombinations} | Thr: ${entryThreshold} | SL: ${stopLossPct} | TP: ${takeProfitPct} | Tr: ${trailingStop} | Pos: ${maxPositions} | Sz: ${maxPositionSizePct} | ROI: ${roiTable ? 'Yes' : 'No'}`,
-                  );
-                }
+    let runCount = 0;
 
-                const config: BacktestConfig = {
-                  symbols: Array.from(allData.keys()),
-                  startDate: runConfig.startDate,
-                  endDate: runConfig.endDate,
-                  initialCapital: runConfig.initialCapital,
-                  maxPositions,
-                  maxPositionSizePct,
-                  stopLossPct,
-                  takeProfitPct,
-                  trailingStop,
-                  commission: 1.0,
-                  entryThreshold,
-                  slippagePct: 0.001,
-                  spreadBps: 2,
-                  roiTable: roiTable as Record<string, number> | undefined,
-                };
-
-                try {
-                  const engine = await createBacktestEngine(config, dataLoader);
-                  const result = await engine.run();
-
-                  const csvLine = toCsvLine(config, result.metrics);
-                  fs.appendFileSync(runConfig.resultsFile, `${csvLine}\n`);
-
-                  const score = result.metrics.returnPct * (result.metrics.profitFactor || 0);
-                  if (
-                    !bestResult ||
-                    score > bestResult.metrics.returnPct * (bestResult.metrics.profitFactor || 0)
-                  ) {
-                    bestResult = { config, metrics: result.metrics };
-                  }
-
-                  if (isSingleRun) {
-                    printResultTable(result);
-                  } else {
+    for (const entryThreshold of grid.entryThreshold) {
+      for (const stopLossPct of grid.stopLossPct) {
+        for (const takeProfitPct of grid.takeProfitPct) {
+          for (const trailingStop of grid.trailingStop) {
+            for (const maxPositions of grid.maxPositions) {
+              for (const maxPositionSizePct of grid.maxPositionSizePct) {
+                for (const roiTable of grid.roiTable) {
+                  runCount++;
+                  if (totalCombinations > 1) {
                     console.log(
-                      `   Result: ${(result.metrics.returnPct * 100).toFixed(2)}% Return | PF: ${result.metrics.profitFactor?.toFixed(2)}`,
+                      `\n▶ Run ${runCount}/${totalCombinations} | Thr: ${entryThreshold} | SL: ${stopLossPct} | TP: ${takeProfitPct} | Tr: ${trailingStop} | Pos: ${maxPositions} | Sz: ${maxPositionSizePct} | ROI: ${roiTable ? 'Yes' : 'No'}`,
                     );
                   }
-                } catch (error) {
-                  console.log(
-                    `   Failed: ${error instanceof Error ? error.message : String(error)}`,
-                  );
+
+                  const config: BacktestConfig = {
+                    symbols: Array.from(allData.keys()),
+                    startDate: runConfig.startDate,
+                    endDate: runConfig.endDate,
+                    initialCapital: runConfig.initialCapital,
+                    maxPositions,
+                    maxPositionSizePct,
+                    stopLossPct,
+                    takeProfitPct,
+                    trailingStop,
+                    commission: 1.0,
+                    entryThreshold,
+                    slippagePct: 0.001,
+                    spreadBps: 2,
+                    roiTable: roiTable as Record<string, number> | undefined,
+                  };
+
+                  try {
+                    const engine = await createBacktestEngine(config, dataLoader, currentStrategy);
+                    const result = await engine.run();
+
+                    const roiDesc = config.roiTable ? 'Active' : 'None';
+                    const csvLine = [
+                      strategyLabel,
+                      config.entryThreshold,
+                      config.stopLossPct,
+                      config.takeProfitPct ?? 'Trailing',
+                      config.trailingStop,
+                      config.maxPositions,
+                      config.maxPositionSizePct,
+                      roiDesc,
+                      result.metrics.totalTrades,
+                      (result.metrics.winRate * 100).toFixed(2),
+                      (result.metrics.returnPct * 100).toFixed(2),
+                      result.metrics.profitFactor?.toFixed(2) ?? '0.00',
+                      result.metrics.sharpeRatio?.toFixed(2) ?? '0.00',
+                      (result.metrics.maxDrawdownPct * 100).toFixed(2),
+                    ].join(',');
+                    fs.appendFileSync(runConfig.resultsFile, `${csvLine}\n`);
+
+                    const score = result.metrics.returnPct * (result.metrics.profitFactor || 0);
+                    if (
+                      !bestResult ||
+                      score > bestResult.metrics.returnPct * (bestResult.metrics.profitFactor || 0)
+                    ) {
+                      bestResult = { config, metrics: result.metrics };
+                    }
+
+                    if (isSingleRun) {
+                      printResultTable(result);
+                    } else {
+                      console.log(
+                        `   Result: ${(result.metrics.returnPct * 100).toFixed(2)}% Return | PF: ${result.metrics.profitFactor?.toFixed(2)}`,
+                      );
+                    }
+                  } catch (error) {
+                    console.log(
+                      `   Failed: ${error instanceof Error ? error.message : String(error)}`,
+                    );
+                  }
                 }
               }
             }
@@ -344,22 +352,103 @@ async function runBacktest() {
         }
       }
     }
+
+    if (bestResult) {
+      comparisonResults.push({ strategy: strategyLabel, metrics: bestResult.metrics });
+
+      if (!isSingleRun) {
+        console.log(`\n  Best ${strategyLabel}:`);
+        console.log(`  Entry Threshold: ${bestResult.config.entryThreshold}`);
+        console.log(`  Stop Loss: ${(bestResult.config.stopLossPct * 100).toFixed(1)}%`);
+        console.log(
+          `  Take Profit: ${bestResult.config.takeProfitPct ? `${(bestResult.config.takeProfitPct * 100).toFixed(1)}%` : 'Trailing Only'}`,
+        );
+        printResultTable(bestResult);
+      }
+    }
   }
 
-  if (!isSingleRun && bestResult) {
-    console.log('\n🏆 *** BEST CONFIGURATION ***');
-    console.log(`Entry Threshold: ${bestResult.config.entryThreshold}`);
-    console.log(`Stop Loss: ${(bestResult.config.stopLossPct * 100).toFixed(1)}%`);
+  // Print comparison table if running both
+  if (strategiesToRun.length > 1 && comparisonResults.length > 1) {
+    console.log(`\n${'='.repeat(60)}`);
+    console.log('  STRATEGY COMPARISON');
+    console.log('='.repeat(60));
     console.log(
-      `Take Profit: ${bestResult.config.takeProfitPct ? `${(bestResult.config.takeProfitPct * 100).toFixed(1)}%` : 'Trailing Only'}`,
+      `${'Metric'.padEnd(22)} | ${'Legacy'.padStart(12)} | ${'Multi-Strat'.padStart(12)} | ${'Delta'.padStart(10)}`,
     );
-    console.log(`Max Pos: ${bestResult.config.maxPositions}`);
-    console.log(`Size %: ${(bestResult.config.maxPositionSizePct * 100).toFixed(1)}%`);
-    console.log(`ROI Table: ${bestResult.config.roiTable ? 'Yes' : 'No'}`);
-    printResultTable(bestResult);
+    console.log('-'.repeat(62));
+
+    const legacy = comparisonResults.find((r) => r.strategy === 'Legacy')?.metrics;
+    const multi = comparisonResults.find((r) => r.strategy === 'Multi-Strategy')?.metrics;
+    if (legacy && multi) {
+      const rows: [string, string, string, string][] = [
+        [
+          'Return',
+          `${(legacy.returnPct * 100).toFixed(2)}%`,
+          `${(multi.returnPct * 100).toFixed(2)}%`,
+          `${((multi.returnPct - legacy.returnPct) * 100).toFixed(2)}%`,
+        ],
+        [
+          'Win Rate',
+          `${(legacy.winRate * 100).toFixed(2)}%`,
+          `${(multi.winRate * 100).toFixed(2)}%`,
+          `${((multi.winRate - legacy.winRate) * 100).toFixed(2)}%`,
+        ],
+        [
+          'Total Trades',
+          `${legacy.totalTrades}`,
+          `${multi.totalTrades}`,
+          `${multi.totalTrades - legacy.totalTrades}`,
+        ],
+        [
+          'Profit Factor',
+          legacy.profitFactor?.toFixed(2) ?? 'N/A',
+          multi.profitFactor?.toFixed(2) ?? 'N/A',
+          legacy.profitFactor != null && multi.profitFactor != null
+            ? (multi.profitFactor - legacy.profitFactor).toFixed(2)
+            : 'N/A',
+        ],
+        [
+          'Sharpe Ratio',
+          legacy.sharpeRatio?.toFixed(2) ?? 'N/A',
+          multi.sharpeRatio?.toFixed(2) ?? 'N/A',
+          legacy.sharpeRatio != null && multi.sharpeRatio != null
+            ? (multi.sharpeRatio - legacy.sharpeRatio).toFixed(2)
+            : 'N/A',
+        ],
+        [
+          'Max Drawdown',
+          `${(legacy.maxDrawdownPct * 100).toFixed(2)}%`,
+          `${(multi.maxDrawdownPct * 100).toFixed(2)}%`,
+          `${((multi.maxDrawdownPct - legacy.maxDrawdownPct) * 100).toFixed(2)}%`,
+        ],
+        [
+          'Avg Win',
+          legacy.avgWin != null ? `$${legacy.avgWin.toFixed(2)}` : 'N/A',
+          multi.avgWin != null ? `$${multi.avgWin.toFixed(2)}` : 'N/A',
+          legacy.avgWin != null && multi.avgWin != null
+            ? `$${(multi.avgWin - legacy.avgWin).toFixed(2)}`
+            : 'N/A',
+        ],
+        [
+          'Avg Loss',
+          legacy.avgLoss != null ? `$${legacy.avgLoss.toFixed(2)}` : 'N/A',
+          multi.avgLoss != null ? `$${multi.avgLoss.toFixed(2)}` : 'N/A',
+          legacy.avgLoss != null && multi.avgLoss != null
+            ? `$${(multi.avgLoss - legacy.avgLoss).toFixed(2)}`
+            : 'N/A',
+        ],
+      ];
+
+      for (const [label, legacyVal, multiVal, delta] of rows) {
+        console.log(
+          `${label.padEnd(22)} | ${legacyVal.padStart(12)} | ${multiVal.padStart(12)} | ${delta.padStart(10)}`,
+        );
+      }
+    }
   }
 
-  console.log(`\n💾 Results saved to: ${runConfig.resultsFile}`);
+  console.log(`\n Results saved to: ${runConfig.resultsFile}`);
 }
 
 runBacktest();

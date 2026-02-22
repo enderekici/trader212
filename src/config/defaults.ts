@@ -353,10 +353,10 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
   { key: 'ai.temperature', value: '0', category: 'ai', description: 'AI temperature' },
 
   // Risk
-  { key: 'risk.maxPositions', value: '8', category: 'risk', description: 'Max open positions' },
+  { key: 'risk.maxPositions', value: '10', category: 'risk', description: 'Max open positions' },
   {
     key: 'risk.maxPositionSizePct',
-    value: '0.15',
+    value: '0.25',
     category: 'risk',
     description: 'Max position size (% of portfolio)',
   },
@@ -368,9 +368,9 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
   },
   {
     key: 'risk.maxStopLossPct',
-    value: '0.10',
+    value: '0.15',
     category: 'risk',
-    description: 'Max stop-loss (10%)',
+    description: 'Max stop-loss (15%)',
   },
   {
     key: 'risk.maxRiskPerTradePct',
@@ -422,7 +422,7 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
   },
   {
     key: 'risk.defaultStopLossPct',
-    value: '0.04',
+    value: '0.12',
     category: 'risk',
     description: 'Default stop-loss % when ATR unavailable',
   },
@@ -1184,7 +1184,7 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
   // AI — Conviction Gate
   {
     key: 'ai.minConvictionScore',
-    value: '55',
+    value: '65',
     category: 'ai',
     description: 'Min AI conviction to execute a BUY',
   },
@@ -1210,9 +1210,9 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
   },
   {
     key: 'ai.rules.takeProfitPct',
-    value: '0.25',
+    value: '0.20',
     category: 'ai',
-    description: 'Rules engine: take-profit target (25% = backtest winner)',
+    description: 'Rules engine: take-profit target (grid-search best Sharpe)',
   },
   {
     key: 'ai.rules.sellTechMax',

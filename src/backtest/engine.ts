@@ -548,15 +548,25 @@ export class BacktestEngine {
 /**
  * Factory that creates a BacktestEngine with the real scorer loaded.
  * Use this in production; use the constructor directly in tests.
+ *
+ * @param strategy - 'legacy' uses the weighted-average scorer; 'multi' uses the 4-strategy consensus.
  */
 export async function createBacktestEngine(
   config: BacktestConfig,
   dataLoader?: BacktestDataLoader,
+  strategy: 'legacy' | 'multi' = 'legacy',
 ): Promise<BacktestEngine> {
-  const { scoreTechnicals } = await import('../analysis/technical/scorer.js');
+  let scoreFn: ScoreFn;
+  if (strategy === 'multi') {
+    const { scoreMultiStrategy } = await import('../analysis/technical/strategies.js');
+    scoreFn = scoreMultiStrategy;
+  } else {
+    const { scoreTechnicals } = await import('../analysis/technical/scorer.js');
+    scoreFn = scoreTechnicals;
+  }
   return new BacktestEngine({
     config,
-    scoreFn: scoreTechnicals,
+    scoreFn,
     dataLoader,
   });
 }

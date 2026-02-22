@@ -101,7 +101,7 @@ Autonomous AI trading bot for Trading212. ESM TypeScript, Node.js 24+.
   - `src/analysis/` - Analysis engines
     - `analyzer.ts` - Main analysis orchestrator
     - `technical/indicators.ts` - 25+ technical indicators computation
-    - `technical/strategies.ts` - 4 modular strategy scorers for backtesting: scoreMeanReversion(), scoreTrendFollowing(), scoreMomentum(), scoreBreakout() — each returns { strategy, direction, strength, confidence, reasons }
+    - `technical/strategies.ts` - 4 modular strategy scorers for backtesting: scoreMeanReversion(), scoreTrendFollowing(), scoreMomentum(), scoreBreakout() — each returns { strategy, direction, strength, confidence, reasons }. Used by both TS backtest engine and Rust grid search
     - `technical/scorer.ts` - analyzeTechnicals(), scoreTechnicals()
     - `fundamental/scorer.ts` - scoreFundamentals()
     - `sentiment/scorer.ts` - scoreSentiment()
@@ -175,6 +175,14 @@ Autonomous AI trading bot for Trading212. ESM TypeScript, Node.js 24+.
     - `types.ts` - TypeScript types for API responses
 - `data/` - SQLite database (gitignored)
 - `test/` - Vitest tests (94 test files, 3153 tests total)
+- `tools/` - Performance-critical tooling
+  - `tools/grid-search/` - Rust parallel grid search over backtest parameters (101,376 combos in ~9s)
+    - `src/main.rs` - CLI, orchestration, CSV I/O, analysis tables
+    - `src/data.rs` - JSON data loader, common date intersection
+    - `src/indicators.rs` - 28 technical indicators (pure Rust, no dependencies)
+    - `src/candlesticks.rs` - 19 candlestick pattern detections
+    - `src/strategies.rs` - Multi-Strategy (4 strategies, 38 sub-signals) and Legacy scorer
+    - `src/simulation.rs` - Portfolio simulation engine (SoA position tracking)
 
 ## Key Conventions
 - ESM modules with .js import extensions in source files
@@ -212,6 +220,7 @@ Key flows:
 - **Tax-Loss Harvesting**: automatically identifies candidates for tax-loss harvesting; tracks wash sales; supports FIFO/LIFO/HIFO
 - **Trade Journal**: records notes, tags, mood, and lessons for each trade; generates insights on common mistakes and patterns
 - **Backtesting**: full backtesting engine with historical data loader (cacheOnly offline mode), reporting with 6 profitability gates, transaction cost modeling (slippage/spread), and walk-forward out-of-sample validation
+- **Grid Search** (Rust): High-performance parallel grid search at `tools/grid-search/`. Pre-computes score matrices once per strategy, then runs 50,688 parameter combos per strategy in parallel via rayon. Multi-Strategy uses 4 regime-weighted strategies with 38 sub-signals (mean-reversion: RSI, Bollinger, Z-score, Stochastic, Williams %R, Keltner, CMF, candlesticks, VWAP; trend-following: EMA alignment, ADX, ROC, EMA200, volume, Ichimoku, Supertrend, TRIX, market structure; momentum: ROC dual, RSI zones, volume, OBV, MFI, AO, Force Index, Elder Ray, ADL; breakout: Donchian, volume surge, ATR expansion, ADX, BB bandwidth, squeeze, S/R breaks, Ichimoku cloud, Keltner expansion). Best config (Sharpe 1.69): entry 0.3, SL 12%, TP 20%, 10 positions, 25% size
 - **Webhooks**: send trade notifications and alerts to Discord, Slack, or custom endpoints
 - **Market Regime Detection**: identifies bull/bear/sideways market regimes and adjusts strategy parameters accordingly
 - **Performance Attribution**: breaks down returns by alpha, beta, sector contributions, and factor exposures

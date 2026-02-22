@@ -600,3 +600,135 @@ export function scoreBreakout(
 
   return { strategy: 'BREAKOUT', direction, strength, confidence, reasons };
 }
+
+// ---------------------------------------------------------------------------
+// Multi-Strategy Consensus Scorer (for backtesting)
+// ---------------------------------------------------------------------------
+
+/**
+ * Regime-weighted strategy weights based on market conditions.
+ * Detected from price data: volatility percentile + trend strength.
+ */
+function detectRegimeFromCandles(closes: number[], highs: number[], lows: number[]): string {
+  // ADX for trend strength
+  const adx = calcADX(highs, lows, closes);
+  // Volatility percentile from recent ATR vs long-term ATR
+  const shortATR = calcATR(highs, lows, closes, 14);
+  const longATR = calcATR(highs, lows, closes, 50);
+  const atrRatio = shortATR != null && longATR != null && longATR > 0 ? shortATR / longATR : 1;
+
+  // High vol + weak trend = volatile
+  if (atrRatio > 1.3 && (adx == null || adx < 20)) return 'volatile';
+  // Strong trend
+  if (adx != null && adx > 30) {
+    const ema50 = calcEMA(closes, 50);
+    const price = closes[closes.length - 1];
+    if (ema50 != null && price > ema50) return 'trending_up';
+    return 'trending_down';
+  }
+  // Moderate trend
+  if (adx != null && adx > 20) return 'moderate_trend';
+  // Default: range-bound / sideways
+  return 'sideways';
+}
+
+function getRegimeWeights(regime: string): Record<StrategyType, number> {
+  switch (regime) {
+    case 'trending_up':
+      return { TREND_FOLLOWING: 0.4, MOMENTUM: 0.3, BREAKOUT: 0.2, MEAN_REVERSION: 0.1 };
+    case 'trending_down':
+      return { TREND_FOLLOWING: 0.35, MEAN_REVERSION: 0.3, MOMENTUM: 0.2, BREAKOUT: 0.15 };
+    case 'moderate_trend':
+      return { TREND_FOLLOWING: 0.3, MOMENTUM: 0.3, BREAKOUT: 0.2, MEAN_REVERSION: 0.2 };
+    case 'volatile':
+      return { MEAN_REVERSION: 0.35, BREAKOUT: 0.25, MOMENTUM: 0.25, TREND_FOLLOWING: 0.15 };
+    default: // sideways
+      return { MEAN_REVERSION: 0.35, MOMENTUM: 0.25, BREAKOUT: 0.25, TREND_FOLLOWING: 0.15 };
+  }
+}
+
+/**
+ * Multi-strategy consensus score. Runs all 4 strategies, weights them by
+ * detected market regime, and returns a 0-100 score compatible with the
+ * backtest engine's scoreFn interface.
+ *
+ * Score mapping:
+ *   - 2+ LONG strategies: 50 + weighted strength * 50 → 50-100
+ *   - 1 high-conviction LONG: 50 + strength * 40 → 50-90
+ *   - NEUTRAL / mixed: 40-60
+ *   - SHORT signals: 0-40
+ */
+export function scoreMultiStrategy(
+  candles: {
+    date: string;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    volume: number;
+  }[],
+): number {
+  if (candles.length < 50) return 50; // insufficient data → neutral
+
+  const closes = candles.map((c) => c.close);
+  const highs = candles.map((c) => c.high);
+  const lows = candles.map((c) => c.low);
+  const volumes = candles.map((c) => c.volume);
+
+  // Run all 4 strategies
+  const mr = scoreMeanReversion(closes, highs, lows, volumes);
+  const tf = scoreTrendFollowing(closes, highs, lows, volumes);
+  const mo = scoreMomentum(closes, highs, lows, volumes);
+  const bo = scoreBreakout(closes, highs, lows, volumes);
+
+  const strategies = [mr, tf, mo, bo];
+
+  // Detect regime and get weights
+  const regime = detectRegimeFromCandles(closes, highs, lows);
+  const weights = getRegimeWeights(regime);
+
+  // Count agreements
+  const longStrategies = strategies.filter((s) => s.direction === 'LONG');
+  const shortStrategies = strategies.filter((s) => s.direction === 'SHORT');
+
+  // Weighted strength calculation
+  let weightedLong = 0;
+  let weightedShort = 0;
+  for (const s of strategies) {
+    const w = weights[s.strategy];
+    if (s.direction === 'LONG') weightedLong += s.strength * s.confidence * w;
+    else if (s.direction === 'SHORT') weightedShort += s.strength * s.confidence * w;
+  }
+
+  // Multi-strategy agreement gate
+  if (longStrategies.length >= 2) {
+    // Strong LONG consensus: 55-95 range
+    return Math.round(55 + clamp(weightedLong * 2) * 40);
+  }
+
+  if (shortStrategies.length >= 2) {
+    // Strong SHORT consensus: 5-40 range
+    return Math.round(40 - clamp(weightedShort * 2) * 35);
+  }
+
+  // Single high-conviction strategy
+  if (
+    longStrategies.length === 1 &&
+    longStrategies[0].strength > 0.35 &&
+    longStrategies[0].confidence > 0.4
+  ) {
+    return Math.round(50 + clamp(weightedLong * 1.5) * 35);
+  }
+
+  if (
+    shortStrategies.length === 1 &&
+    shortStrategies[0].strength > 0.35 &&
+    shortStrategies[0].confidence > 0.4
+  ) {
+    return Math.round(45 - clamp(weightedShort * 1.5) * 30);
+  }
+
+  // Neutral — slight bias from weighted scores
+  const netScore = weightedLong - weightedShort;
+  return Math.round(50 + clamp(netScore * 10, -10, 10));
+}
