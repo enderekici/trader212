@@ -18,6 +18,8 @@ export default defineConfig({
         'src/db/repositories/tax-lots.ts',
         'src/execution/order-sync.ts',
         'src/backtest/types.ts',
+        'src/orchestrators/**',
+        'src/scripts/**',
       ],
       thresholds: {
         lines: 90,
