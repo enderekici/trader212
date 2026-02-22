@@ -21,6 +21,8 @@ vi.mock('../../src/db/repositories/orders.js', () => ({
 
 vi.mock('drizzle-orm', () => ({
   eq: vi.fn(),
+  and: vi.fn((...args: unknown[]) => ({ args, type: 'and' })),
+  sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({ strings, values, type: 'sql' }),
 }));
 
 vi.mock('../../src/utils/helpers.js', () => ({
@@ -74,6 +76,7 @@ describe('PartialExitManager', () => {
     dcaCount: 0,
     totalInvested: null,
     partialExitCount: 0,
+    version: 1,
     updatedAt: '2024-01-01T10:00:00Z',
     ...overrides,
   });
@@ -91,7 +94,7 @@ describe('PartialExitManager', () => {
       update: vi.fn().mockReturnThis(),
       set: vi.fn().mockReturnThis(),
       delete: vi.fn().mockReturnThis(),
-      run: vi.fn(),
+      run: vi.fn().mockReturnValue({ changes: 1 }),
       transaction: vi.fn((fn) => fn(mockDb)),
       values: vi.fn().mockReturnThis(),
     };

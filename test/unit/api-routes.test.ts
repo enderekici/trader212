@@ -88,7 +88,7 @@ const mockConfigManager = {
     };
     return defaults[key] ?? null;
   }),
-  set: vi.fn(),
+  set: vi.fn().mockResolvedValue(undefined),
   getAll: vi.fn(),
   getAllRaw: vi.fn((): Array<{ key: string; value: string; category: string; description: string | null }> => []),
   getByCategory: vi.fn(() => ({})),
@@ -471,6 +471,9 @@ describe('api/routes', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    // Restore default mockResolvedValue for async set() — clearAllMocks only
+    // clears call history, not implementations set by mockRejectedValue in prior tests.
+    mockConfigManager.set.mockResolvedValue(undefined);
     routes = await getRouteHandlers();
   });
 
@@ -1953,7 +1956,7 @@ describe('api/routes', () => {
       routes = await getRouteHandlers();
       const handler = findHandler(routes, 'post', '/api/pairlist/static');
       const res = mockRes();
-      handler(mockReq({ body: { symbol: 'aapl' } }), res);
+      await handler(mockReq({ body: { symbol: 'aapl' } }), res);
 
       expect(mockConfigManager.set).toHaveBeenCalledWith('pairlist.staticSymbols', ['MSFT', 'AAPL']);
       expect(res.json).toHaveBeenCalledWith({ symbols: ['MSFT', 'AAPL'] });
@@ -1968,34 +1971,34 @@ describe('api/routes', () => {
       routes = await getRouteHandlers();
       const handler = findHandler(routes, 'post', '/api/pairlist/static');
       const res = mockRes();
-      handler(mockReq({ body: { symbol: 'AAPL' } }), res);
+      await handler(mockReq({ body: { symbol: 'AAPL' } }), res);
 
       expect(mockConfigManager.set).not.toHaveBeenCalled();
       expect(res.json).toHaveBeenCalledWith({ symbols: ['AAPL'] });
     });
 
-    it('returns 400 when symbol is missing', () => {
+    it('returns 400 when symbol is missing', async () => {
       const handler = findHandler(routes, 'post', '/api/pairlist/static');
       const res = mockRes();
-      handler(mockReq({ body: {} }), res);
+      await handler(mockReq({ body: {} }), res);
 
       expect(res.status).toHaveBeenCalledWith(400);
     });
 
-    it('returns 400 when symbol is not a string', () => {
+    it('returns 400 when symbol is not a string', async () => {
       const handler = findHandler(routes, 'post', '/api/pairlist/static');
       const res = mockRes();
-      handler(mockReq({ body: { symbol: 123 } }), res);
+      await handler(mockReq({ body: { symbol: 123 } }), res);
 
       expect(res.status).toHaveBeenCalledWith(400);
     });
 
-    it('handles errors', () => {
+    it('handles errors', async () => {
       mockConfigManager.get.mockImplementation(() => { throw new Error('fail'); });
 
       const handler = findHandler(routes, 'post', '/api/pairlist/static');
       const res = mockRes();
-      handler(mockReq({ body: { symbol: 'AAPL' } }), res);
+      await handler(mockReq({ body: { symbol: 'AAPL' } }), res);
 
       expect(res.status).toHaveBeenCalledWith(500);
     });
@@ -2011,18 +2014,18 @@ describe('api/routes', () => {
       routes = await getRouteHandlers();
       const handler = findHandler(routes, 'delete', '/api/pairlist/static/:symbol');
       const res = mockRes();
-      handler(mockReq({ params: { symbol: 'aapl' } }), res);
+      await handler(mockReq({ params: { symbol: 'aapl' } }), res);
 
       expect(mockConfigManager.set).toHaveBeenCalledWith('pairlist.staticSymbols', ['MSFT']);
       expect(res.json).toHaveBeenCalledWith({ symbols: ['MSFT'] });
     });
 
-    it('handles errors', () => {
+    it('handles errors', async () => {
       mockConfigManager.get.mockImplementation(() => { throw new Error('fail'); });
 
       const handler = findHandler(routes, 'delete', '/api/pairlist/static/:symbol');
       const res = mockRes();
-      handler(mockReq({ params: { symbol: 'AAPL' } }), res);
+      await handler(mockReq({ params: { symbol: 'AAPL' } }), res);
 
       expect(res.status).toHaveBeenCalledWith(500);
     });

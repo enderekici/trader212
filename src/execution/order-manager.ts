@@ -6,6 +6,7 @@ import { configManager } from '../config/manager.js';
 import { getDb } from '../db/index.js';
 import { createOrder, updateOrderStatus } from '../db/repositories/orders.js';
 import { positions, trades } from '../db/schema.js';
+import { getAuditLogger } from '../monitoring/audit-log.js';
 import { sleep } from '../utils/helpers.js';
 import { createLogger } from '../utils/logger.js';
 
@@ -248,6 +249,7 @@ export class OrderManager {
 
       // Place stop-loss order (GTC so it persists across trading sessions)
       let stopOrderId: string | undefined;
+      let stopLossFailed = false;
       try {
         // Track the stop-loss order
         const slOrderId = createOrder({
@@ -278,6 +280,7 @@ export class OrderManager {
           'Stop-loss order placed',
         );
       } catch (err) {
+        stopLossFailed = true;
         log.error(
           { symbol: params.symbol, err },
           'Failed to place stop-loss — closing unprotected position',
@@ -295,6 +298,23 @@ export class OrderManager {
             'FATAL: Cannot close unprotected position — MANUAL INTERVENTION REQUIRED',
           );
         }
+      }
+
+      // If stop-loss placement failed, the position was emergency-closed on the exchange.
+      // Skip DB insert to prevent a phantom position record with no exchange counterpart.
+      if (stopLossFailed) {
+        const audit = getAuditLogger();
+        audit.logRisk(
+          `Phantom position prevented for ${params.symbol}: stop-loss placement failed, position emergency-closed on exchange`,
+          { symbol: params.symbol, orderId: String(order.id), fillPrice },
+          'error',
+        );
+        return {
+          success: false,
+          orderId: String(order.id),
+          localOrderId,
+          error: `Stop-loss placement failed for ${params.symbol} — position emergency-closed, no DB record created`,
+        };
       }
 
       // Place take-profit limit order (GTC) -- only if takeProfitPct is set
@@ -336,10 +356,23 @@ export class OrderManager {
         }
       }
 
-      // Record trade and position atomically
+      // Record trade and position atomically with duplicate guard inside the transaction
       const buySlippage = (fillPrice - params.price) / params.price;
       let tradeRowId: number | bigint = 0;
+      let duplicateAtInsert = false;
       db.transaction((tx) => {
+        // Second duplicate check inside transaction to prevent race conditions
+        // where two concurrent buys for the same symbol both pass the pre-check
+        const existingPosition = tx
+          .select()
+          .from(positions)
+          .where(eq(positions.symbol, params.symbol))
+          .get();
+        if (existingPosition) {
+          duplicateAtInsert = true;
+          return;
+        }
+
         const trade = tx
           .insert(trades)
           .values({
@@ -382,6 +415,57 @@ export class OrderManager {
           })
           .run();
       });
+
+      // Handle duplicate detected at insert time: close the exchange position we just opened
+      if (duplicateAtInsert) {
+        log.warn(
+          { symbol: params.symbol, orderId: order.id },
+          'Duplicate position detected at insert time — attempting to close exchange order',
+        );
+        const audit = getAuditLogger();
+        audit.logRisk(
+          `Duplicate position race condition detected for ${params.symbol}: order filled on exchange but position already exists in DB`,
+          { symbol: params.symbol, orderId: String(order.id), fillPrice },
+          'error',
+        );
+        try {
+          await client.placeMarketOrder({
+            ticker: params.t212Ticker,
+            quantity: params.shares,
+            timeValidity: 'DAY',
+          });
+          log.warn(
+            { symbol: params.symbol },
+            'Duplicate position closed on exchange after race condition',
+          );
+        } catch (closeErr) {
+          log.fatal(
+            { symbol: params.symbol, closeErr },
+            'FATAL: Cannot close duplicate position on exchange — MANUAL INTERVENTION REQUIRED',
+          );
+        }
+        // Cancel the stop-loss and take-profit orders we placed for the duplicate
+        if (stopOrderId) {
+          try {
+            await client.cancelOrder(Number(stopOrderId));
+          } catch {
+            /* best effort */
+          }
+        }
+        if (takeProfitOrderId) {
+          try {
+            await client.cancelOrder(Number(takeProfitOrderId));
+          } catch {
+            /* best effort */
+          }
+        }
+        return {
+          success: false,
+          orderId: String(order.id),
+          localOrderId,
+          error: `Duplicate position detected for ${params.symbol} at insert time — exchange position closed`,
+        };
+      }
 
       log.info(
         { symbol: params.symbol, fillPrice, shares: params.shares, orderId: order.id },

@@ -844,7 +844,7 @@ export function createRouter(): Router {
     }
   });
 
-  router.post('/api/pairlist/static', (req, res) => {
+  router.post('/api/pairlist/static', async (req, res) => {
     try {
       const parsed = staticSymbolSchema.safeParse(req.body);
       if (!parsed.success) {
@@ -856,7 +856,7 @@ export function createRouter(): Router {
       const upper = symbol.toUpperCase();
       if (!current.includes(upper)) {
         current.push(upper);
-        configManager.set('pairlist.staticSymbols', current);
+        await configManager.set('pairlist.staticSymbols', current);
         configManager.invalidateCache('pairlist.staticSymbols');
       }
       const audit = getAuditLogger();
@@ -868,12 +868,12 @@ export function createRouter(): Router {
     }
   });
 
-  router.delete('/api/pairlist/static/:symbol', (req, res) => {
+  router.delete('/api/pairlist/static/:symbol', async (req, res) => {
     try {
       const upper = req.params.symbol.toUpperCase();
       const current = configManager.get<string[]>('pairlist.staticSymbols');
       const updated = current.filter((s) => s !== upper);
-      configManager.set('pairlist.staticSymbols', updated);
+      await configManager.set('pairlist.staticSymbols', updated);
       configManager.invalidateCache('pairlist.staticSymbols');
       const audit = getAuditLogger();
       audit.logControl(`Removed ${upper} from static pairlist`, { symbol: upper });

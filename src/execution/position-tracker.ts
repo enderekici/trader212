@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import type { Trading212Client } from '../api/trading212/client.js';
 import { configManager } from '../config/manager.js';
 import { getDb } from '../db/index.js';
@@ -24,29 +24,59 @@ export class PositionTracker {
     const yahoo = new YahooFinanceClient();
     const now = new Date().toISOString();
 
+    // Fetch all quotes concurrently instead of sequentially (N+1 fix)
+    const quoteResults = await Promise.allSettled(
+      allPositions.map((pos) => yahoo.getQuote(pos.symbol)),
+    );
+
     let updated = 0;
-    for (const pos of allPositions) {
+    for (let i = 0; i < allPositions.length; i++) {
+      const pos = allPositions[i];
+      const result = quoteResults[i];
+
+      if (result.status === 'rejected') {
+        log.warn({ symbol: pos.symbol, err: result.reason }, 'Failed to fetch quote');
+        continue;
+      }
+
+      const quote = result.value;
+      if (!quote) continue;
+
+      // Guard against division by zero when entryPrice is 0
+      if (pos.entryPrice === 0) {
+        log.warn({ symbol: pos.symbol }, 'Skipping P&L calculation: entryPrice is 0');
+        continue;
+      }
+
+      const pnl = (quote.price - pos.entryPrice) * pos.shares;
+      const pnlPct = (quote.price - pos.entryPrice) / pos.entryPrice;
+
       try {
-        const quote = await yahoo.getQuote(pos.symbol);
-        if (!quote) continue;
-
-        const pnl = (quote.price - pos.entryPrice) * pos.shares;
-        const pnlPct = (quote.price - pos.entryPrice) / pos.entryPrice;
-
-        db.update(positions)
+        const updateResult = db
+          .update(positions)
           .set({
             currentPrice: quote.price,
             pnl,
             pnlPct,
+            version: sql`version + 1`,
             updatedAt: now,
           })
           .where(eq(positions.symbol, pos.symbol))
           .run();
 
-        updated++;
+        if (updateResult.changes === 0) {
+          log.warn(
+            { symbol: pos.symbol },
+            'Position not found during price update (may have been closed)',
+          );
+          continue;
+        }
       } catch (err) {
         log.error({ symbol: pos.symbol, err }, 'Failed to update position price');
+        continue;
       }
+
+      updated++;
     }
 
     log.info({ totalPositions: allPositions.length, updated }, 'Positions updated');
@@ -121,6 +151,7 @@ export class PositionTracker {
             db.update(positions)
               .set({
                 shares: t212Pos.quantity,
+                version: sql`version + 1`,
                 updatedAt: new Date().toISOString(),
               })
               .where(eq(positions.symbol, dbPos.symbol))
@@ -160,6 +191,7 @@ export class PositionTracker {
         db.update(positions)
           .set({
             trailingStop: newTrailingStop,
+            version: sql`version + 1`,
             updatedAt: new Date().toISOString(),
           })
           .where(eq(positions.symbol, pos.symbol))

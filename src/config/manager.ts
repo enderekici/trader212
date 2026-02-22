@@ -157,8 +157,9 @@ export class ConfigManager {
     // Try to parse as JSON (handles numbers, booleans, arrays, objects)
     try {
       return JSON.parse(envValue);
-    } catch {
-      // If not valid JSON, return as string
+    } catch (err) {
+      // If not valid JSON, return as string (this is expected for plain string values)
+      log.debug({ envName, err }, 'Env override is not valid JSON, using as raw string');
       return envValue;
     }
   }

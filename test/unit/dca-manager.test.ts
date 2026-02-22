@@ -23,6 +23,8 @@ vi.mock('../../src/utils/helpers.js', () => ({
 
 vi.mock('drizzle-orm', () => ({
   eq: vi.fn((field, value) => ({ field, value, type: 'eq' })),
+  and: vi.fn((...args: unknown[]) => ({ args, type: 'and' })),
+  sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({ strings, values, type: 'sql' }),
 }));
 
 let mockDbInstance: any;
@@ -62,7 +64,7 @@ describe('DCAManager', () => {
       update: vi.fn().mockReturnThis(),
       set: vi.fn().mockReturnThis(),
       values: vi.fn().mockReturnThis(),
-      run: vi.fn().mockReturnValue({ lastInsertRowid: 1 }),
+      run: vi.fn().mockReturnValue({ lastInsertRowid: 1, changes: 1 }),
       transaction: vi.fn(function (callback) {
         return callback(this);
       }),
@@ -512,6 +514,7 @@ describe('DCAManager', () => {
         entryTime: new Date().toISOString(),
         dcaCount: 0,
         totalInvested: 1500,
+        version: 1,
       };
 
       mockDbInstance.get.mockReturnValue(position);
@@ -543,6 +546,7 @@ describe('DCAManager', () => {
         entryTime: new Date().toISOString(),
         dcaCount: 0,
         totalInvested: 1500,
+        version: 1,
       };
 
       mockDbInstance.get.mockReturnValue(position);
@@ -571,6 +575,7 @@ describe('DCAManager', () => {
         entryTime: new Date().toISOString(),
         dcaCount: 1,
         totalInvested: 2900,
+        version: 1,
       };
 
       mockDbInstance.get.mockReturnValue(position);
@@ -594,6 +599,7 @@ describe('DCAManager', () => {
         entryTime: new Date().toISOString(),
         dcaCount: 0,
         totalInvested: 1500,
+        version: 1,
       };
 
       mockDbInstance.get.mockReturnValue(position);
@@ -619,6 +625,7 @@ describe('DCAManager', () => {
         entryTime: new Date().toISOString(),
         dcaCount: 0,
         totalInvested: 1500,
+        version: 1,
       };
 
       mockDbInstance.get.mockReturnValue(position);
@@ -643,6 +650,7 @@ describe('DCAManager', () => {
         entryTime: new Date().toISOString(),
         dcaCount: 0,
         totalInvested: null,
+        version: 1,
       };
 
       mockDbInstance.get.mockReturnValue(position);
@@ -667,6 +675,7 @@ describe('DCAManager', () => {
         entryTime: new Date().toISOString(),
         dcaCount: null, // null → ?? 0 → dcaRound = 1
         totalInvested: 1500,
+        version: 1,
       };
 
       mockDbInstance.get.mockReturnValue(position);
@@ -720,6 +729,7 @@ describe('DCAManager', () => {
         entryTime: new Date().toISOString(),
         dcaCount: 0,
         totalInvested: 1500,
+        version: 1,
       };
       mockDbInstance.get.mockReturnValue(position);
 
@@ -764,6 +774,7 @@ describe('DCAManager', () => {
         entryTime: new Date().toISOString(),
         dcaCount: 0,
         totalInvested: null,
+        version: 1,
       };
       mockDbInstance.get.mockReturnValue(position);
 
@@ -926,6 +937,7 @@ describe('DCAManager', () => {
         entryTime: new Date().toISOString(),
         dcaCount: 0,
         totalInvested: 1500,
+        version: 1,
       };
       mockDbInstance.get.mockReturnValue(position);
 

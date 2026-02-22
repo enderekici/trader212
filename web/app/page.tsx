@@ -19,6 +19,7 @@ import type {
   TradesResponse,
 } from '@/lib/types';
 import { useWebSocket } from '@/lib/websocket';
+import { useToast } from '@/lib/toast-context';
 import { StatusBadge } from '@/components/status-badge';
 import { PnlDisplay } from '@/components/pnl-display';
 import { StockChart } from '@/components/stock-chart';
@@ -51,6 +52,8 @@ export default function OverviewPage() {
     'position_update',
   ]);
 
+  const { addToast } = useToast();
+
   // Debounce WS-triggered portfolio refresh (max once per 2s)
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => {
@@ -69,12 +72,19 @@ export default function OverviewPage() {
 
   async function toggleBot() {
     if (!status) return;
-    if (status.status === 'running') {
-      await api.pause();
-    } else {
-      await api.resume();
+    try {
+      if (status.status === 'running') {
+        await api.pause();
+        addToast('Bot paused', 'success');
+      } else {
+        await api.resume();
+        addToast('Bot resumed', 'success');
+      }
+      mutateStatus();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to toggle bot status';
+      addToast(message, 'error');
     }
-    mutateStatus();
   }
 
   return (
@@ -102,8 +112,9 @@ export default function OverviewPage() {
               <button
                 type="button"
                 onClick={toggleBot}
+                aria-label={status.status === 'running' ? 'Pause bot' : 'Resume bot'}
                 className={cn(
-                  'flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+                  'flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent',
                   status.status === 'running'
                     ? 'bg-amber-500/10 text-amber-500 hover:bg-amber-500/20'
                     : 'bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20',
@@ -111,11 +122,11 @@ export default function OverviewPage() {
               >
                 {status.status === 'running' ? (
                   <>
-                    <Pause className="h-4 w-4" /> Pause
+                    <Pause className="h-4 w-4" aria-hidden="true" /> Pause
                   </>
                 ) : (
                   <>
-                    <Play className="h-4 w-4" /> Resume
+                    <Play className="h-4 w-4" aria-hidden="true" /> Resume
                   </>
                 )}
               </button>

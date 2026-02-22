@@ -148,4 +148,32 @@ describe('authMiddleware', () => {
 
     expect(next).toHaveBeenCalled();
   });
+
+  it('rejects token of different length (timing-safe length check)', () => {
+    process.env.API_SECRET_KEY = 'my-secret';
+    const req = mockReq({ headers: { authorization: 'Bearer short' } });
+    const res = mockRes();
+    const next = vi.fn();
+
+    authMiddleware(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(res.json).toHaveBeenCalledWith({ error: 'Unauthorized: invalid token' });
+  });
+
+  it('rejects token of same length but wrong value (timing-safe comparison)', () => {
+    process.env.API_SECRET_KEY = 'my-secret';
+    // Same length (9 chars) but different content
+    const req = mockReq({ headers: { authorization: 'Bearer my-secreX' } });
+    const res = mockRes();
+    const next = vi.fn();
+
+    authMiddleware(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(res.json).toHaveBeenCalledWith({ error: 'Unauthorized: invalid token' });
+  });
+
 });

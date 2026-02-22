@@ -17,7 +17,22 @@ vi.mock('../../src/config/manager.js', () => ({
 
 vi.mock('drizzle-orm', () => ({
   eq: vi.fn((_col: unknown, _val: unknown) => 'eq_condition'),
+  sql: (strings: TemplateStringsArray, ..._values: unknown[]) => ({ strings, type: 'sql' }),
 }));
+
+vi.mock('../../src/db/repositories/positions.js', () => {
+  class StaleVersionError extends Error {
+    readonly symbol: string;
+    readonly expectedVersion: number;
+    constructor(symbol: string, expectedVersion: number) {
+      super(`Stale version for position ${symbol}: expected version ${expectedVersion}`);
+      this.name = 'StaleVersionError';
+      this.symbol = symbol;
+      this.expectedVersion = expectedVersion;
+    }
+  }
+  return { StaleVersionError };
+});
 
 // DB mock
 const mockDbRun = vi.fn().mockReturnValue({ lastInsertRowid: 1n, changes: 1 });
@@ -126,6 +141,77 @@ describe('PositionTracker', () => {
       mockGetQuote.mockRejectedValueOnce(new Error('API down'));
 
       await expect(tracker.updatePositions()).resolves.not.toThrow();
+    });
+
+    it('fetches all quotes concurrently via Promise.allSettled', async () => {
+      mockDbAll.mockReturnValueOnce([
+        { symbol: 'AAPL', entryPrice: 150, shares: 10 },
+        { symbol: 'GOOG', entryPrice: 100, shares: 5 },
+        { symbol: 'MSFT', entryPrice: 300, shares: 3 },
+      ]);
+      mockGetQuote
+        .mockResolvedValueOnce({ price: 160 })
+        .mockResolvedValueOnce({ price: 110 })
+        .mockResolvedValueOnce({ price: 320 });
+
+      await tracker.updatePositions();
+
+      // All three quotes should be requested
+      expect(mockGetQuote).toHaveBeenCalledTimes(3);
+      expect(mockGetQuote).toHaveBeenCalledWith('AAPL');
+      expect(mockGetQuote).toHaveBeenCalledWith('GOOG');
+      expect(mockGetQuote).toHaveBeenCalledWith('MSFT');
+      // All three DB updates should happen
+      expect(mockDbRun).toHaveBeenCalledTimes(3);
+    });
+
+    it('continues updating other positions when one quote fetch fails', async () => {
+      mockDbAll.mockReturnValueOnce([
+        { symbol: 'AAPL', entryPrice: 150, shares: 10 },
+        { symbol: 'GOOG', entryPrice: 100, shares: 5 },
+        { symbol: 'MSFT', entryPrice: 300, shares: 3 },
+      ]);
+      mockGetQuote
+        .mockResolvedValueOnce({ price: 160 })  // AAPL succeeds
+        .mockRejectedValueOnce(new Error('API down'))  // GOOG fails
+        .mockResolvedValueOnce({ price: 320 });  // MSFT succeeds
+
+      await tracker.updatePositions();
+
+      // All three quotes requested concurrently
+      expect(mockGetQuote).toHaveBeenCalledTimes(3);
+      // Only AAPL and MSFT should be updated in DB (GOOG failed)
+      expect(mockDbRun).toHaveBeenCalledTimes(2);
+    });
+
+    it('skips P&L calculation when entryPrice is 0 to avoid division by zero', async () => {
+      mockDbAll.mockReturnValueOnce([
+        { symbol: 'AAPL', entryPrice: 0, shares: 10 },
+      ]);
+      mockGetQuote.mockResolvedValueOnce({ price: 160 });
+
+      await tracker.updatePositions();
+
+      // Quote is fetched but DB update is skipped due to entryPrice === 0
+      expect(mockGetQuote).toHaveBeenCalledTimes(1);
+      expect(mockDbRun).not.toHaveBeenCalled();
+    });
+
+    it('updates valid positions even when some have entryPrice 0', async () => {
+      mockDbAll.mockReturnValueOnce([
+        { symbol: 'ZERO', entryPrice: 0, shares: 10 },
+        { symbol: 'AAPL', entryPrice: 150, shares: 10 },
+      ]);
+      mockGetQuote
+        .mockResolvedValueOnce({ price: 50 })
+        .mockResolvedValueOnce({ price: 160 });
+
+      await tracker.updatePositions();
+
+      // Both quotes fetched concurrently
+      expect(mockGetQuote).toHaveBeenCalledTimes(2);
+      // Only AAPL should be updated (ZERO skipped due to entryPrice === 0)
+      expect(mockDbRun).toHaveBeenCalledTimes(1);
     });
   });
 

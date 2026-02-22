@@ -2,13 +2,7 @@ import 'dotenv/config';
 
 import { and, desc, eq, gte, isNotNull } from 'drizzle-orm';
 import pLimit from 'p-limit';
-import {
-  type AIAgent,
-  type AIContext,
-  type AIDecision,
-  createAIAgent,
-  getActiveModelName,
-} from './ai/agent.js';
+import { type AIAgent, createAIAgent, getActiveModelName } from './ai/agent.js';
 import { MarketResearcher } from './ai/market-research.js';
 import { getAISelfImprovement } from './ai/self-improvement.js';
 import { CorrelationAnalyzer } from './analysis/correlation.js';
@@ -20,38 +14,35 @@ import { analyzeTechnicals } from './analysis/technical/scorer.js';
 import { registerBotCallbacks } from './api/routes.js';
 import { ApiServer } from './api/server.js';
 import { Trading212Client } from './api/trading212/client.js';
-import { getWebhookManager } from './api/webhooks.js';
 import type { WebSocketManager } from './api/websocket.js';
 import { minutesToWeekdayCron, Scheduler, timeToCron } from './bot/scheduler.js';
 import { configManager } from './config/manager.js';
 import { getStrategyProfileManager } from './config/strategy-profiles.js';
-import { DataAggregator, type StockData } from './data/data-aggregator.js';
+import { DataAggregator } from './data/data-aggregator.js';
 import { FinnhubClient } from './data/finnhub.js';
 import { MarketauxClient } from './data/marketaux.js';
 import { PriceStreamer } from './data/price-streamer.js';
-import { getSocialSentimentAnalyzer } from './data/social-sentiment.js';
 import { TickerMapper } from './data/ticker-mapper.js';
 import { YahooFinanceClient } from './data/yahoo-finance.js';
 import { getDb, initDatabase } from './db/index.js';
 import * as schema from './db/schema.js';
 import { ApprovalManager } from './execution/approval-manager.js';
 import { getConditionalOrderManager } from './execution/conditional-orders.js';
-import { getDCAManager } from './execution/dca-manager.js';
-import { type BuyParams, type CloseParams, OrderManager } from './execution/order-manager.js';
+import { OrderManager } from './execution/order-manager.js';
 import { OrderReplacer } from './execution/order-replacer.js';
 import { getPairLockManager } from './execution/pair-locks.js';
 import { getPartialExitManager } from './execution/partial-exit-manager.js';
 import { PositionTracker } from './execution/position-tracker.js';
-import { getProtectionManager } from './execution/protections.js';
-import { type PortfolioState, RiskGuard, type TradeProposal } from './execution/risk-guard.js';
+import { type PortfolioState, RiskGuard } from './execution/risk-guard.js';
 import { TradePlanner } from './execution/trade-planner.js';
 import { getAuditLogger } from './monitoring/audit-log.js';
 import { ModelTracker } from './monitoring/model-tracker.js';
 import { PerformanceTracker } from './monitoring/performance.js';
 import { getReportGenerator } from './monitoring/report-generator.js';
-import { getTaxTracker } from './monitoring/tax-tracker.js';
 import { TelegramNotifier } from './monitoring/telegram.js';
-import { getTradeJournalManager } from './monitoring/trade-journal.js';
+import { AnalysisOrchestrator } from './orchestrators/analysis.js';
+import { ExecutionOrchestrator } from './orchestrators/execution.js';
+import { PositionOrchestrator } from './orchestrators/positions.js';
 import type { StockInfo } from './pairlist/filters.js';
 import { createPairlistPipeline } from './pairlist/index.js';
 import type { PairlistPipeline } from './pairlist/pipeline.js';
@@ -96,6 +87,11 @@ class TradingBot {
   private activeStocks: StockInfo[] = [];
   private lastKnownPortfolio: { cash: number; value: number; timestamp: string } | null = null;
   private lossCooldownUntil: Date | null = null;
+
+  // Orchestrators
+  private analysisOrchestrator!: AnalysisOrchestrator;
+  private executionOrchestrator!: ExecutionOrchestrator;
+  private positionOrchestrator!: PositionOrchestrator;
 
   async start(): Promise<void> {
     log.info('Starting Trading Bot...');
@@ -307,6 +303,40 @@ class TradingBot {
       this.wsManager.broadcast('price_update', update);
     });
 
+    // 10i. Create orchestrators
+    this.analysisOrchestrator = new AnalysisOrchestrator({
+      dataAggregator: this.dataAggregator,
+      aiAgent: this.aiAgent,
+      correlationAnalyzer: this.correlationAnalyzer,
+      pairlistPipeline: this.pairlistPipeline,
+      tickerMapper: this.tickerMapper,
+      wsManager: this.wsManager,
+    });
+
+    this.executionOrchestrator = new ExecutionOrchestrator({
+      orderManager: this.orderManager,
+      riskGuard: this.riskGuard,
+      tradePlanner: this.tradePlanner,
+      approvalManager: this.approvalManager,
+      modelTracker: this.modelTracker,
+      correlationAnalyzer: this.correlationAnalyzer,
+      telegram: this.telegram,
+      wsManager: this.wsManager,
+      getPortfolioState: () => this.getPortfolioState(),
+      getLossCooldownUntil: () => this.lossCooldownUntil,
+    });
+
+    this.positionOrchestrator = new PositionOrchestrator({
+      orderManager: this.orderManager,
+      positionTracker: this.positionTracker,
+      orderReplacer: this.orderReplacer,
+      correlationAnalyzer: this.correlationAnalyzer,
+      telegram: this.telegram,
+      wsManager: this.wsManager,
+      t212Client: this.t212Client,
+      getPortfolioState: () => this.getPortfolioState(),
+    });
+
     // 12b. Register bot callbacks for API control endpoints
     registerBotCallbacks({
       getStatus: () => ({ paused: this.paused, startedAt: this.startedAt }),
@@ -429,14 +459,14 @@ class TradingBot {
     this.scheduler.registerJob(
       'positionMonitor',
       minutesToWeekdayCron(positionMonitorMinutes),
-      () => this.monitorPositions(),
+      () => this.positionOrchestrator.monitorPositions(),
       true,
     );
 
     this.scheduler.registerJob(
       't212Sync',
       minutesToWeekdayCron(t212SyncMinutes),
-      () => this.syncPositions(),
+      () => this.positionOrchestrator.syncPositions(),
       true,
     );
 
@@ -583,21 +613,7 @@ class TradingBot {
   // ─── Core Loops ────────────────────────────────────────
 
   private async refreshPairlist(): Promise<void> {
-    try {
-      // Retry loading ticker mapper if not loaded yet
-      if (!this.tickerMapper.isLoaded()) {
-        log.info('Ticker mapper not loaded, attempting to load...');
-        await this.tickerMapper.load();
-      }
-      const allStocks = this.tickerMapper.getUSEquities();
-      this.activeStocks = await this.pairlistPipeline.run(allStocks);
-      log.info({ count: this.activeStocks.length }, 'Pairlist refreshed');
-      this.wsManager.broadcast('pairlist_updated', {
-        symbols: this.activeStocks.map((s) => s.symbol),
-      });
-    } catch (err) {
-      log.error({ err }, 'Pairlist refresh failed');
-    }
+    this.activeStocks = await this.analysisOrchestrator.refreshPairlist(this.activeStocks);
   }
 
   private async analysisLoop(): Promise<void> {
@@ -736,242 +752,16 @@ class TradingBot {
     portfolio: PortfolioState,
     spyCandles: import('./data/yahoo-finance.js').OHLCVCandle[] = [],
   ): Promise<void> {
-    const { symbol, t212Ticker } = stock;
+    const result = await this.analysisOrchestrator.analyzeStock(stock, portfolio, spyCandles);
+    if (!result) return;
 
-    // 1. Get full stock data
-    const data = await this.dataAggregator.getStockData(symbol);
-    if (!data.quote || data.candles.length === 0) {
-      log.warn({ symbol }, 'Insufficient data, skipping');
-      return;
-    }
+    const { shouldTrade, decision, data, technicalScore, fundamentalScore, sentimentScore } =
+      result;
 
-    // 2. Run scorers
-    const techAnalysis = analyzeTechnicals(data.candles);
-    const technicalScore = techAnalysis.score;
-    const fundamentalScore = data.fundamentals ? scoreFundamentals(data.fundamentals) : 0;
-    const sentimentInput: SentimentInput = {
-      finnhubNews: data.finnhubNews,
-      marketauxNews: data.marketauxNews,
-      insiderTransactions: data.insiderTransactions,
-      earnings: data.earnings,
-    };
-    const sentimentScore = scoreSentiment(sentimentInput);
-
-    // 2b. Confluence gate — pre-filter before AI call
-    let confluenceEnabled = false;
-    try {
-      confluenceEnabled = configManager.get<boolean>('analysis.confluenceEnabled');
-    } catch {
-      /* use defaults */
-    }
-
-    if (confluenceEnabled) {
-      let minSignals = 2;
-      let minScore = 55;
-      let minAvgScore = 50;
-      try {
-        minSignals = configManager.get<number>('analysis.confluenceMinSignals');
-      } catch {
-        /* use defaults */
-      }
-      try {
-        minScore = configManager.get<number>('analysis.confluenceMinScore');
-      } catch {
-        /* use defaults */
-      }
-      try {
-        minAvgScore = configManager.get<number>('analysis.confluenceMinAvgScore');
-      } catch {
-        /* use defaults */
-      }
-
-      const scores = [technicalScore, fundamentalScore, sentimentScore];
-      const passingSignals = scores.filter((s) => s >= minScore).length;
-      const avgScore = scores.reduce((a, b) => a + b, 0) / scores.length;
-
-      if (passingSignals < minSignals || avgScore < minAvgScore) {
-        log.debug(
-          { symbol, technicalScore, fundamentalScore, sentimentScore, passingSignals, avgScore },
-          'Confluence gate: insufficient signal alignment, skipping AI call',
-        );
-        const audit = getAuditLogger();
-        audit.logSignal(
-          symbol,
-          `Skipped by confluence gate: ${passingSignals}/${minSignals} signals, avg ${avgScore.toFixed(0)}/${minAvgScore}`,
-        );
-        return;
-      }
-    }
-
-    // 3. Compute portfolio correlations
-    const correlationResults = this.correlationAnalyzer.checkCorrelationWithPortfolio(symbol);
-    const portfolioCorrelations = correlationResults.map((c) => ({
-      symbol: c.symbol2,
-      correlation: c.correlation,
-    }));
-
-    // 3c. Regime detection (uses SPY candles fetched once per loop)
-    let regimeAnalysis = null;
-    try {
-      if (spyCandles.length > 0) {
-        regimeAnalysis = getRegimeDetector().detect(
-          spyCandles,
-          data.marketContext.vixLevel ?? undefined,
-        );
-      }
-    } catch (err) {
-      log.debug({ symbol, err }, 'Regime detection failed, continuing without');
-    }
-
-    // 3d. Multi-timeframe analysis
-    let multiTimeframeResult = null;
-    try {
-      multiTimeframeResult = createMultiTimeframeAnalyzer().analyze(symbol, data.candles);
-    } catch (err) {
-      log.debug({ symbol, err }, 'Multi-timeframe analysis failed, continuing without');
-    }
-
-    // 3e. Social sentiment (if module has data)
-    let socialSentimentResult = null;
-    try {
-      const socialAnalyzer = getSocialSentimentAnalyzer();
-      socialSentimentResult = await socialAnalyzer.analyzeSymbolFull(symbol, []);
-    } catch (err) {
-      log.debug({ symbol, err }, 'Social sentiment failed, continuing without');
-    }
-
-    // 4. Build AI context (portfolio passed from caller)
-    const aiContext = this.buildAIContext(
-      symbol,
-      data,
-      techAnalysis,
-      technicalScore,
-      fundamentalScore,
-      sentimentScore,
-      sentimentInput,
-      portfolio,
-      portfolioCorrelations,
-      regimeAnalysis,
-      multiTimeframeResult,
-      socialSentimentResult,
-    );
-
-    // 5. AI decision
-    const aiEnabled = configManager.get<boolean>('ai.enabled');
-    let decision: AIDecision = {
-      decision: 'HOLD',
-      conviction: 0,
-      reasoning: 'AI disabled',
-      risks: [],
-      suggestedStopLossPct: 0.05,
-      suggestedPositionSizePct: 0.1,
-      suggestedTakeProfitPct: 0.15,
-      urgency: 'no_rush',
-      exitConditions: '',
-    };
-
-    if (aiEnabled) {
-      const aiDecision = await this.aiAgent.analyze(aiContext);
-      if (!aiDecision) {
-        log.warn({ symbol }, 'AI decision parsing failed — skipping symbol');
-        return;
-      }
-      decision = aiDecision;
-    }
-
-    // 6. Store signal in DB
-    const db = getDb();
-    db.insert(schema.signals)
-      .values({
-        timestamp: new Date().toISOString(),
-        symbol,
-        rsi: techAnalysis.rsi,
-        macdValue: techAnalysis.macd?.value ?? null,
-        macdSignal: techAnalysis.macd?.signal ?? null,
-        macdHistogram: techAnalysis.macd?.histogram ?? null,
-        sma20: techAnalysis.sma20,
-        sma50: techAnalysis.sma50,
-        sma200: techAnalysis.sma200,
-        ema12: techAnalysis.ema12,
-        ema26: techAnalysis.ema26,
-        bollingerUpper: techAnalysis.bollinger?.upper ?? null,
-        bollingerMiddle: techAnalysis.bollinger?.middle ?? null,
-        bollingerLower: techAnalysis.bollinger?.lower ?? null,
-        atr: techAnalysis.atr,
-        adx: techAnalysis.adx,
-        stochasticK: techAnalysis.stochastic?.k ?? null,
-        stochasticD: techAnalysis.stochastic?.d ?? null,
-        williamsR: techAnalysis.williamsR,
-        mfi: techAnalysis.mfi,
-        cci: techAnalysis.cci,
-        obv: techAnalysis.obv,
-        vwap: techAnalysis.vwap,
-        parabolicSar: techAnalysis.parabolicSar,
-        roc: techAnalysis.roc,
-        forceIndex: techAnalysis.forceIndex,
-        volumeRatio: techAnalysis.volumeRatio,
-        supportLevel: techAnalysis.supportResistance?.support ?? null,
-        resistanceLevel: techAnalysis.supportResistance?.resistance ?? null,
-        technicalScore,
-        sentimentScore,
-        fundamentalScore,
-        aiScore: decision.conviction,
-        convictionTotal:
-          (technicalScore + fundamentalScore + sentimentScore + decision.conviction) / 4,
-        decision: decision.decision,
-        executed: false,
-        aiReasoning: decision.reasoning,
-        aiModel: getActiveModelName(),
-        suggestedStopLossPct: decision.suggestedStopLossPct,
-        suggestedPositionSizePct: decision.suggestedPositionSizePct,
-        suggestedTakeProfitPct: decision.suggestedTakeProfitPct,
-      })
-      .run();
-
-    // 7. Broadcast signal via WebSocket
-    this.wsManager.broadcast('signal_generated', {
-      symbol,
-      decision: decision.decision,
-      conviction: decision.conviction,
-      technicalScore,
-      fundamentalScore,
-      sentimentScore,
-    });
-
-    // 7b. Webhook dispatch for signal
-    try {
-      await getWebhookManager().sendOutbound('signal_generated', {
-        symbol,
-        decision: decision.decision,
-        conviction: decision.conviction,
-        technicalScore,
-        fundamentalScore,
-        sentimentScore,
-      });
-    } catch {
-      // Non-critical, swallow webhook errors
-    }
-
-    // 8. Execute if actionable (with conviction gate for BUY)
-    if (decision.decision === 'BUY') {
-      let minConviction = 65;
-      try {
-        minConviction = configManager.get<number>('ai.minConvictionScore');
-      } catch {
-        /* use defaults */
-      }
-
-      if (decision.conviction < minConviction) {
-        log.info(
-          { symbol, conviction: decision.conviction, minConviction },
-          'BUY conviction below threshold, holding',
-        );
-        return;
-      }
-
-      await this.executeTrade(
-        symbol,
-        t212Ticker,
+    if (shouldTrade) {
+      await this.executionOrchestrator.executeTrade(
+        stock.symbol,
+        stock.t212Ticker,
         data,
         decision,
         portfolio,
@@ -979,422 +769,6 @@ class TradingBot {
         fundamentalScore,
         sentimentScore,
       );
-    } else if (decision.decision === 'SELL') {
-      await this.executeTrade(
-        symbol,
-        t212Ticker,
-        data,
-        decision,
-        portfolio,
-        technicalScore,
-        fundamentalScore,
-        sentimentScore,
-      );
-    }
-  }
-
-  private async executeTrade(
-    symbol: string,
-    t212Ticker: string,
-    data: StockData,
-    decision: AIDecision,
-    portfolio: PortfolioState,
-    technicalScore?: number,
-    fundamentalScore?: number,
-    sentimentScore?: number,
-  ): Promise<void> {
-    const price = data.quote?.price ?? 0;
-    const audit = getAuditLogger();
-
-    // Overtrading protection
-    const maxDailyTrades = configManager.get<number>('risk.maxDailyTrades');
-    const todayStr = new Date().toISOString().split('T')[0];
-    const todayTradeCount = getDb()
-      .select()
-      .from(schema.trades)
-      .where(gte(schema.trades.entryTime, todayStr))
-      .all().length;
-    if (todayTradeCount >= maxDailyTrades) {
-      log.warn({ todayTradeCount, maxDailyTrades }, 'Daily trade limit reached');
-      audit.logRisk(`Daily trade limit: ${todayTradeCount}/${maxDailyTrades}`);
-      return;
-    }
-
-    // Record AI prediction for model tracking
-    this.modelTracker.recordPrediction({
-      aiModel: getActiveModelName(),
-      symbol,
-      decision: decision.decision,
-      conviction: decision.conviction,
-      priceAtSignal: price,
-    });
-
-    // Check portfolio correlation for BUY orders
-    if (decision.decision === 'BUY') {
-      const correlations = this.correlationAnalyzer.checkCorrelationWithPortfolio(symbol);
-      const highCorr = correlations.filter((c) => c.isHighlyCorrelated);
-      if (highCorr.length > 0) {
-        log.warn(
-          { symbol, correlatedWith: highCorr.map((c) => c.symbol2) },
-          'High correlation with existing positions',
-        );
-        audit.logRisk(
-          `${symbol} highly correlated with ${highCorr.map((c) => c.symbol2).join(', ')}`,
-          { correlations: highCorr },
-        );
-        return; // Hard block: don't trade highly correlated positions
-      }
-    }
-
-    // Earnings blackout enforcement
-    const blackoutDays = configManager.get<number>('data.earningsBlackoutDays') ?? 3;
-    if (blackoutDays > 0 && data.earnings?.length) {
-      const now = new Date();
-      const hasUpcomingEarnings = data.earnings.some((e) => {
-        const earningsDate = new Date(e.date);
-        const daysUntil = (earningsDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
-        return daysUntil >= 0 && daysUntil <= blackoutDays;
-      });
-      if (hasUpcomingEarnings) {
-        log.info({ symbol, blackoutDays }, 'Skipping trade: earnings blackout period');
-        audit.logRisk(`Earnings blackout: ${symbol} has earnings within ${blackoutDays} days`);
-        return;
-      }
-    }
-
-    // Create trade plan instead of executing immediately
-    const plan = this.tradePlanner.createPlan({
-      symbol,
-      t212Ticker,
-      price,
-      decision,
-      portfolio,
-      technicalScore,
-      fundamentalScore,
-      sentimentScore,
-    });
-
-    if (!plan) {
-      log.warn({ symbol }, 'Trade plan creation failed (insufficient R:R or 0 shares)');
-      return;
-    }
-
-    // Send plan to WebSocket
-    this.wsManager.broadcast('trade_plan_created', plan);
-    audit.logTrade(
-      symbol,
-      `Trade plan created: ${plan.side} ${plan.shares} shares @ $${price.toFixed(2)}`,
-      {
-        planId: plan.id,
-        riskReward: plan.riskRewardRatio,
-        conviction: plan.aiConviction,
-      },
-    );
-
-    // Process through approval flow
-    const { shouldExecute, plan: processedPlan } = await this.approvalManager.processNewPlan(plan);
-
-    if (!shouldExecute) {
-      // Approval required - send to Telegram and wait
-      const planMsg = this.tradePlanner.formatPlanMessage(processedPlan);
-      await this.telegram.sendMessage(
-        `<b>Trade Plan Pending Approval</b>\n<pre>${planMsg}</pre>\n\nReply /approve_${plan.id} or /reject_${plan.id}`,
-      );
-      return;
-    }
-
-    // Execute the approved plan
-    await this.executeApprovedPlan(processedPlan);
-  }
-
-  private async executeApprovedPlan(plan: ReturnType<TradePlanner['getPlan']>): Promise<void> {
-    if (!plan) return;
-
-    const accountType = plan.accountType as 'INVEST' | 'ISA';
-    const audit = getAuditLogger();
-
-    // Validate with risk guard
-    const portfolio = await this.getPortfolioState();
-    const fundRow = getDb()
-      .select({ sector: schema.fundamentalCache.sector })
-      .from(schema.fundamentalCache)
-      .where(eq(schema.fundamentalCache.symbol, plan.symbol))
-      .orderBy(desc(schema.fundamentalCache.fetchedAt))
-      .limit(1)
-      .get();
-
-    const proposal: TradeProposal = {
-      symbol: plan.symbol,
-      side: plan.side,
-      shares: plan.shares,
-      price: plan.entryPrice,
-      stopLossPct: plan.stopLossPct,
-      positionSizePct: plan.positionSizePct,
-      sector: fundRow?.sector ?? undefined,
-    };
-
-    const validation = this.riskGuard.validateTrade(proposal, portfolio);
-    if (!validation.allowed) {
-      log.warn({ symbol: plan.symbol, reason: validation.reason }, 'Trade rejected by risk guard');
-      audit.logRisk(`Trade rejected: ${plan.symbol} - ${validation.reason}`, { planId: plan.id });
-      return;
-    }
-
-    log.info(
-      {
-        symbol: plan.symbol,
-        side: plan.side,
-        shares: plan.shares,
-        price: plan.entryPrice,
-        conviction: plan.aiConviction,
-      },
-      'Executing trade from plan',
-    );
-
-    try {
-      if (plan.side === 'BUY') {
-        // Apply streak-based position size reduction
-        let adjustedShares = plan.shares;
-        const streakMultiplier = this.riskGuard.getLosingStreakMultiplier();
-        if (streakMultiplier < 1.0) {
-          adjustedShares = Math.max(1, Math.floor(plan.shares * streakMultiplier));
-          log.info(
-            {
-              symbol: plan.symbol,
-              originalShares: plan.shares,
-              adjustedShares,
-              streakMultiplier,
-            },
-            'Position size reduced due to losing streak',
-          );
-          audit.logRisk(
-            `Streak reduction: ${plan.symbol} shares ${plan.shares} -> ${adjustedShares} (x${streakMultiplier})`,
-            { planId: plan.id, streakMultiplier },
-          );
-        }
-
-        // Apply cool-down position size reduction (stacks with streak reduction)
-        if (this.lossCooldownUntil && new Date() < this.lossCooldownUntil) {
-          const factor = configManager.get<number>('risk.lossCooldownSizeFactor') ?? 0.5;
-          const beforeCooldown = adjustedShares;
-          adjustedShares = Math.max(1, Math.floor(adjustedShares * factor));
-          log.warn(
-            {
-              symbol: plan.symbol,
-              factor,
-              beforeCooldown,
-              afterCooldown: adjustedShares,
-              cooldownUntil: this.lossCooldownUntil.toISOString(),
-            },
-            'Cool-down: reduced position size',
-          );
-          audit.logRisk(
-            `Cool-down reduction: ${plan.symbol} shares ${beforeCooldown} -> ${adjustedShares} (x${factor})`,
-            { planId: plan.id, factor, cooldownUntil: this.lossCooldownUntil.toISOString() },
-          );
-        }
-
-        const buyParams: BuyParams = {
-          symbol: plan.symbol,
-          t212Ticker: plan.t212Ticker,
-          shares: adjustedShares,
-          price: plan.entryPrice,
-          stopLossPct: plan.stopLossPct,
-          takeProfitPct: plan.takeProfitPct,
-          aiReasoning: plan.aiReasoning ?? '',
-          conviction: plan.aiConviction,
-          aiModel: plan.aiModel ?? '',
-          accountType,
-        };
-        await this.orderManager.executeBuy(buyParams);
-      } else {
-        const exitReason = plan.aiReasoning ?? 'AI sell signal';
-        const closeParams: CloseParams = {
-          symbol: plan.symbol,
-          t212Ticker: plan.t212Ticker,
-          shares: plan.shares,
-          exitReason,
-          accountType,
-        };
-        await this.orderManager.executeClose(closeParams);
-
-        // Evaluate protections after sell
-        try {
-          // We don't have exact pnlPct here; pass 0 as protections query DB directly
-          getProtectionManager().evaluateAfterClose(plan.symbol, exitReason, 0);
-        } catch (protErr) {
-          log.error(
-            { symbol: plan.symbol, protErr },
-            'Protection evaluation failed after plan sell',
-          );
-        }
-      }
-
-      this.tradePlanner.markExecuted(plan.id);
-      audit.logTrade(
-        plan.symbol,
-        `Trade executed: ${plan.side} ${plan.shares} shares @ $${plan.entryPrice.toFixed(2)}`,
-        { planId: plan.id },
-      );
-
-      await this.telegram.sendTradeNotification({
-        symbol: plan.symbol,
-        side: plan.side,
-        shares: plan.shares,
-        price: plan.entryPrice,
-        stopLoss: plan.stopLossPrice,
-        reasoning: plan.aiReasoning ?? '',
-      });
-
-      this.wsManager.broadcast('trade_executed', {
-        symbol: plan.symbol,
-        side: plan.side,
-        shares: plan.shares,
-        price: plan.entryPrice,
-      });
-
-      // Webhook dispatch
-      try {
-        await getWebhookManager().sendOutbound('trade_executed', {
-          symbol: plan.symbol,
-          side: plan.side,
-          shares: plan.shares,
-          price: plan.entryPrice,
-          planId: plan.id,
-        });
-      } catch (whErr) {
-        log.error({ whErr }, 'Webhook dispatch failed');
-      }
-
-      // Trade journal auto-annotation
-      try {
-        getTradeJournalManager().autoAnnotate(
-          plan.symbol,
-          plan.side === 'BUY' ? 'trade_open' : 'trade_close',
-          {
-            price: plan.entryPrice,
-            shares: plan.shares,
-            conviction: plan.aiConviction,
-            reasoning: plan.aiReasoning,
-          },
-        );
-      } catch (jErr) {
-        log.error({ jErr }, 'Trade journal annotation failed');
-      }
-
-      // Tax lot tracking
-      try {
-        const taxTracker = getTaxTracker();
-        if (plan.side === 'BUY') {
-          await taxTracker.recordPurchase(plan.symbol, plan.shares, plan.entryPrice, accountType);
-        } else {
-          await taxTracker.recordSale(plan.symbol, plan.shares, plan.entryPrice);
-        }
-      } catch (taxErr) {
-        log.error({ taxErr }, 'Tax lot tracking failed');
-      }
-    } catch (err) {
-      log.error({ symbol: plan.symbol, err }, 'Trade execution failed');
-      audit.logError(`Trade execution failed: ${plan.symbol}`, {
-        planId: plan.id,
-        error: String(err),
-      });
-      await this.telegram.sendAlert(
-        'Trade Execution Failed',
-        `${plan.symbol} ${plan.side}: ${err}`,
-      );
-    }
-  }
-
-  private async monitorPositions(): Promise<void> {
-    try {
-      // Update prices
-      await this.positionTracker.updatePositions();
-
-      // Update trailing stops for profitable positions
-      await this.positionTracker.updateTrailingStops();
-
-      // Check exit conditions (stop-loss, take-profit, AI conditions)
-      const exitResult = await this.positionTracker.checkExitConditions();
-      const accountType = configManager.get<string>('t212.accountType') as 'INVEST' | 'ISA';
-
-      for (const symbol of exitResult.positionsToClose) {
-        const db = getDb();
-        const pos = db
-          .select()
-          .from(schema.positions)
-          .where(eq(schema.positions.symbol, symbol))
-          .get();
-        if (!pos) continue;
-
-        const exitReason = exitResult.exitReasons[symbol] ?? 'Exit condition triggered';
-        log.info({ symbol, exitReason }, 'Auto-closing position due to exit condition');
-
-        try {
-          await this.orderManager.executeClose({
-            symbol: pos.symbol,
-            t212Ticker: pos.t212Ticker,
-            shares: pos.shares,
-            exitReason,
-            accountType,
-          });
-
-          // Evaluate protections after close
-          const pnlPct = pos.pnlPct ?? 0;
-          try {
-            getProtectionManager().evaluateAfterClose(symbol, exitReason, pnlPct);
-          } catch (protErr) {
-            log.error({ symbol, protErr }, 'Protection evaluation failed after position close');
-          }
-
-          await this.telegram.sendTradeNotification({
-            symbol,
-            side: 'SELL',
-            shares: pos.shares,
-            price: pos.currentPrice ?? pos.entryPrice,
-            stopLoss: pos.stopLoss ?? 0,
-            reasoning: exitReason,
-          });
-
-          this.wsManager.broadcast('trade_executed', {
-            symbol,
-            side: 'SELL',
-            shares: pos.shares,
-            price: pos.currentPrice ?? pos.entryPrice,
-          });
-        } catch (err) {
-          log.error({ symbol, err }, 'Failed to auto-close position');
-        }
-      }
-
-      // Check for stale unfilled orders and reprice if enabled
-      await this.processOrderReplacements();
-
-      // Check for correlation drift between held positions
-      await this.checkCorrelationDrift();
-
-      // DCA evaluation for losing positions
-      await this.evaluateDCAOpportunities();
-
-      // Partial exit evaluation for profitable positions
-      await this.evaluatePartialExits();
-
-      // Broadcast updated positions
-      const db = getDb();
-      const allPositions = db.select().from(schema.positions).all();
-      for (const pos of allPositions) {
-        this.wsManager.broadcast('position_update', pos);
-      }
-    } catch (err) {
-      log.error({ err }, 'Position monitor failed');
-    }
-  }
-
-  private async syncPositions(): Promise<void> {
-    try {
-      await this.positionTracker.syncWithT212(this.t212Client);
-    } catch (err) {
-      log.error({ err }, 'T212 position sync failed');
     }
   }
 
@@ -1668,7 +1042,7 @@ class TradingBot {
         }
 
         const portfolio = await this.getPortfolioState();
-        const aiContext = this.buildAIContext(
+        const aiContext = this.analysisOrchestrator.buildAIContext(
           pos.symbol,
           data,
           techAnalysis,
@@ -1730,83 +1104,6 @@ class TradingBot {
       } catch (err) {
         log.error({ symbol: pos.symbol, err }, 'Position re-evaluation failed');
       }
-    }
-  }
-
-  private async processOrderReplacements(): Promise<void> {
-    const enabled = configManager.get<boolean>('execution.orderReplacement.enabled');
-    if (!enabled) return;
-
-    const audit = getAuditLogger();
-
-    try {
-      const result = await this.orderReplacer.processOpenOrders();
-      if (result.replaced > 0) {
-        log.info(
-          { replaced: result.replaced, checked: result.checked },
-          'Order replacements processed',
-        );
-        audit.logTrade(
-          '*',
-          `Order replacement: ${result.replaced} orders repriced (${result.checked} checked)`,
-          {
-            replaced: result.replaced,
-            skipped: result.skipped,
-            filledDuringCancel: result.filledDuringCancel,
-          },
-        );
-      }
-      if (result.errors.length > 0) {
-        for (const error of result.errors) {
-          log.error({ error }, 'Order replacement error');
-        }
-        await this.telegram.sendAlert(
-          'Order Replacement Errors',
-          `${result.errors.length} error(s) during order replacement. Check logs.`,
-        );
-      }
-    } catch (err) {
-      log.error({ err }, 'Order replacement processing failed');
-    }
-  }
-
-  private async checkCorrelationDrift(): Promise<void> {
-    const db = getDb();
-    const allPositions = db.select().from(schema.positions).all();
-    if (allPositions.length < 2) return;
-
-    const audit = getAuditLogger();
-    const maxCorrelation = configManager.get<number>('risk.maxCorrelation');
-
-    try {
-      const { symbols, matrix } = this.correlationAnalyzer.getPortfolioCorrelationMatrix();
-
-      for (let i = 0; i < symbols.length; i++) {
-        for (let j = i + 1; j < symbols.length; j++) {
-          const corr = matrix[i][j];
-          if (Math.abs(corr) > maxCorrelation) {
-            const pair = `${symbols[i]}/${symbols[j]}`;
-            const corrStr = corr.toFixed(2);
-
-            log.warn(
-              { pair, correlation: corr, threshold: maxCorrelation },
-              'Correlation drift detected between held positions',
-            );
-
-            audit.logRisk(
-              `Correlation drift: ${pair} at ${corrStr} (threshold: ${maxCorrelation})`,
-              { symbol1: symbols[i], symbol2: symbols[j], correlation: corr },
-            );
-
-            await this.telegram.sendAlert(
-              'Correlation Drift',
-              `${pair} correlation spiked to ${corrStr} (max: ${maxCorrelation}). Consider reducing exposure.`,
-            );
-          }
-        }
-      }
-    } catch (err) {
-      log.error({ err }, 'Correlation drift check failed');
     }
   }
 
@@ -1961,267 +1258,6 @@ class TradingBot {
     }
   }
 
-  private buildAIContext(
-    symbol: string,
-    data: StockData,
-    techAnalysis: ReturnType<typeof analyzeTechnicals>,
-    technicalScore: number,
-    fundamentalScore: number,
-    sentimentScore: number,
-    _sentimentInput: SentimentInput,
-    portfolio: PortfolioState,
-    portfolioCorrelations?: Array<{ symbol: string; correlation: number }>,
-    regimeAnalysis?: import('./analysis/regime-detector.js').RegimeAnalysis | null,
-    multiTimeframeResult?: import('./analysis/multi-timeframe.js').MultiTimeframeResult | null,
-    socialSentimentResult?: import('./data/social-sentiment.js').SocialSentimentResult | null,
-  ): AIContext {
-    const candles = data.candles;
-    const latest = candles[candles.length - 1];
-    const fiveDaysAgo = candles.length >= 5 ? candles[candles.length - 5] : latest;
-    const thirtyDaysAgo = candles.length >= 22 ? candles[candles.length - 22] : latest;
-
-    const price = data.quote?.price ?? 0;
-    const priceChange1d = latest ? (price - latest.close) / latest.close : 0;
-    const priceChange5d = fiveDaysAgo ? (price - fiveDaysAgo.close) / fiveDaysAgo.close : 0;
-    const priceChange1m = thirtyDaysAgo ? (price - thirtyDaysAgo.close) / thirtyDaysAgo.close : 0;
-
-    // Fetch historical signals (only when enabled)
-    const db = getDb();
-    const includeHistorical = configManager.get<boolean>('ai.includeHistoricalSignals');
-    let prevSignals: (typeof schema.signals.$inferSelect)[] = [];
-    if (includeHistorical) {
-      const historicalSignalCount = configManager.get<number>('ai.historicalSignalCount');
-      prevSignals = db
-        .select()
-        .from(schema.signals)
-        .where(eq(schema.signals.symbol, symbol))
-        .orderBy(desc(schema.signals.timestamp))
-        .limit(historicalSignalCount)
-        .all();
-    }
-
-    const mc = data.marketContext;
-
-    // Compute insider net buying from InsiderTx
-    const insiderNetBuying = data.insiderTransactions.reduce((sum: number, tx) => {
-      const val = tx.change ?? 0;
-      return sum + val; // positive = buy, negative = sell
-    }, 0);
-
-    // Compute days to earnings and estimates (nearest future event only)
-    const now = Date.now();
-    const nextEarnings = data.earnings
-      .filter((e) => new Date(e.date).getTime() > now)
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())[0];
-    const nextEarningsTs = nextEarnings ? new Date(nextEarnings.date).getTime() : undefined;
-    const daysToEarnings = nextEarningsTs
-      ? Math.ceil((nextEarningsTs - now) / (1000 * 60 * 60 * 24))
-      : null;
-    const epsEstimateNextQ = nextEarnings?.epsEstimate ?? null;
-    const revenueEstimateNextQ = nextEarnings?.revenueEstimate ?? null;
-
-    // Existing positions from DB
-    const dbPositions = db.select().from(schema.positions).all();
-
-    return {
-      symbol,
-      currentPrice: price,
-      priceChange1d,
-      priceChange5d,
-      priceChange1m,
-      dayHigh: data.quote?.dayHigh ?? null,
-      dayLow: data.quote?.dayLow ?? null,
-      volume: data.quote?.volume ?? null,
-      avgVolume: data.quote?.avgVolume ?? null,
-      technical: {
-        rsi: techAnalysis.rsi,
-        macdValue: techAnalysis.macd?.value ?? null,
-        macdSignal: techAnalysis.macd?.signal ?? null,
-        macdHistogram: techAnalysis.macd?.histogram ?? null,
-        sma20: techAnalysis.sma20,
-        sma50: techAnalysis.sma50,
-        sma200: techAnalysis.sma200,
-        ema12: techAnalysis.ema12,
-        ema26: techAnalysis.ema26,
-        bollingerUpper: techAnalysis.bollinger?.upper ?? null,
-        bollingerMiddle: techAnalysis.bollinger?.middle ?? null,
-        bollingerLower: techAnalysis.bollinger?.lower ?? null,
-        atr: techAnalysis.atr,
-        adx: techAnalysis.adx,
-        stochasticK: techAnalysis.stochastic?.k ?? null,
-        stochasticD: techAnalysis.stochastic?.d ?? null,
-        williamsR: techAnalysis.williamsR,
-        mfi: techAnalysis.mfi,
-        cci: techAnalysis.cci,
-        obv: techAnalysis.obv,
-        vwap: techAnalysis.vwap,
-        parabolicSar: techAnalysis.parabolicSar,
-        roc: techAnalysis.roc,
-        forceIndex: techAnalysis.forceIndex,
-        volumeRatio: techAnalysis.volumeRatio,
-        perfWeek: techAnalysis.perfWeek,
-        perfMonth: techAnalysis.perfMonth,
-        perfQuarter: techAnalysis.perfQuarter,
-        perfYear: techAnalysis.perfYear,
-        ichimoku: techAnalysis.ichimoku ?? null,
-        adl: techAnalysis.adl,
-        awesomeOscillator: techAnalysis.awesomeOscillator,
-        support: techAnalysis.supportResistance?.support ?? null,
-        resistance: techAnalysis.supportResistance?.resistance ?? null,
-        candlestickBullish:
-          techAnalysis.candlestickPatterns.bullish.length > 0
-            ? techAnalysis.candlestickPatterns.bullish.join(', ')
-            : null,
-        candlestickBearish:
-          techAnalysis.candlestickPatterns.bearish.length > 0
-            ? techAnalysis.candlestickPatterns.bearish.join(', ')
-            : null,
-        candlestickNeutral:
-          techAnalysis.candlestickPatterns.neutral.length > 0
-            ? techAnalysis.candlestickPatterns.neutral.join(', ')
-            : null,
-        score: technicalScore,
-      },
-      fundamental: {
-        peRatio: data.fundamentals?.peRatio ?? null,
-        forwardPE: data.fundamentals?.forwardPE ?? null,
-        pegRatio: data.fundamentals?.pegRatio ?? null,
-        revenueGrowthYoY: data.fundamentals?.revenueGrowthYoY ?? null,
-        profitMargin: data.fundamentals?.profitMargin ?? null,
-        operatingMargin: data.fundamentals?.operatingMargin ?? null,
-        debtToEquity: data.fundamentals?.debtToEquity ?? null,
-        currentRatio: data.fundamentals?.currentRatio ?? null,
-        marketCap: data.fundamentals?.marketCap ?? null,
-        sector: data.fundamentals?.sector ?? null,
-        beta: data.fundamentals?.beta ?? null,
-        dividendYield: data.fundamentals?.dividendYield ?? null,
-        industry: data.fundamentals?.industry ?? null,
-        earningsSurprise: data.fundamentals?.earningsSurprise ?? null,
-        roe: data.fundamentals?.roe ?? null,
-        roa: data.fundamentals?.roa ?? null,
-        freeCashflow: data.fundamentals?.freeCashflow ?? null,
-        analystBuy: data.fundamentals?.analystBuy ?? null,
-        analystSell: data.fundamentals?.analystSell ?? null,
-        analystTargetPrice: data.fundamentals?.analystTargetPrice ?? null,
-        analystConsensus: data.fundamentals?.analystConsensus ?? null,
-        analystCount: data.fundamentals?.analystCount ?? null,
-        shortInterestPct: data.fundamentals?.shortInterestPct ?? null,
-        institutionalOwnershipPct: data.fundamentals?.institutionalOwnershipPct ?? null,
-        score: fundamentalScore,
-      },
-      sentiment: {
-        headlines: [
-          ...data.finnhubNews.slice(0, 5).map((n) => ({
-            title: n.headline,
-            score: 0,
-            source: n.source,
-          })),
-          ...data.marketauxNews.slice(0, 5).map((n) => ({
-            title: n.title,
-            score: n.sentimentScore ?? 0,
-            source: n.source,
-            relevanceScore: n.relevanceScore ?? undefined,
-          })),
-        ],
-        insiderNetBuying,
-        daysToEarnings,
-        epsEstimateNextQ,
-        revenueEstimateNextQ,
-        sentimentBreakdown: socialSentimentResult?.sentimentBreakdown ?? null,
-        topKeywords: socialSentimentResult?.keywords ?? [],
-        finraShortVolumePct: data.finraShortVolume?.shortVolumePct ?? null,
-        score: sentimentScore,
-      },
-      historicalSignals: prevSignals.map((s) => ({
-        timestamp: s.timestamp,
-        technicalScore: s.technicalScore ?? 0,
-        sentimentScore: s.sentimentScore ?? 0,
-        fundamentalScore: s.fundamentalScore ?? 0,
-        decision: s.decision ?? 'HOLD',
-        rsi: s.rsi ?? null,
-        macdHistogram: s.macdHistogram ?? null,
-      })),
-      portfolio: {
-        cashAvailable: portfolio.cashAvailable,
-        portfolioValue: portfolio.portfolioValue,
-        openPositions: portfolio.openPositions,
-        maxPositions: configManager.get<number>('risk.maxPositions'),
-        todayPnl: portfolio.todayPnl,
-        todayPnlPct: portfolio.todayPnlPct,
-        sectorExposure: portfolio.sectorExposure,
-        sectorExposureValue: portfolio.sectorExposureValue,
-        existingPositions: dbPositions.map((p) => ({
-          symbol: p.symbol,
-          pnlPct: p.pnlPct ?? 0,
-          entryPrice: p.entryPrice,
-          currentPrice: p.currentPrice ?? p.entryPrice,
-          shares: p.shares,
-          stopLoss: p.stopLoss ?? null,
-          trailingStop: p.trailingStop ?? null,
-          holdDays: Math.ceil(
-            (Date.now() - new Date(p.entryTime).getTime()) / (1000 * 60 * 60 * 24),
-          ),
-          dcaCount: p.dcaCount ?? 0,
-          partialExitCount: p.partialExitCount ?? 0,
-        })),
-      },
-      marketContext: {
-        spyPrice: mc.spyPrice ?? 0,
-        spyChange1d: mc.spyChange1d ?? 0,
-        vixLevel: mc.vixLevel ?? 0,
-        marketTrend: mc.marketTrend,
-      },
-      riskConstraints: {
-        maxPositionSizePct: configManager.get<number>('risk.maxPositionSizePct'),
-        maxStopLossPct: configManager.get<number>('risk.maxStopLossPct'),
-        minStopLossPct: configManager.get<number>('risk.minStopLossPct'),
-        maxRiskPerTradePct: configManager.get<number>('risk.maxRiskPerTradePct'),
-        dailyLossLimitPct: configManager.get<number>('risk.dailyLossLimitPct'),
-      },
-      portfolioCorrelations: portfolioCorrelations ?? [],
-      ...(regimeAnalysis
-        ? {
-            regime: {
-              regime: regimeAnalysis.regime,
-              confidence: regimeAnalysis.confidence,
-              spyTrend: regimeAnalysis.details.spyTrend,
-              volatilityPctile: regimeAnalysis.details.volatilityPctile,
-              newEntriesAllowed: regimeAnalysis.details.adjustments.newEntriesAllowed,
-              positionSizeMultiplier: regimeAnalysis.details.adjustments.positionSizeMultiplier,
-              stopLossMultiplier: regimeAnalysis.details.adjustments.stopLossMultiplier,
-              entryThresholdAdjustment: regimeAnalysis.details.adjustments.entryThresholdAdjustment,
-              breadthScore: regimeAnalysis.details.breadthScore,
-            },
-          }
-        : {}),
-      ...(multiTimeframeResult
-        ? {
-            multiTimeframe: {
-              compositeScore: multiTimeframeResult.compositeScore,
-              alignment: multiTimeframeResult.alignment,
-              timeframeScores: multiTimeframeResult.timeframeScores,
-              timeframeDetails: multiTimeframeResult.timeframeDetails.map((td) => ({
-                timeframe: td.timeframe,
-                score: td.score,
-                signal: td.signal,
-                candleCount: td.candleCount,
-              })),
-            },
-          }
-        : {}),
-      ...(socialSentimentResult && socialSentimentResult.mentionCount > 0
-        ? {
-            socialSentiment: {
-              overallScore: socialSentimentResult.overallScore,
-              buzzScore: socialSentimentResult.buzzScore,
-              mentionCount: socialSentimentResult.mentionCount,
-              trendDirection: socialSentimentResult.trendDirection,
-            },
-          }
-        : {}),
-    };
-  }
-
   private async checkConditionalOrders(): Promise<void> {
     try {
       const condOrderMgr = getConditionalOrderManager();
@@ -2257,88 +1293,6 @@ class TradingBot {
       }
     } catch (err) {
       log.error({ err }, 'Conditional orders check failed');
-    }
-  }
-
-  private async evaluateDCAOpportunities(): Promise<void> {
-    try {
-      const dcaManager = getDCAManager();
-      const db = getDb();
-      const allPositions = db.select().from(schema.positions).all();
-      const portfolio = await this.getPortfolioState();
-      const accountType = configManager.get<string>('t212.accountType') as 'INVEST' | 'ISA';
-
-      for (const pos of allPositions) {
-        if (!pos.currentPrice) continue;
-
-        const evaluation = dcaManager.evaluatePosition(
-          pos.symbol,
-          pos.currentPrice,
-          {
-            symbol: pos.symbol,
-            shares: pos.shares,
-            entryPrice: pos.entryPrice,
-            entryTime: pos.entryTime,
-            dcaCount: pos.dcaCount ?? 0,
-            totalInvested: pos.totalInvested,
-          },
-          portfolio,
-        );
-
-        if (evaluation.shouldDCA && evaluation.shares && evaluation.shares > 0) {
-          log.info(
-            { symbol: pos.symbol, shares: evaluation.shares, round: (pos.dcaCount ?? 0) + 1 },
-            'DCA opportunity detected',
-          );
-          try {
-            await dcaManager.executeDCA(
-              pos.symbol,
-              pos.t212Ticker,
-              evaluation.shares,
-              pos.currentPrice,
-              accountType,
-              this.t212Client,
-            );
-          } catch (dcaErr) {
-            log.error({ symbol: pos.symbol, dcaErr }, 'DCA execution failed');
-          }
-        }
-      }
-    } catch (err) {
-      log.error({ err }, 'DCA evaluation failed');
-    }
-  }
-
-  private async evaluatePartialExits(): Promise<void> {
-    try {
-      const partialExitMgr = getPartialExitManager();
-      const db = getDb();
-      const allPositions = db.select().from(schema.positions).all();
-      const accountType = configManager.get<string>('t212.accountType') as 'INVEST' | 'ISA';
-
-      for (const pos of allPositions) {
-        const evaluation = partialExitMgr.evaluatePosition(pos);
-
-        if (evaluation.shouldExit && evaluation.sharesToSell && evaluation.sharesToSell > 0) {
-          log.info(
-            { symbol: pos.symbol, sharesToSell: evaluation.sharesToSell },
-            'Partial exit triggered',
-          );
-          try {
-            await partialExitMgr.executePartialExit(
-              pos.symbol,
-              pos.t212Ticker,
-              evaluation.sharesToSell,
-              evaluation.reason ?? 'Partial exit tier reached',
-              accountType,
-            );
-          } catch (peErr) {
-            log.error({ symbol: pos.symbol, peErr }, 'Partial exit execution failed');
-          }
-        }
-      }
-    } catch (err) {
-      log.error({ err }, 'Partial exit evaluation failed');
     }
   }
 

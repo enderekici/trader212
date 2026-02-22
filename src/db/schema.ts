@@ -270,7 +270,10 @@ export const tradePlans = sqliteTable(
     expiresAt: text('expiresAt'),
     createdAt: text('createdAt').notNull(),
   },
-  (table) => [index('idx_trade_plans_symbol').on(table.symbol, table.status)],
+  (table) => [
+    index('idx_trade_plans_symbol').on(table.symbol, table.status),
+    index('idx_trade_plans_expires').on(table.expiresAt, table.status),
+  ],
 );
 
 // ── AI Market Research ──────────────────────────────────────────────────
@@ -317,7 +320,10 @@ export const modelPerformance = sqliteTable(
     actualReturnPct: real('actualReturnPct'),
     evaluatedAt: text('evaluatedAt'),
   },
-  (table) => [index('idx_model_perf').on(table.aiModel, table.signalTimestamp)],
+  (table) => [
+    index('idx_model_perf').on(table.aiModel, table.signalTimestamp),
+    index('idx_model_perf_model').on(table.aiModel),
+  ],
 );
 
 // ── Pair Locks (protection-based trading restrictions) ───────────────────

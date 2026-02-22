@@ -212,6 +212,7 @@ function createTables(sqlite: InstanceType<typeof Database>) {
       createdAt TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_trade_plans_symbol ON trade_plans(symbol, status);
+    CREATE INDEX IF NOT EXISTS idx_trade_plans_expires ON trade_plans(expiresAt, status);
 
     CREATE TABLE IF NOT EXISTS ai_research (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -241,6 +242,7 @@ function createTables(sqlite: InstanceType<typeof Database>) {
       evaluatedAt TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_model_perf ON model_performance(aiModel, signalTimestamp);
+    CREATE INDEX IF NOT EXISTS idx_model_perf_model ON model_performance(aiModel);
 
     CREATE TABLE IF NOT EXISTS pair_locks (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

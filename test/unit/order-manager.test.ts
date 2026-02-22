@@ -8,6 +8,18 @@ vi.mock('../../src/config/manager.js', () => ({
   configManager: { get: (...args: unknown[]) => mockConfigGet(...args) },
 }));
 
+// Mock audit logger
+const mockLogRisk = vi.fn();
+const mockLogTrade = vi.fn();
+const mockLogError = vi.fn();
+vi.mock('../../src/monitoring/audit-log.js', () => ({
+  getAuditLogger: () => ({
+    logRisk: (...args: unknown[]) => mockLogRisk(...args),
+    logTrade: (...args: unknown[]) => mockLogTrade(...args),
+    logError: (...args: unknown[]) => mockLogError(...args),
+  }),
+}));
+
 // Mock logger
 vi.mock('../../src/utils/logger.js', () => ({
   createLogger: () => ({
@@ -323,7 +335,7 @@ describe('OrderManager', () => {
       expect(result.orderId).toBe('102');
     });
 
-    it('handles stop-loss order failure gracefully', async () => {
+    it('handles stop-loss order failure by returning error and not creating DB position', async () => {
       const client = makeMockT212Client();
       client.placeMarketOrder.mockResolvedValue({ id: 103 });
       client.getOrder.mockResolvedValue({
@@ -335,16 +347,26 @@ describe('OrderManager', () => {
 
       orderManager.setT212Client(client);
       mockSelectChain.get.mockReturnValueOnce(undefined);
-      mockTxInsertChain.run.mockReturnValue({ lastInsertRowid: 6n });
 
-      // Should still succeed; stop-loss error is logged but not fatal
+      // Should fail: stop-loss failure triggers emergency close, no DB record
       const result = await orderManager.executeBuy(makeBuyParams());
 
-      expect(result.success).toBe(true);
-      expect(result.tradeId).toBe(6);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Stop-loss placement failed');
+      expect(result.error).toContain('no DB record created');
+      // DB transaction should NOT have been called (phantom position prevented)
+      expect(mockTransaction).not.toHaveBeenCalled();
+      // Emergency close was attempted (second placeMarketOrder call)
+      expect(client.placeMarketOrder).toHaveBeenCalledTimes(2);
+      // Audit log records the phantom prevention
+      expect(mockLogRisk).toHaveBeenCalledWith(
+        expect.stringContaining('Phantom position prevented'),
+        expect.objectContaining({ symbol: 'AAPL' }),
+        'error',
+      );
     });
 
-    it('logs FATAL when both stop-loss and close-position fail', async () => {
+    it('logs FATAL when both stop-loss and close-position fail, still prevents phantom', async () => {
       const client = makeMockT212Client();
       // First call: buy order succeeds. Second call: close after stop-loss failure fails.
       client.placeMarketOrder
@@ -359,14 +381,16 @@ describe('OrderManager', () => {
 
       orderManager.setT212Client(client);
       mockSelectChain.get.mockReturnValueOnce(undefined);
-      mockTxInsertChain.run.mockReturnValue({ lastInsertRowid: 7n });
 
       const result = await orderManager.executeBuy(makeBuyParams());
 
-      // Trade is still recorded despite FATAL situation
-      expect(result.success).toBe(true);
+      // No DB record created despite FATAL close failure (phantom prevention)
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Stop-loss placement failed');
       // Verify both placeMarketOrder calls happened (buy + attempted close)
       expect(client.placeMarketOrder).toHaveBeenCalledTimes(2);
+      // DB transaction should NOT have been called
+      expect(mockTransaction).not.toHaveBeenCalled();
     });
 
     it('returns error when placeMarketOrder throws', async () => {
@@ -625,6 +649,140 @@ describe('OrderManager', () => {
       const result = await orderManager.executeBuy(makeBuyParams());
       expect(result.success).toBe(false);
       expect(result.error).toBe('Order fill timeout');
+    });
+
+    // ── Fix #1: Phantom Position Bug ────────────────────────────────────
+    it('should not create DB position when stop-loss placement fails (phantom prevention)', async () => {
+      const client = makeMockT212Client();
+      client.placeMarketOrder
+        .mockResolvedValueOnce({ id: 200 })   // buy order
+        .mockResolvedValueOnce({ id: 201 });   // emergency close
+      client.getOrder.mockResolvedValue({
+        status: 'FILLED',
+        filledValue: 1500,
+        filledQuantity: 10,
+      });
+      client.placeStopOrder.mockRejectedValue(new Error('Exchange rejected stop'));
+
+      orderManager.setT212Client(client);
+      mockSelectChain.get.mockReturnValueOnce(undefined); // no existing position
+
+      const result = await orderManager.executeBuy(makeBuyParams());
+
+      // Must fail — no phantom position
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Stop-loss placement failed');
+      expect(result.error).toContain('no DB record created');
+      expect(result.orderId).toBe('200');
+
+      // DB transaction must NOT be called — this is the core of the fix
+      expect(mockTransaction).not.toHaveBeenCalled();
+
+      // Emergency close was attempted
+      expect(client.placeMarketOrder).toHaveBeenCalledTimes(2);
+
+      // Audit log records the event
+      expect(mockLogRisk).toHaveBeenCalledWith(
+        expect.stringContaining('Phantom position prevented for AAPL'),
+        expect.objectContaining({ symbol: 'AAPL', orderId: '200', fillPrice: 150 }),
+        'error',
+      );
+    });
+
+    // ── Fix #2: Race Condition on Duplicate Check ───────────────────────
+    it('should detect duplicate position at insert time and handle gracefully', async () => {
+      const client = makeMockT212Client();
+      client.placeMarketOrder
+        .mockResolvedValueOnce({ id: 300 })   // buy order
+        .mockResolvedValueOnce({ id: 301 });   // close duplicate on exchange
+      client.getOrder.mockResolvedValue({
+        status: 'FILLED',
+        filledValue: 1500,
+        filledQuantity: 10,
+      });
+      client.placeStopOrder.mockResolvedValue({ id: 400 });
+      client.cancelOrder.mockResolvedValue(undefined);
+
+      orderManager.setT212Client(client);
+      // Pre-check: no position (fast path passes)
+      mockSelectChain.get.mockReturnValueOnce(undefined);
+      // Inside transaction: position already exists (race condition)
+      mockSelectChain.get.mockReturnValueOnce({ symbol: 'AAPL', shares: 10 });
+
+      const result = await orderManager.executeBuy(makeBuyParams());
+
+      // Must fail — duplicate detected at insert time
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Duplicate position detected');
+      expect(result.error).toContain('exchange position closed');
+      expect(result.orderId).toBe('300');
+
+      // Transaction was called but did early return (no insert)
+      expect(mockTransaction).toHaveBeenCalledOnce();
+
+      // Exchange position was closed (third placeMarketOrder call: buy + close duplicate)
+      expect(client.placeMarketOrder).toHaveBeenCalledTimes(2);
+
+      // Stop-loss order was cancelled (best effort cleanup)
+      expect(client.cancelOrder).toHaveBeenCalledWith(400);
+
+      // Audit log records the race condition
+      expect(mockLogRisk).toHaveBeenCalledWith(
+        expect.stringContaining('Duplicate position race condition'),
+        expect.objectContaining({ symbol: 'AAPL', orderId: '300', fillPrice: 150 }),
+        'error',
+      );
+    });
+
+    it('should handle duplicate at insert time even when exchange close fails', async () => {
+      const client = makeMockT212Client();
+      client.placeMarketOrder
+        .mockResolvedValueOnce({ id: 310 })   // buy order
+        .mockRejectedValueOnce(new Error('Exchange down')); // close duplicate fails
+      client.getOrder.mockResolvedValue({
+        status: 'FILLED',
+        filledValue: 1500,
+        filledQuantity: 10,
+      });
+      client.placeStopOrder.mockResolvedValue({ id: 410 });
+      client.cancelOrder.mockResolvedValue(undefined);
+
+      orderManager.setT212Client(client);
+      mockSelectChain.get.mockReturnValueOnce(undefined); // pre-check passes
+      mockSelectChain.get.mockReturnValueOnce({ symbol: 'AAPL', shares: 10 }); // tx check finds dup
+
+      const result = await orderManager.executeBuy(makeBuyParams());
+
+      // Still fails even though exchange close failed
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Duplicate position detected');
+      expect(client.placeMarketOrder).toHaveBeenCalledTimes(2);
+    });
+
+    it('should cancel take-profit order when duplicate detected at insert time', async () => {
+      const client = makeMockT212Client();
+      client.placeMarketOrder
+        .mockResolvedValueOnce({ id: 320 })   // buy order
+        .mockResolvedValueOnce({ id: 321 });   // close duplicate
+      client.getOrder.mockResolvedValue({
+        status: 'FILLED',
+        filledValue: 1500,
+        filledQuantity: 10,
+      });
+      client.placeStopOrder.mockResolvedValue({ id: 420 });
+      client.placeLimitOrder.mockResolvedValue({ id: 520 }); // take-profit order
+      client.cancelOrder.mockResolvedValue(undefined);
+
+      orderManager.setT212Client(client);
+      mockSelectChain.get.mockReturnValueOnce(undefined); // pre-check passes
+      mockSelectChain.get.mockReturnValueOnce({ symbol: 'AAPL', shares: 10 }); // tx check finds dup
+
+      const result = await orderManager.executeBuy(makeBuyParams({ takeProfitPct: 0.10 }));
+
+      expect(result.success).toBe(false);
+      // Both stop and TP orders should be cancelled
+      expect(client.cancelOrder).toHaveBeenCalledWith(420); // stop order
+      expect(client.cancelOrder).toHaveBeenCalledWith(520); // take-profit order
     });
   });
 

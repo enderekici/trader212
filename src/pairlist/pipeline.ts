@@ -22,7 +22,8 @@ export class PairlistPipeline {
   private getMode(): PairlistMode {
     try {
       return configManager.get<PairlistMode>('pairlist.mode');
-    } catch {
+    } catch (err) {
+      log.warn({ err }, 'Failed to read pairlist.mode config, defaulting to dynamic');
       return 'dynamic';
     }
   }
@@ -31,7 +32,8 @@ export class PairlistPipeline {
   private getStaticSymbols(): string[] {
     try {
       return configManager.get<string[]>('pairlist.staticSymbols');
-    } catch {
+    } catch (err) {
+      log.warn({ err }, 'Failed to read pairlist.staticSymbols config, defaulting to empty list');
       return [];
     }
   }
@@ -244,7 +246,8 @@ export class PairlistPipeline {
     let maxPairs: number;
     try {
       maxPairs = configManager.get<number>('pairlist.maxPairs');
-    } catch {
+    } catch (err) {
+      log.warn({ err }, 'Failed to read pairlist.maxPairs config, defaulting to no limit');
       maxPairs = Number.POSITIVE_INFINITY;
     }
 
@@ -265,9 +268,17 @@ export class PairlistPipeline {
 
     const refreshMinutes = configManager.get<number>('pairlist.refreshMinutes');
     const maxAge = refreshMinutes * 60 * 1000;
+    const cacheAge = Date.now() - this.cache.timestamp;
 
-    if (Date.now() - this.cache.timestamp > maxAge) {
+    if (cacheAge > 2 * maxAge) {
+      log.warn({ cacheAgeMs: cacheAge, maxAgeMs: maxAge }, 'Pairlist cache significantly stale');
+      this.cache = null;
+      return null;
+    }
+
+    if (cacheAge > maxAge) {
       log.debug('Pairlist cache expired');
+      this.cache = null;
       return null;
     }
 

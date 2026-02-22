@@ -15,6 +15,8 @@ const statusStyles: Record<string, string> = {
 export function StatusBadge({ status, size = 'sm' }: StatusBadgeProps) {
   return (
     <span
+      role="status"
+      aria-label={`Status: ${status}`}
       className={cn(
         'inline-flex items-center gap-1.5 rounded-full border font-medium capitalize',
         size === 'sm' ? 'px-2 py-0.5 text-xs' : 'px-3 py-1 text-sm',
@@ -22,6 +24,7 @@ export function StatusBadge({ status, size = 'sm' }: StatusBadgeProps) {
       )}
     >
       <span
+        aria-hidden="true"
         className={cn(
           'inline-block rounded-full',
           size === 'sm' ? 'h-1.5 w-1.5' : 'h-2 w-2',

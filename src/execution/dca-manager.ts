@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import type { Trading212Client } from '../api/trading212/client.js';
 import { configManager } from '../config/manager.js';
 import { getDb } from '../db/index.js';
@@ -205,6 +205,8 @@ export class DCAManager {
         'DCA buy executed (simulated)',
       );
 
+      const posVersion = position.version ?? 1;
+      let versionConflict = false;
       db.transaction((tx) => {
         // Record DCA trade
         tx.insert(trades)
@@ -224,8 +226,9 @@ export class DCAManager {
           })
           .run();
 
-        // Update position
-        tx.update(positions)
+        // Update position with version check
+        const updateResult = tx
+          .update(positions)
           .set({
             shares: totalShares,
             entryPrice: newAvgPrice,
@@ -234,11 +237,24 @@ export class DCAManager {
             currentPrice: price,
             pnl: (price - newAvgPrice) * totalShares,
             pnlPct: (price - newAvgPrice) / newAvgPrice,
+            version: sql`version + 1`,
             updatedAt: now,
           })
-          .where(eq(positions.symbol, symbol))
+          .where(and(eq(positions.symbol, symbol), eq(positions.version, posVersion)))
           .run();
+
+        if (updateResult.changes === 0) {
+          versionConflict = true;
+        }
       });
+
+      if (versionConflict) {
+        log.warn(
+          { symbol, expectedVersion: posVersion },
+          'DCA position version conflict, retrying',
+        );
+        return { success: false, error: `Position version conflict for ${symbol}` };
+      }
 
       // Mark order as filled
       updateOrderStatus(localOrderId, {
@@ -307,6 +323,8 @@ export class DCAManager {
 
       const buySlippage = (fillPrice - price) / price;
 
+      const posVersion = position.version ?? 1;
+      let versionConflict = false;
       db.transaction((tx) => {
         // Record DCA trade
         tx.insert(trades)
@@ -326,8 +344,9 @@ export class DCAManager {
           })
           .run();
 
-        // Update position
-        tx.update(positions)
+        // Update position with version check
+        const updateResult = tx
+          .update(positions)
           .set({
             shares: totalShares,
             entryPrice: newAvgPrice,
@@ -336,11 +355,24 @@ export class DCAManager {
             currentPrice: fillPrice,
             pnl: (fillPrice - newAvgPrice) * totalShares,
             pnlPct: (fillPrice - newAvgPrice) / newAvgPrice,
+            version: sql`version + 1`,
             updatedAt: now,
           })
-          .where(eq(positions.symbol, symbol))
+          .where(and(eq(positions.symbol, symbol), eq(positions.version, posVersion)))
           .run();
+
+        if (updateResult.changes === 0) {
+          versionConflict = true;
+        }
       });
+
+      if (versionConflict) {
+        log.warn(
+          { symbol, expectedVersion: posVersion },
+          'DCA position version conflict after live fill',
+        );
+        return { success: false, error: `Position version conflict for ${symbol}` };
+      }
 
       log.info(
         {

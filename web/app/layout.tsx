@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Sidebar } from '@/components/sidebar';
 import { HeaderBar } from '@/components/header-bar';
 import { WizardMount } from '@/components/WizardMount';
+import { Providers } from '@/components/providers';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -13,12 +14,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className="dark">
       <body className="antialiased">
-        <Sidebar />
-        <main className="ml-56 min-h-screen p-6">
-          <HeaderBar />
-          {children}
-        </main>
-        <WizardMount />
+        <Providers>
+          <Sidebar />
+          <main className="ml-56 min-h-screen p-6">
+            <HeaderBar />
+            {children}
+          </main>
+          <WizardMount />
+        </Providers>
       </body>
     </html>
   );

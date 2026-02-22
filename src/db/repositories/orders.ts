@@ -67,7 +67,7 @@ export function createOrder(order: NewOrder): number {
   return Number(result.lastInsertRowid);
 }
 
-/** Update order status and/or fill information. */
+/** Update order status and/or fill information. Always increments version. */
 export function updateOrderStatus(orderId: number, updates: OrderUpdate): void {
   const db = getDb();
   const now = new Date().toISOString();
@@ -81,6 +81,7 @@ export function updateOrderStatus(orderId: number, updates: OrderUpdate): void {
       ...(updates.cancelReason !== undefined && { cancelReason: updates.cancelReason }),
       ...(updates.filledAt !== undefined && { filledAt: updates.filledAt }),
       updatedAt: updates.updatedAt ?? now,
+      version: sql`version + 1`,
     })
     .where(eq(orders.id, orderId))
     .run();
@@ -142,7 +143,7 @@ export function getOrderById(orderId: number): Order | undefined {
   return db.select().from(orders).where(eq(orders.id, orderId)).get();
 }
 
-/** Cancel an order: set status to 'cancelled' and record reason. */
+/** Cancel an order: set status to 'cancelled' and record reason. Always increments version. */
 export function cancelOrder(orderId: number, reason: string): void {
   const db = getDb();
   const now = new Date().toISOString();
@@ -152,6 +153,7 @@ export function cancelOrder(orderId: number, reason: string): void {
       status: 'cancelled',
       cancelReason: reason,
       updatedAt: now,
+      version: sql`version + 1`,
     })
     .where(eq(orders.id, orderId))
     .run();
@@ -201,11 +203,14 @@ export function findOrderReplacedBy(replacedByOrderId: number): Order | undefine
   return db.select().from(orders).where(eq(orders.replacedByOrderId, replacedByOrderId)).get();
 }
 
-/** Set the replacedByOrderId field on an order record. */
+/** Set the replacedByOrderId field on an order record. Always increments version. */
 export function setReplacedByOrderId(orderId: number, replacedByOrderId: number): void {
   const db = getDb();
   const now = new Date().toISOString();
-  db.update(orders).set({ replacedByOrderId, updatedAt: now }).where(eq(orders.id, orderId)).run();
+  db.update(orders)
+    .set({ replacedByOrderId, updatedAt: now, version: sql`version + 1` })
+    .where(eq(orders.id, orderId))
+    .run();
 }
 
 /**

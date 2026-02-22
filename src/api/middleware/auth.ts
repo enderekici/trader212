@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import type { NextFunction, Request, Response } from 'express';
 import { createLogger } from '../../utils/logger.js';
 
@@ -25,7 +26,9 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction):
   }
 
   const token = authHeader.slice(7);
-  if (token !== apiKey) {
+  const apiKeyBuf = Buffer.from(apiKey);
+  const tokenBuf = Buffer.from(token);
+  if (apiKeyBuf.length !== tokenBuf.length || !crypto.timingSafeEqual(apiKeyBuf, tokenBuf)) {
     log.warn({ path: req.path, ip: req.ip }, 'Unauthorized request — invalid token');
     res.status(401).json({ error: 'Unauthorized: invalid token' });
     return;

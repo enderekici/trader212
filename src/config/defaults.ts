@@ -604,7 +604,7 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
   // Risk - correlation
   {
     key: 'risk.maxCorrelation',
-    value: '0.85',
+    value: '0.70',
     category: 'risk',
     description: 'Max correlation between positions (0-1)',
   },
@@ -824,7 +824,7 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
   // Market Regime Detection
   {
     key: 'regime.enabled',
-    value: 'false',
+    value: 'true',
     category: 'regime',
     description: 'Enable market regime detection',
   },
@@ -1238,13 +1238,13 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
   // Trading — Slippage & Spread
   {
     key: 'trading.slippageMarketPct',
-    value: '0.001',
+    value: '0.0015',
     category: 'trading',
-    description: 'Simulated slippage percentage (0.1%)',
+    description: 'Simulated slippage percentage (0.15%)',
   },
   {
     key: 'trading.spreadBps',
-    value: '1',
+    value: '3',
     category: 'trading',
     description: 'Simulated spread in basis points',
   },

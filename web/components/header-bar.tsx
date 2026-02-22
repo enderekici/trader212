@@ -48,10 +48,13 @@ export function HeaderBar() {
   return (
     <div className="flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-2 text-xs mb-4">
       {/* Environment badge */}
-      <span className={cn(
-        'rounded px-2 py-0.5 font-bold uppercase',
-        isLive ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-      )}>
+      <span
+        aria-label={`Environment: ${status.environment}`}
+        className={cn(
+          'rounded px-2 py-0.5 font-bold uppercase',
+          isLive ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+        )}
+      >
         {status.environment}
       </span>
 
@@ -63,25 +66,29 @@ export function HeaderBar() {
       {/* Dry run badge */}
       {isDryRun && (
         <span className="rounded bg-yellow-500/20 px-2 py-0.5 font-medium text-yellow-400 border border-yellow-500/30 flex items-center gap-1">
-          <Shield className="h-3 w-3" />
+          <Shield className="h-3 w-3" aria-hidden="true" />
           DRY RUN
         </span>
       )}
 
       {/* Bot status */}
-      <span className={cn(
-        'flex items-center gap-1',
-        status.status === 'paused' ? 'text-yellow-400' : 'text-emerald-400'
-      )}>
-        <Power className="h-3 w-3" />
+      <span
+        role="status"
+        aria-label={`Bot is ${status.status === 'paused' ? 'paused' : 'running'}`}
+        className={cn(
+          'flex items-center gap-1',
+          status.status === 'paused' ? 'text-yellow-400' : 'text-emerald-400'
+        )}
+      >
+        <Power className="h-3 w-3" aria-hidden="true" />
         {status.status === 'paused' ? 'PAUSED' : 'RUNNING'}
       </span>
 
       <span className="text-border">|</span>
 
       {/* Market status */}
-      <span className={cn('flex items-center gap-1', marketStatusColor)}>
-        <Clock className="h-3 w-3" />
+      <span role="status" aria-live="polite" className={cn('flex items-center gap-1', marketStatusColor)}>
+        <Clock className="h-3 w-3" aria-hidden="true" />
         {marketStatusLabel}
         {mt && mt.countdownMinutes > 0 && (
           <span className="text-muted-foreground">
@@ -92,7 +99,7 @@ export function HeaderBar() {
 
       {mt?.isHoliday && (
         <span className="text-orange-400 flex items-center gap-1">
-          <AlertTriangle className="h-3 w-3" />
+          <AlertTriangle className="h-3 w-3" aria-hidden="true" />
           Holiday
         </span>
       )}
@@ -110,12 +117,14 @@ export function HeaderBar() {
 
       {/* Emergency stop */}
       <button
+        type="button"
+        aria-label="Emergency stop"
         onClick={() => {
           if (confirm('EMERGENCY STOP: This will close ALL positions and pause the bot. Continue?')) {
             api.emergencyStop().catch(console.error);
           }
         }}
-        className="ml-2 rounded bg-red-600 px-2 py-0.5 font-bold text-white hover:bg-red-700 transition-colors"
+        className="ml-2 rounded bg-red-600 px-2 py-0.5 font-bold text-white hover:bg-red-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 focus-visible:ring-offset-transparent"
       >
         STOP
       </button>

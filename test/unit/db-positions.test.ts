@@ -67,7 +67,8 @@ describe('db/repositories/positions', () => {
   describe('updatePosition', () => {
     it('updates a position by symbol', async () => {
       const updated = { symbol: 'AAPL', currentPrice: 160 };
-      mockDb.update.mockReturnValue(createChainableMock(updated));
+      mockDb.update.mockReturnValue(createChainableMock({ changes: 1 }));
+      mockDb.select.mockReturnValue(createChainableMock(updated));
 
       const { updatePosition } = await import('../../src/db/repositories/positions.js');
       const result = updatePosition('AAPL', { currentPrice: 160 });

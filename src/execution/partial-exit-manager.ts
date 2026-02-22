@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import type { Trading212Client } from '../api/trading212/client.js';
 import { configManager } from '../config/manager.js';
 import { getDb } from '../db/index.js';
@@ -35,6 +35,7 @@ interface Position {
   dcaCount: number | null;
   totalInvested: number | null;
   partialExitCount: number | null;
+  version: number | null;
   updatedAt: string | null;
 }
 
@@ -226,6 +227,8 @@ export class PartialExitManager {
         );
       }
 
+      const posVersion = position.version ?? 1;
+      let versionConflict = false;
       db.transaction((tx) => {
         // Create a SELL trade record for the partial exit
         tx.insert(trades)
@@ -247,17 +250,28 @@ export class PartialExitManager {
           })
           .run();
 
-        // Update position: reduce shares, increment partialExitCount
-        tx.update(positions)
+        // Update position: reduce shares, increment partialExitCount (with version check)
+        const updateResult = tx
+          .update(positions)
           .set({
             shares: position.shares - sharesToSell,
             stopLoss: newStopLoss,
             partialExitCount: (position.partialExitCount ?? 0) + 1,
+            version: sql`version + 1`,
             updatedAt: now,
           })
-          .where(eq(positions.symbol, symbol))
+          .where(and(eq(positions.symbol, symbol), eq(positions.version, posVersion)))
           .run();
+
+        if (updateResult.changes === 0) {
+          versionConflict = true;
+        }
       });
+
+      if (versionConflict) {
+        log.warn({ symbol, expectedVersion: posVersion }, 'Partial exit position version conflict');
+        return { success: false, error: `Position version conflict for ${symbol}` };
+      }
 
       // Mark order as filled
       updateOrderStatus(localOrderId, {
@@ -382,7 +396,7 @@ export class PartialExitManager {
 
           // Update position with new stop order ID
           db.update(positions)
-            .set({ stopOrderId: String(stopOrder.id) })
+            .set({ stopOrderId: String(stopOrder.id), version: sql`version + 1` })
             .where(eq(positions.symbol, symbol))
             .run();
         } catch (err) {
@@ -391,6 +405,10 @@ export class PartialExitManager {
       }
 
       // Record partial exit trade and update position atomically
+      // Re-read position to get latest version after potential stop order update
+      const latestPos = db.select().from(positions).where(eq(positions.symbol, symbol)).get();
+      const liveVersion = latestPos?.version ?? 1;
+      let liveVersionConflict = false;
       db.transaction((tx) => {
         // Create a SELL trade record for the partial exit
         tx.insert(trades)
@@ -412,17 +430,30 @@ export class PartialExitManager {
           })
           .run();
 
-        // Update position: reduce shares, increment partialExitCount, update stop
-        tx.update(positions)
+        // Update position: reduce shares, increment partialExitCount, update stop (with version check)
+        const updateResult = tx
+          .update(positions)
           .set({
             shares: position.shares - sharesToSell,
             stopLoss: newStopLoss,
             partialExitCount: (position.partialExitCount ?? 0) + 1,
+            version: sql`version + 1`,
             updatedAt: now,
           })
-          .where(eq(positions.symbol, symbol))
+          .where(and(eq(positions.symbol, symbol), eq(positions.version, liveVersion)))
           .run();
+
+        if (updateResult.changes === 0) {
+          liveVersionConflict = true;
+        }
       });
+
+      if (liveVersionConflict) {
+        log.warn(
+          { symbol, expectedVersion: liveVersion },
+          'Live partial exit position version conflict',
+        );
+      }
 
       log.info(
         {
