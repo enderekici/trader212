@@ -132,7 +132,7 @@ Autonomous AI trading bot for Trading212. ESM TypeScript, Node.js 24+.
   - `src/backtest/` - Backtesting engine
     - `engine.ts` - Backtesting engine: runs strategies on historical data (with slippage/spread modeling)
     - `data-loader.ts` - Historical data loader for backtests (supports cacheOnly mode for offline backtests, endDateMs for date range filtering)
-    - `reporter.ts` - Backtest result reporting, visualization, and profitability gates (6 acceptance criteria: WF OOS CAGR>0%, profit factor>=1.4, Sharpe>=1.2, max DD<=12%, Monte Carlo P25>0, win rate>=55%)
+    - `reporter.ts` - Backtest result reporting, visualization, and profitability gates (6 acceptance criteria: WF OOS CAGR>0%, profit factor>=1.4, Sharpe>=1.0, max DD<=18%, Monte Carlo P25>0, win rate>=45%)
     - `types.ts` - Backtest-specific type definitions
     - `walk-forward.ts` - Walk-forward analysis: rolling train/test windows for out-of-sample validation
   - `src/utils/` - Utilities

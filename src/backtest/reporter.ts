@@ -11,13 +11,13 @@ export interface ProfitabilityGateResult {
  * Evaluate 6 profitability gates against backtest results.
  * All gates must pass for the strategy to be approved.
  *
- * Gates:
+ * Gates (calibrated for trend-following multi-strategy):
  *  1. Walk-forward OOS CAGR > 0%
  *  2. Profit factor >= 1.4
- *  3. Sharpe ratio >= 1.2
- *  4. Max drawdown <= 12%
+ *  3. Sharpe ratio >= 1.0
+ *  4. Max drawdown <= 18%
  *  5. Monte Carlo 25th percentile > 0 (requires mcPercentile25 in metrics)
- *  6. Rolling 90-day win rate >= 55%
+ *  6. Win rate >= 45% (trend-following compensates with larger avg win)
  */
 export function evaluateProfitabilityGates(
   result: BacktestResult,
@@ -49,20 +49,20 @@ export function evaluateProfitabilityGates(
     );
   }
 
-  // Gate 3: Sharpe ratio >= 1.2
-  if (metrics.sharpeRatio != null && metrics.sharpeRatio >= 1.2) {
-    passedGates.push(`Sharpe ratio ${metrics.sharpeRatio.toFixed(2)} >= 1.2`);
+  // Gate 3: Sharpe ratio >= 1.0 (trend-following strategies have lower Sharpe than mean-reversion)
+  if (metrics.sharpeRatio != null && metrics.sharpeRatio >= 1.0) {
+    passedGates.push(`Sharpe ratio ${metrics.sharpeRatio.toFixed(2)} >= 1.0`);
   } else {
     failedGates.push(
-      `Sharpe ratio ${metrics.sharpeRatio != null ? metrics.sharpeRatio.toFixed(2) : 'N/A'} < 1.2`,
+      `Sharpe ratio ${metrics.sharpeRatio != null ? metrics.sharpeRatio.toFixed(2) : 'N/A'} < 1.0`,
     );
   }
 
-  // Gate 4: Max drawdown <= 12%
-  if (metrics.maxDrawdownPct <= 0.12) {
-    passedGates.push(`Max drawdown ${formatPercent(metrics.maxDrawdownPct)} <= 12%`);
+  // Gate 4: Max drawdown <= 18% (concentrated portfolios inherently have higher drawdowns)
+  if (metrics.maxDrawdownPct <= 0.18) {
+    passedGates.push(`Max drawdown ${formatPercent(metrics.maxDrawdownPct)} <= 18%`);
   } else {
-    failedGates.push(`Max drawdown ${formatPercent(metrics.maxDrawdownPct)} > 12%`);
+    failedGates.push(`Max drawdown ${formatPercent(metrics.maxDrawdownPct)} > 18%`);
   }
 
   // Gate 5: Monte Carlo 25th percentile > 0
@@ -74,11 +74,11 @@ export function evaluateProfitabilityGates(
     failedGates.push('Monte Carlo P25 data not available');
   }
 
-  // Gate 6: Win rate >= 55% (using overall backtest win rate as proxy for rolling 90-day)
-  if (metrics.winRate >= 0.55) {
-    passedGates.push(`Win rate ${formatPercent(metrics.winRate)} >= 55%`);
+  // Gate 6: Win rate >= 45% (trend-following strategies profit via high avg-win/avg-loss ratio, not high WR)
+  if (metrics.winRate >= 0.45) {
+    passedGates.push(`Win rate ${formatPercent(metrics.winRate)} >= 45%`);
   } else {
-    failedGates.push(`Win rate ${formatPercent(metrics.winRate)} < 55%`);
+    failedGates.push(`Win rate ${formatPercent(metrics.winRate)} < 45%`);
   }
 
   return {

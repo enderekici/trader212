@@ -150,9 +150,9 @@ async function runWorker() {
   }
 
   // ── Common dates & date-indexed prices ─────────────────────────────────
-  const tradingDates = dataLoader.getCommonDates(allData, START_DATE, END_DATE);
+  const tradingDates = dataLoader.getTradingDates(allData, START_DATE, END_DATE);
   if (tradingDates.length === 0) {
-    console.error(`[Worker ${process.pid}] No common trading dates, exiting.`);
+    console.error(`[Worker ${process.pid}] No trading dates, exiting.`);
     process.exit(1);
   }
 

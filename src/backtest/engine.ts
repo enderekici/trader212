@@ -90,7 +90,7 @@ export class BacktestEngine {
     }
 
     // 2. Get common trading dates in the backtest range
-    const tradingDates = this.dataLoader.getCommonDates(allData, config.startDate, config.endDate);
+    const tradingDates = this.dataLoader.getTradingDates(allData, config.startDate, config.endDate);
 
     if (tradingDates.length === 0) {
       log.warn('No common trading dates found');

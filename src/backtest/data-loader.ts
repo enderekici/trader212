@@ -145,29 +145,23 @@ export class BacktestDataLoader {
   }
 
   /**
-   * Get the set of dates that exist in the backtest range across all symbols.
+   * Get all trading dates that exist in the backtest range across any symbol.
+   * Uses the union of dates — a day is included if ANY symbol has data for it.
+   * This matches real trading: you don't skip AAPL because KMI has no data.
    * Only returns dates that fall within [startDate, endDate].
    */
-  getCommonDates(data: Map<string, Candle[]>, startDate: string, endDate: string): string[] {
+  getTradingDates(data: Map<string, Candle[]>, startDate: string, endDate: string): string[] {
     if (data.size === 0) return [];
 
-    // Collect all dates per symbol that are within the backtest range
-    const dateSets: Set<string>[] = [];
+    const allDates = new Set<string>();
     for (const candles of data.values()) {
-      const dates = new Set<string>();
       for (const c of candles) {
         if (c.date >= startDate && c.date <= endDate) {
-          dates.add(c.date);
+          allDates.add(c.date);
         }
       }
-      dateSets.push(dates);
     }
 
-    if (dateSets.length === 0) return [];
-
-    // Intersect all date sets
-    const commonDates = [...dateSets[0]].filter((d) => dateSets.every((set) => set.has(d)));
-
-    return commonDates.sort();
+    return [...allDates].sort();
   }
 }

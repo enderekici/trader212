@@ -201,26 +201,26 @@ describe('BacktestDataLoader', () => {
     });
   });
 
-  describe('getCommonDates', () => {
-    it('returns common dates across all symbols within range', () => {
+  describe('getTradingDates', () => {
+    it('returns union of dates across all symbols within range', () => {
       const data = new Map<string, Candle[]>([
         ['AAPL', makeCandles(['2024-06-01', '2024-06-02', '2024-06-03', '2024-06-04'])],
         ['MSFT', makeCandles(['2024-06-01', '2024-06-02', '2024-06-03'])],
       ]);
 
       const loader = new BacktestDataLoader();
-      const commonDates = loader.getCommonDates(data, '2024-06-01', '2024-06-30');
+      const dates = loader.getTradingDates(data, '2024-06-01', '2024-06-30');
 
-      expect(commonDates).toEqual(['2024-06-01', '2024-06-02', '2024-06-03']);
+      expect(dates).toEqual(['2024-06-01', '2024-06-02', '2024-06-03', '2024-06-04']);
     });
 
     it('returns empty array for empty data', () => {
       const data = new Map<string, Candle[]>();
 
       const loader = new BacktestDataLoader();
-      const commonDates = loader.getCommonDates(data, '2024-06-01', '2024-06-30');
+      const dates = loader.getTradingDates(data, '2024-06-01', '2024-06-30');
 
-      expect(commonDates).toEqual([]);
+      expect(dates).toEqual([]);
     });
 
     it('filters dates to within startDate and endDate', () => {
@@ -238,9 +238,9 @@ describe('BacktestDataLoader', () => {
       ]);
 
       const loader = new BacktestDataLoader();
-      const commonDates = loader.getCommonDates(data, '2024-06-01', '2024-06-30');
+      const dates = loader.getTradingDates(data, '2024-06-01', '2024-06-30');
 
-      expect(commonDates).toEqual(['2024-06-01', '2024-06-02']);
+      expect(dates).toEqual(['2024-06-01', '2024-06-02']);
     });
 
     it('returns dates sorted chronologically', () => {
@@ -249,9 +249,9 @@ describe('BacktestDataLoader', () => {
       ]);
 
       const loader = new BacktestDataLoader();
-      const commonDates = loader.getCommonDates(data, '2024-06-01', '2024-06-30');
+      const dates = loader.getTradingDates(data, '2024-06-01', '2024-06-30');
 
-      expect(commonDates).toEqual(['2024-06-01', '2024-06-02', '2024-06-03']);
+      expect(dates).toEqual(['2024-06-01', '2024-06-02', '2024-06-03']);
     });
 
     it('handles single symbol', () => {
@@ -260,21 +260,21 @@ describe('BacktestDataLoader', () => {
       ]);
 
       const loader = new BacktestDataLoader();
-      const commonDates = loader.getCommonDates(data, '2024-06-01', '2024-06-30');
+      const dates = loader.getTradingDates(data, '2024-06-01', '2024-06-30');
 
-      expect(commonDates).toEqual(['2024-06-01', '2024-06-02', '2024-06-03']);
+      expect(dates).toEqual(['2024-06-01', '2024-06-02', '2024-06-03']);
     });
 
-    it('returns empty when symbols have no overlapping dates', () => {
+    it('includes all dates when symbols have no overlapping dates (union)', () => {
       const data = new Map<string, Candle[]>([
         ['AAPL', makeCandles(['2024-06-01', '2024-06-02'])],
         ['MSFT', makeCandles(['2024-06-03', '2024-06-04'])],
       ]);
 
       const loader = new BacktestDataLoader();
-      const commonDates = loader.getCommonDates(data, '2024-06-01', '2024-06-30');
+      const dates = loader.getTradingDates(data, '2024-06-01', '2024-06-30');
 
-      expect(commonDates).toEqual([]);
+      expect(dates).toEqual(['2024-06-01', '2024-06-02', '2024-06-03', '2024-06-04']);
     });
 
     it('handles missing data gracefully (symbols with data outside range)', () => {
@@ -284,17 +284,30 @@ describe('BacktestDataLoader', () => {
       ]);
 
       const loader = new BacktestDataLoader();
-      const commonDates = loader.getCommonDates(data, '2024-06-01', '2024-06-30');
+      const dates = loader.getTradingDates(data, '2024-06-01', '2024-06-30');
 
-      expect(commonDates).toEqual([]);
+      expect(dates).toEqual([]);
     });
 
     it('returns empty array when data map is empty', () => {
       const emptyData = new Map<string, Candle[]>();
       const loader = new BacktestDataLoader();
-      const commonDates = loader.getCommonDates(emptyData, '2024-01-01', '2024-12-31');
+      const dates = loader.getTradingDates(emptyData, '2024-01-01', '2024-12-31');
 
-      expect(commonDates).toEqual([]);
+      expect(dates).toEqual([]);
+    });
+
+    it('deduplicates dates from multiple symbols', () => {
+      const data = new Map<string, Candle[]>([
+        ['AAPL', makeCandles(['2024-06-01', '2024-06-02', '2024-06-03'])],
+        ['MSFT', makeCandles(['2024-06-02', '2024-06-03', '2024-06-04'])],
+        ['GOOG', makeCandles(['2024-06-01', '2024-06-04', '2024-06-05'])],
+      ]);
+
+      const loader = new BacktestDataLoader();
+      const dates = loader.getTradingDates(data, '2024-06-01', '2024-06-30');
+
+      expect(dates).toEqual(['2024-06-01', '2024-06-02', '2024-06-03', '2024-06-04', '2024-06-05']);
     });
   });
 });

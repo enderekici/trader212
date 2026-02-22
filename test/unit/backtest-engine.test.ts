@@ -83,7 +83,7 @@ function createMockDataLoader(data: Map<string, Candle[]>): BacktestDataLoader {
   const loader = new BacktestDataLoader();
   // Override loadMultiple to return synthetic data
   loader.loadMultiple = vi.fn().mockResolvedValue(data);
-  // getCommonDates still works normally since it's a pure function
+  // getTradingDates still works normally since it's a pure function
   return loader;
 }
 

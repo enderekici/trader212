@@ -8,11 +8,18 @@ export class WalkForwardAnalyzer {
   private config: BacktestConfig;
   private windows: number;
   private trainRatio: number;
+  private strategy: 'legacy' | 'multi';
 
-  constructor(config: BacktestConfig, windows: number, trainRatio: number) {
+  constructor(
+    config: BacktestConfig,
+    windows: number,
+    trainRatio: number,
+    strategy: 'legacy' | 'multi' = 'legacy',
+  ) {
     this.config = config;
     this.windows = windows;
     this.trainRatio = trainRatio;
+    this.strategy = strategy;
   }
 
   async run(): Promise<WalkForwardResult> {
@@ -50,10 +57,10 @@ export class WalkForwardAnalyzer {
         'Running walk-forward window',
       );
 
-      const trainEngine = await createBacktestEngine(trainConfig);
+      const trainEngine = await createBacktestEngine(trainConfig, undefined, this.strategy);
       const trainResult = await trainEngine.run();
 
-      const testEngine = await createBacktestEngine(testConfig);
+      const testEngine = await createBacktestEngine(testConfig, undefined, this.strategy);
       const testResult = await testEngine.run();
 
       windowResults.push({
