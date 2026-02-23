@@ -59,7 +59,7 @@ describe('config defaults', () => {
 
     expect(JSON.parse(byKey['t212.environment'].value)).toBe('demo');
     expect(JSON.parse(byKey['execution.dryRun'].value)).toBe(true);
-    expect(JSON.parse(byKey['risk.maxPositions'].value)).toBe(10);
+    expect(JSON.parse(byKey['risk.maxPositions'].value)).toBe(5);
     expect(JSON.parse(byKey['pairlist.filters'].value)).toBeInstanceOf(Array);
   });
 

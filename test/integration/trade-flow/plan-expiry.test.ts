@@ -1,9 +1,5 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { insertTradePlan } from '../helpers/fixtures.js';
-
-vi.mock('../../../src/ai/agent.js', () => ({
-  getActiveModelName: () => 'test-model',
-}));
 
 const { TradePlanner } = await import('../../../src/execution/trade-planner.js');
 

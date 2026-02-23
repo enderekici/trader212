@@ -49,9 +49,8 @@ function createTrade(overrides: Partial<typeof schema.trades.$inferSelect> = {})
     stopLoss: 95,
     takeProfit: 110,
     exitReason: 'take_profit',
-    aiReasoning: null,
+    reasoning: null,
     convictionScore: 0.8,
-    aiModel: 'claude-opus-4',
     intendedPrice: 100,
     slippage: 0,
     accountType: 'INVEST',
@@ -98,12 +97,11 @@ function createSignal(overrides: Partial<typeof schema.signals.$inferSelect> = {
     technicalScore: 0.7,
     sentimentScore: 0.5,
     fundamentalScore: 0.6,
-    aiScore: 0.8,
+    decisionScore: 0.8,
     convictionTotal: 0.65,
     decision: 'BUY',
     executed: true,
-    aiReasoning: 'Strong technical setup',
-    aiModel: 'claude-opus-4',
+    reasoning: 'Strong technical setup',
     suggestedStopLossPct: 0.05,
     suggestedPositionSizePct: 0.1,
     suggestedTakeProfitPct: 0.1,
@@ -193,7 +191,7 @@ describe('attribution', () => {
         technicalScore: 0.8,
         fundamentalScore: 0.5,
         sentimentScore: 0.4,
-        aiScore: 0.6,
+        decisionScore: 0.6,
       });
 
       expect(getDominantFactor(signal)).toBe('technical');
@@ -204,7 +202,7 @@ describe('attribution', () => {
         technicalScore: 0.5,
         fundamentalScore: 0.75,
         sentimentScore: 0.4,
-        aiScore: 0.6,
+        decisionScore: 0.6,
       });
 
       expect(getDominantFactor(signal)).toBe('fundamental');
@@ -215,7 +213,7 @@ describe('attribution', () => {
         technicalScore: 0.5,
         fundamentalScore: 0.5,
         sentimentScore: 0.7,
-        aiScore: 0.6,
+        decisionScore: 0.6,
       });
 
       expect(getDominantFactor(signal)).toBe('sentiment');
@@ -226,7 +224,7 @@ describe('attribution', () => {
         technicalScore: 0.5,
         fundamentalScore: 0.5,
         sentimentScore: 0.4,
-        aiScore: 0.85,
+        decisionScore: 0.85,
       });
 
       expect(getDominantFactor(signal)).toBe('ai');
@@ -237,7 +235,7 @@ describe('attribution', () => {
         technicalScore: 0.5,
         fundamentalScore: 0.5,
         sentimentScore: 0.4,
-        aiScore: 0.55,
+        decisionScore: 0.55,
       });
 
       expect(getDominantFactor(signal)).toBeNull();
@@ -247,12 +245,12 @@ describe('attribution', () => {
       expect(getDominantFactor(null)).toBeNull();
     });
 
-    it('should use 0 when aiScore is null (line 124 ?? branch)', () => {
+    it('should use 0 when decisionScore is null (line 124 ?? branch)', () => {
       const signal = createSignal({
         technicalScore: 0.5,
         fundamentalScore: 0.5,
         sentimentScore: 0.5,
-        aiScore: null as unknown as number, // triggers aiScore ?? 0
+        decisionScore: null as unknown as number, // triggers decisionScore ?? 0
       });
       // All scores: technical=0.5, fundamental=0.5, sentiment=0.5, ai=0 → maxScore=0.5 < 0.6 → null
       expect(getDominantFactor(signal)).toBeNull();
@@ -263,7 +261,7 @@ describe('attribution', () => {
         technicalScore: 0.5,
         fundamentalScore: 0.5,
         sentimentScore: null as unknown as number, // triggers sentimentScore ?? 0
-        aiScore: 0.5,
+        decisionScore: 0.5,
       });
       // All scores: technical=0.5, fundamental=0.5, sentiment=0, ai=0.5 → maxScore=0.5 < 0.6 → null
       expect(getDominantFactor(signal)).toBeNull();
@@ -274,7 +272,7 @@ describe('attribution', () => {
         technicalScore: null as unknown as number, // triggers technicalScore ?? 0
         fundamentalScore: null as unknown as number, // triggers fundamentalScore ?? 0
         sentimentScore: 0.5,
-        aiScore: 0.5,
+        decisionScore: 0.5,
       });
       // All scores: technical=0, fundamental=0, sentiment=0.5, ai=0.5 → maxScore=0.5 < 0.6 → null
       expect(getDominantFactor(signal)).toBeNull();
@@ -286,17 +284,17 @@ describe('attribution', () => {
       const matchedTrades = [
         {
           trade: createTrade({ pnl: 100, pnlPct: 0.1 }),
-          signal: createSignal({ technicalScore: 0.8, fundamentalScore: 0.5, sentimentScore: 0.4, aiScore: 0.5 }),
+          signal: createSignal({ technicalScore: 0.8, fundamentalScore: 0.5, sentimentScore: 0.4, decisionScore: 0.5 }),
           sector: 'Technology',
         },
         {
           trade: createTrade({ pnl: -50, pnlPct: -0.05 }),
-          signal: createSignal({ technicalScore: 0.7, fundamentalScore: 0.5, sentimentScore: 0.4, aiScore: 0.5 }),
+          signal: createSignal({ technicalScore: 0.7, fundamentalScore: 0.5, sentimentScore: 0.4, decisionScore: 0.5 }),
           sector: 'Technology',
         },
         {
           trade: createTrade({ pnl: 200, pnlPct: 0.2 }),
-          signal: createSignal({ technicalScore: 0.5, fundamentalScore: 0.9, sentimentScore: 0.4, aiScore: 0.5 }),
+          signal: createSignal({ technicalScore: 0.5, fundamentalScore: 0.9, sentimentScore: 0.4, decisionScore: 0.5 }),
           sector: 'Finance',
         },
       ];
@@ -351,7 +349,7 @@ describe('attribution', () => {
             pnl: null as unknown as number,
             pnlPct: null as unknown as number,
           }),
-          signal: createSignal({ technicalScore: 0.8, fundamentalScore: 0.5, sentimentScore: 0.4, aiScore: 0.5 }),
+          signal: createSignal({ technicalScore: 0.8, fundamentalScore: 0.5, sentimentScore: 0.4, decisionScore: 0.5 }),
           sector: 'Technology',
         },
       ];
@@ -765,17 +763,17 @@ describe('attribution', () => {
       const matchedTrades = [
         {
           trade: createTrade(),
-          signal: createSignal({ technicalScore: 0.8, fundamentalScore: 0.6, sentimentScore: 0.5, aiScore: 0.7 }),
+          signal: createSignal({ technicalScore: 0.8, fundamentalScore: 0.6, sentimentScore: 0.5, decisionScore: 0.7 }),
           sector: null,
         },
         {
           trade: createTrade(),
-          signal: createSignal({ technicalScore: 0.7, fundamentalScore: 0.5, sentimentScore: 0.4, aiScore: 0.6 }),
+          signal: createSignal({ technicalScore: 0.7, fundamentalScore: 0.5, sentimentScore: 0.4, decisionScore: 0.6 }),
           sector: null,
         },
         {
           trade: createTrade(),
-          signal: createSignal({ technicalScore: 0.9, fundamentalScore: 0.7, sentimentScore: 0.6, aiScore: 0.8 }),
+          signal: createSignal({ technicalScore: 0.9, fundamentalScore: 0.7, sentimentScore: 0.6, decisionScore: 0.8 }),
           sector: null,
         },
       ];
@@ -829,7 +827,7 @@ describe('attribution', () => {
             technicalScore: null,
             fundamentalScore: null,
             sentimentScore: null,
-            aiScore: null,
+            decisionScore: null,
           }),
           sector: null,
         },
@@ -839,7 +837,7 @@ describe('attribution', () => {
             technicalScore: null,
             fundamentalScore: null,
             sentimentScore: null,
-            aiScore: null,
+            decisionScore: null,
           }),
           sector: null,
         },
@@ -1374,9 +1372,8 @@ describe('attribution', () => {
         stopLoss: 95,
         takeProfit: 115,
         exitReason: 'take_profit',
-        aiReasoning: null,
+        reasoning: null,
         convictionScore: 0.8,
-        aiModel: 'claude',
         intendedPrice: 100,
         slippage: 0,
         createdAt: '2024-01-15T14:30:00.000Z',
@@ -1391,7 +1388,7 @@ describe('attribution', () => {
         technicalScore: 0.7,
         fundamentalScore: 0.0,
         sentimentScore: 0.0,
-        aiScore: 0.8,
+        decisionScore: 0.8,
         price: 100,
         reasoning: 'Strong momentum',
         createdAt: '2024-01-15T14:25:00.000Z',

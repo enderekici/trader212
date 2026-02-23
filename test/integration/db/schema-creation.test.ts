@@ -16,8 +16,6 @@ describe('Schema Creation', () => {
     'pairlist_history',
     'config',
     'trade_plans',
-    'ai_research',
-    'model_performance',
     'audit_log',
     'pair_locks',
     'orders',

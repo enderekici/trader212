@@ -40,7 +40,7 @@ Autonomous AI trading bot for Trading212. ESM TypeScript, Node.js 24+.
     - `strategy-profiles.ts` - Pre-configured strategy profiles (conservative, balanced, aggressive, scalper, swing)
   - `src/db/` - Database layer
     - `index.ts` - Database connection (better-sqlite3 + drizzle-orm)
-    - `schema.ts` - Drizzle schema (25 tables)
+    - `schema.ts` - Drizzle schema (22 tables)
     - `repositories/` - Data access layers
       - `cache.ts` - Price, news, earnings, insider, fundamental caching
       - `config.ts` - Configuration CRUD
@@ -51,7 +51,6 @@ Autonomous AI trading bot for Trading212. ESM TypeScript, Node.js 24+.
       - `orders.ts` - Order management and tracking
       - `conditional-orders.ts` - Conditional order logic (OCO, Trailing, etc.)
       - `journal.ts` - Trade journal entries with tags and notes
-      - `research-watchlist.ts` - Research watchlist CRUD (symbols tracked for AI research)
       - `strategy-profiles.ts` - Strategy profile management
       - `tax-lots.ts` - Tax lot tracking for FIFO/LIFO/HIFO
       - `webhooks.ts` - Webhook configuration and logs
@@ -70,18 +69,7 @@ Autonomous AI trading bot for Trading212. ESM TypeScript, Node.js 24+.
     - `price-streamer.ts` - Real-time price streaming via WebSocket
     - `fred.ts` - FRED (Federal Reserve Economic Data) client
     - `ticker-mapper.ts` - Symbol <-> Trading212 ticker mapping
-  - `src/ai/` - AI decision engine
-    - `agent.ts` - AI orchestrator, AIAgent interface, createAIAgent() factory
-    - `prompt-builder.ts` - Structured prompt construction for AI
-    - `decision-processor.ts` - Parse + validate AI JSON responses
-    - `market-research.ts` - MarketResearcher: scheduled AI research for stock discovery
-    - `self-improvement.ts` - AI self-improvement system: analyzes past decisions, identifies patterns, updates strategies
-    - `rules-engine.ts` - RulesEngine: regime-weighted 4-strategy consensus (mean-reversion, trend-following, momentum, breakout) with fundamental quality/value/growth scoring, volatility risk adjustment, ATR-based stop/take-profit (zero-cost, no LLM calls, backtest-reproducible)
-    - `consensus.ts` - ConsensusEngine: multi-model consensus voting (majority/weighted/unanimous modes) across multiple OpenAI-compat profiles
-    - `adapters/` - Provider adapters
-      - `anthropic.ts` - Anthropic Claude adapter (@anthropic-ai/sdk)
-      - `ollama.ts` - Ollama adapter (HTTP client)
-      - `openai-compat.ts` - OpenAI-compatible adapter (HTTP client)
+  - `src/analysis/decision-engine.ts` - DecisionEngine: deterministic regime-weighted 4-strategy consensus (mean-reversion, trend-following, momentum, breakout) with fundamental quality/value/growth scoring, volatility risk adjustment, ATR-based stop/take-profit. Types: DecisionContext, TradeDecision. Constant: DECISION_ENGINE_MODEL_NAME.
   - `src/execution/` - Trade execution
     - `order-manager.ts` - OrderManager: executeBuy(), executeClose(), dry-run simulation
     - `order-replacer.ts` - Order modification and replacement logic
@@ -116,7 +104,6 @@ Autonomous AI trading bot for Trading212. ESM TypeScript, Node.js 24+.
   - `src/monitoring/` - Monitoring and notifications
     - `telegram.ts` - TelegramNotifier: sendMessage(), sendAlert(), sendTradeNotification(), registerCommands()
     - `performance.ts` - PerformanceTracker: generateDailySummary(), generateWeeklySummary(), saveDailyMetrics(), getMetrics()
-    - `model-tracker.ts` - ModelTracker: recordPrediction(), evaluatePendingPredictions(), getModelStats()
     - `audit-log.ts` - AuditLogger: logTrade(), logSignal(), logRisk(), logConfig(), logError(), logControl(), logResearch(), getRecent(), getByType(), getBySymbol(), getEntriesForDate(), generateDailyReport()
     - `report-generator.ts` - Automated report generation (daily, weekly, monthly performance reports)
     - `attribution.ts` - Performance attribution analysis (alpha, beta, sector contributions)
@@ -125,8 +112,8 @@ Autonomous AI trading bot for Trading212. ESM TypeScript, Node.js 24+.
     - `health-metrics.ts` - System health monitoring (API latency, error rates, queue depths)
   - `src/api/` - HTTP + WebSocket
     - `server.ts` - ApiServer: Express app setup, CORS whitelist, JSON parsing, auth middleware, rate limiting, starts HTTP + WS
-    - `routes.ts` - All REST endpoint definitions (70+ endpoints), Zod input validation on mutation endpoints
-    - `websocket.ts` - WebSocketManager: broadcast(), 10 event types
+    - `routes.ts` - All REST endpoint definitions (55+ endpoints), Zod input validation on mutation endpoints
+    - `websocket.ts` - WebSocketManager: broadcast(), 9 event types
     - `webhooks.ts` - Webhook system for external integrations (Discord, Slack, custom endpoints)
     - `middleware/auth.ts` - Bearer token auth middleware (`API_SECRET_KEY` env var); skips `/api/status`; disabled if no key set
     - `trading212/client.ts` - Trading212 API client
@@ -157,28 +144,24 @@ Autonomous AI trading bot for Trading212. ESM TypeScript, Node.js 24+.
     - `trades/page.tsx` - Trade history
     - `signals/page.tsx` - Signal history
     - `pairlist/page.tsx` - Pairlist management (dynamic/static/hybrid)
-    - `research/page.tsx` - AI market research reports
     - `analytics/page.tsx` - Performance analytics
     - `audit/page.tsx` - Activity / audit log
     - `settings/page.tsx` - Configuration editor
   - `web/components/` - Shared components
-    - `sidebar.tsx` - Navigation sidebar (9 nav items)
+    - `sidebar.tsx` - Navigation sidebar (8 nav items)
     - `header-bar.tsx` - Top bar: environment badge, account type, dry-run badge, bot status, market status with countdown, holiday/early close indicators, current ET time, emergency stop button
     - `status-badge.tsx` - Color-coded status badge (running/paused/open/closed)
     - `pnl-display.tsx` - P&L display with color coding
     - `stock-chart.tsx` - Price chart (lightweight-charts)
     - `config-editor.tsx` - Live config editor
     - `HelpTooltip.tsx` - Contextual help tooltip component
-    - `SetupGuideButton.tsx` - Button to launch the setup wizard
-    - `WizardMount.tsx` - Setup wizard mount point
-    - `wizard/` - Setup wizard UI (multi-step onboarding flow for API keys and AI config)
   - `web/lib/` - Shared libraries
     - `utils.ts` - cn() (clsx + tailwind-merge)
     - `api.ts` - API client (fetch wrapper for REST endpoints)
     - `websocket.ts` - WebSocket client for real-time updates
     - `types.ts` - TypeScript types for API responses
 - `data/` - SQLite database (gitignored)
-- `test/` - Vitest tests (94 test files, 3153 tests total)
+- `test/` - Vitest tests (89 test files, 2911 tests total)
 - `tools/` - Performance-critical tooling
   - `tools/grid-search/` - Rust parallel grid search over backtest parameters (101,376 combos in ~9s)
     - `src/main.rs` - CLI, orchestration, CSV I/O, analysis tables, `--no-context` flag for A/B comparison
@@ -204,16 +187,14 @@ Autonomous AI trading bot for Trading212. ESM TypeScript, Node.js 24+.
 - `NODE_ENV` is NOT in `.env` -- it is a deployment concern owned by Dockerfiles / launch commands. Locally it defaults to `undefined` (dev mode); Docker sets `production`.
 
 ## Architecture
-Pairlist Pipeline (with enrichment) -> Data Aggregation -> Analysis (Technical + Fundamental + Sentiment) -> Confluence Gate -> AI Decision (or Rules Engine) -> Conviction Gate -> Trade Planner -> Approval -> Risk Guard -> Execution -> Position Re-evaluation (with Exit DSL) -> Monitoring
+Pairlist Pipeline (with enrichment) -> Data Aggregation -> Analysis (Technical + Fundamental + Sentiment) -> Confluence Gate -> Decision Engine -> Conviction Gate -> Trade Planner -> Approval -> Risk Guard -> Execution -> Position Re-evaluation (with Exit DSL) -> Monitoring
 
 Key flows:
-- **Trade Plan / Pre-Entry Blueprint**: AI decision creates a plan (position size, stops, targets, R:R ratio, risks, urgency, exit conditions) stored in `trade_plans` table -> approval flow -> execution
+- **Decision Engine**: Deterministic 4-strategy consensus (mean-reversion, trend-following, momentum, breakout) with regime weighting, fundamental quality/value/growth scoring, and volatility risk adjustment. Zero cost, fully reproducible. Located at `src/analysis/decision-engine.ts`.
+- **Trade Plan / Pre-Entry Blueprint**: Decision engine creates a plan (position size, stops, targets, R:R ratio, risks, urgency, exit conditions) stored in `trade_plans` table -> approval flow -> execution
 - **Approval Manager**: configurable via `execution.requireApproval` -- auto-approve or manual approval via dashboard/Telegram. Plans expire after `execution.approvalTimeoutMinutes`; on timeout either auto-execute or reject per `execution.approvalAutoExecute` setting
-- **Position Re-evaluation**: AI periodically re-analyzes held positions; if SELL conviction > 60, tightens trailing stops and updates exit conditions
+- **Position Re-evaluation**: Decision engine periodically re-analyzes held positions; if SELL conviction > 60, tightens trailing stops and updates exit conditions
 - **24/7 News Monitoring**: off-hours news fetching at reduced frequency (`data.newsMonitoring.offHoursIntervalMinutes`) for pre-market prep; only runs outside market hours
-- **AI Market Research**: scheduled AI research for stock discovery beyond the active pairlist; stores reports in `ai_research` table
-- **AI Self-Improvement**: analyzes past decisions, identifies patterns (e.g., "overtrading tech stocks" or "poor exits in volatile conditions"), generates insights, updates internal strategies
-- **Model Performance Tracking**: records every AI prediction in `model_performance` table; daily evaluation job compares predicted direction to actual price movement (1d, 5d, 10d); computes per-model accuracy, buy/sell/hold accuracy, avg returns
 - **Portfolio Correlation Analysis**: Pearson correlation on daily returns between positions; warns when new trade is highly correlated (> `risk.maxCorrelation`) with existing positions; full matrix endpoint for dashboard
 - **Graduated Loss Response**: RiskGuard uses 4-tier daily loss response instead of binary stop: normal (0-1% loss), reduce (1-2%, halves position size), pause_day (2-3%, pauses trading), emergency (>3%, full stop). Weekly >5% loss triggers emergency stop requiring manual restart. Losing streak >=5 uses exponential reduction (0.8^streak, floor 10%)
 - **Emergency Stop / Circuit Breaker**: POST `/api/control/emergency-stop` closes all positions and pauses bot; also triggers on daily loss limit breach via `riskGuard.checkDailyLoss()`; header bar has a red STOP button
@@ -234,10 +215,10 @@ Key flows:
 - **Web Research** (optional): Finviz/StockAnalysis scraping via Steer headless browser; requires external Steer instance at `STEER_URL`, gracefully skipped if unavailable
 
 ## Database
-SQLite via better-sqlite3 + drizzle-orm. WAL mode enabled. 25 tables:
+SQLite via better-sqlite3 + drizzle-orm. WAL mode enabled. 22 tables:
 - **Core**: `config`, `positions` (version column for optimistic locking), `trades`, `signals` (indexed on symbol+timestamp), `orders` (version column for optimistic locking)
 - **Caching**: `priceCache`, `newsCache`, `fundamentalCache`, `earningsCalendar`, `insiderTransactions`
-- **AI/Analysis**: `aiResearch`, `researchWatchlist`, `modelPerformance`, `auditLog`
+- **Analysis**: `auditLog`
 - **Execution**: `tradePlans`, `conditionalOrders`, `pairLocks`
 - **Monitoring**: `dailyMetrics`, `pairlistHistory`, `tradeJournal`, `taxLots`
 - **Webhooks**: `webhookConfigs`, `webhookLogs`
@@ -254,17 +235,7 @@ Finnhub and Marketaux support multiple API keys via single comma-separated env v
 ## Market Hours
 NYSE hours with holiday awareness (2024-2028 calendar in `src/utils/holidays.ts`). Includes early close detection. `getMarketTimes()` returns full market status (open/pre/after/closed) with countdown timers, holiday flag, and early close flag. Used by scheduler to skip market-hours-only jobs.
 
-## AI Providers
-Five options selected at runtime via `ai.provider` config key:
-- `anthropic` - Anthropic Claude adapter (default)
-- `ollama` - Ollama adapter for local inference
-- `openai-compatible` - OpenAI-compatible adapter (any OpenAI-compatible API)
-- `rules` - Deterministic 4-strategy consensus engine: regime-weighted scoring across mean-reversion, trend-following, momentum, and breakout strategies with fundamental quality/value/growth modifiers (zero cost, no LLM calls, backtest-reproducible)
-- `consensus` - Multi-model consensus engine: aggregates votes across multiple OpenAI-compatible model profiles (configured via `ai.models` config key as JSON array of profiles)
-
-Market research uses the same provider via `src/ai/market-research.ts` (except `rules` which doesn't support `rawChat`).
-
-## Scheduler Jobs (14 total)
+## Scheduler Jobs (11 total)
 1. `pairlistRefresh` - Refresh pairlist (configurable interval, market hours only)
 2. `analysisLoop` - Full analysis on each stock (configurable interval, market hours only)
 3. `positionMonitor` - Update positions, trailing stops, exit checks (configurable interval, market hours only)
@@ -273,14 +244,11 @@ Market research uses the same provider via `src/ai/market-research.ts` (except `
 6. `preMarketAlert` - Send pre-market alert (configurable time, weekdays)
 7. `weeklyReport` - Send weekly Telegram report (Fridays 5 PM ET)
 8. `offHoursNews` - Weekday news monitoring at reduced frequency (handler skips market hours; conditional on `data.newsMonitoring.enabled`)
-9. `positionReEval` - AI re-evaluation of open positions (configurable interval, market hours only; conditional on `execution.reEvaluatePositions`)
-10. `marketResearch` - AI market research (configurable interval, market hours only; conditional on `ai.research.enabled`)
-11. `modelEvaluation` - Evaluate pending AI predictions (daily at 6 PM ET)
-12. `expirePlans` - Expire old trade plans + cleanup expired pair locks (every 5 minutes, always)
-13. `conditionalOrders` - Monitor and trigger conditional orders (configurable interval, market hours only; conditional on `conditionalOrders.enabled`)
-14. `aiSelfImprovement` - AI self-improvement feedback loop (daily at 6:30 PM ET; conditional on `aiSelfImprovement.enabled`)
+9. `positionReEval` - Decision engine re-evaluation of open positions (configurable interval, market hours only; conditional on `execution.reEvaluatePositions`)
+10. `expirePlans` - Expire old trade plans + cleanup expired pair locks (every 5 minutes, always)
+11. `conditionalOrders` - Monitor and trigger conditional orders (configurable interval, market hours only; conditional on `conditionalOrders.enabled`)
 
-## REST API Endpoints (70+)
+## REST API Endpoints (55+)
 
 ### Status & Health
 - GET `/api/status` - Bot status, uptime, market status, environment, account type
@@ -333,19 +301,6 @@ Market research uses the same provider via `src/ai/market-research.ts` (except `
 - POST `/api/trade-plans/:id/approve` - Approve a pending trade plan
 - POST `/api/trade-plans/:id/reject` - Reject a pending trade plan
 
-### AI & Research
-- GET `/api/research` - List AI research reports
-- POST `/api/research/run` - Trigger manual AI research (body: { focus?, symbols? })
-- POST `/api/research/screen` - Run stock screening
-- GET `/api/research/watchlist` - Get research watchlist symbols
-- POST `/api/research/watchlist` - Add symbol to research watchlist
-- DELETE `/api/research/watchlist/:symbol` - Remove symbol from research watchlist
-- GET `/api/model-stats` - AI model performance statistics
-- GET `/ai/models` - List AI model profiles (for consensus engine)
-- POST `/ai/models` - Save AI model profiles
-- POST `/ai/test` - Test an AI model profile connection
-- GET `/setup/status` - Check if AI provider is configured (used by setup wizard)
-
 ### Protections & Locks
 - GET `/api/protections/locks` - List pair locks
 - DELETE `/api/protections/locks/:symbol` - Remove a pair lock
@@ -387,22 +342,16 @@ Market research uses the same provider via `src/ai/market-research.ts` (except `
 - POST `/conditional-orders/oco` - Create an OCO (One-Cancels-Other) pair
 - DELETE `/conditional-orders/:id` - Cancel a conditional order
 
-### AI Self-Improvement
-- GET `/ai/feedback` - AI self-improvement feedback
-- GET `/ai/calibration` - AI calibration curve
-- GET `/ai/model-comparison` - AI model comparison
-
 ### Risk Parity
 - GET `/risk-parity/rebalance` - Risk parity rebalance suggestions
 
-## WebSocket Events (10 types defined, 7 actively emitted)
+## WebSocket Events (9 types defined, 6 actively emitted)
 - `bot_status` - Bot health/status changes
 - `trade_executed` - Trade completed
 - `signal_generated` - New analysis signal
 - `pairlist_updated` - New pairlist snapshot
 - `position_update` - Position P&L update
 - `trade_plan_created` - New trade plan awaiting approval
-- `research_completed` - AI research report finished
 - `price_update` - Real-time price data (reserved, not yet emitted)
 - `config_changed` - Config value changed (reserved, not yet emitted)
 - `alert` - Alert/notification (reserved, not yet emitted)
@@ -411,7 +360,7 @@ Market research uses the same provider via `src/ai/market-research.ts` (except `
 - **Authentication**: Bearer token via `API_SECRET_KEY` env var. Middleware in `src/api/middleware/auth.ts`. Skips `/api/status` (health check). Disabled if env var is empty/unset.
 - **CORS**: Whitelist via `CORS_ORIGINS` env var (comma-separated, default: `http://localhost:3000`).
 - **Rate Limiting**: `express-rate-limit` — 100 req/min general, 10 req/min on `/api/control/*` and `/api/config/*`.
-- **Input Validation**: Zod schemas on `PUT /api/config/:key`, `POST /api/pairlist/static`, `POST /api/research/run`.
+- **Input Validation**: Zod schemas on `PUT /api/config/:key`, `POST /api/pairlist/static`.
 - **Dashboard Auth**: Next.js server-side API proxy at `web/app/api/[...path]/route.ts` reads `API_SECRET_KEY` from server env and forwards it as Bearer token to the backend. No secrets are exposed to the client bundle.
 
 ## Docker

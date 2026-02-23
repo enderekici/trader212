@@ -33,12 +33,12 @@ Technical deep-dive into the Trader212 autonomous trading bot.
                                   | scores                    |
                                   v                           |
                          +-------------------+                |
-                         |  AI Decision      |                |
-                         |    Engine         |                |
+                         |  Decision Engine  |                |
+                         |  (Deterministic)  |                |
                          |                   |                |
-                         |  Prompt Builder   |                |
-                         |  Multi-Provider   |                |
-                         |  Decision Proc.   |                |
+                         |  4-Strategy       |                |
+                         |  Consensus        |                |
+                         |  Regime-Weighted  |                |
                          +--------+----------+                |
                                   | BUY/SELL/HOLD             |
                                   v                           |
@@ -179,64 +179,29 @@ The `CorrelationAnalyzer` (`src/analysis/correlation.ts`) calculates Pearson cor
 - **Full matrix**: The `GET /api/correlation` endpoint returns the full N x N correlation matrix for all held positions, used by the Analytics dashboard page.
 - **Lookback**: Configurable via `risk.correlationLookbackDays` (default: 30 days of daily returns from the price cache).
 
-### 4. AI Decision Engine
+### 4. Decision Engine
 
-The AI engine receives a structured prompt containing:
+The `DecisionEngine` (`src/analysis/decision-engine.ts`) is a deterministic, zero-cost decision system that receives a `DecisionContext` containing:
 
 - Current price and 25+ indicator values
-- Fundamental metrics
+- Fundamental metrics (P/E, margins, growth, debt)
 - Recent news headlines with sentiment
 - Historical signal context (last 5 decisions)
 - Active positions and portfolio state
 - Market context (SPY price/trend, VIX level)
 - Risk parameters and constraints
+- Market regime (bull/bear/sideways/volatile)
 
-The AI returns a structured JSON response:
+It applies a 4-strategy consensus with regime weighting:
 
-```json
-{
-  "decision": "BUY | SELL | HOLD",
-  "conviction": 0.0 - 1.0,
-  "reasoning": "...",
-  "risks": ["risk1", "risk2"],
-  "stopLossPct": 0.03,
-  "takeProfitPct": 0.08,
-  "positionSizePct": 0.10,
-  "urgency": "immediate | today | no_rush",
-  "exitConditions": "..."
-}
-```
+| Strategy | Signals | Weight (bull/bear/sideways) |
+|----------|---------|---------------------------|
+| Mean Reversion | RSI, Stochastic, Williams %R, CCI, Bollinger, MFI | 15% / 25% / 30% |
+| Trend Following | EMA alignment, ADX, MACD, SMA50/200 | 35% / 20% / 25% |
+| Momentum | ROC, volume ratio, MFI | 30% / 25% / 20% |
+| Breakout | Price vs support/resistance, volume, ADX | 20% / 30% / 25% |
 
-**Multi-provider support:**
-
-| Provider | Adapter | Configuration |
-|----------|---------|--------------|
-| Anthropic | `@anthropic-ai/sdk` | `ANTHROPIC_API_KEY` + model selection |
-| Ollama | HTTP client | Local URL + model name |
-| OpenAI-compatible | HTTP client | Base URL + API key + model |
-| Rules Engine | Deterministic | Configurable score thresholds, no LLM calls |
-
-The provider is configurable at runtime via `ai.provider` in the config table. The rules engine (`ai.provider = "rules"`) provides a zero-cost, deterministic alternative using configurable score thresholds for BUY/SELL/HOLD decisions -- useful for backtesting reproducibility.
-
-#### AI Market Research
-
-The `MarketResearcher` (`src/ai/market-research.ts`) runs scheduled research for stock discovery beyond the active pairlist:
-
-- Triggered on a configurable schedule (`ai.research.intervalMinutes`, default: 120 min)
-- Can also be triggered manually via `POST /api/research/run` with optional focus area and symbol list
-- AI analyzes stocks and returns recommendations (strong_buy/buy/hold/sell/strong_sell) with conviction, catalysts, risks, target prices, and time horizons
-- Results are stored in the `ai_research` table and viewable on the Research dashboard page
-- Reports are listed via `GET /api/research`
-
-#### Model Performance Tracking
-
-The `ModelTracker` (`src/monitoring/model-tracker.ts`) evaluates AI accuracy over time:
-
-- Every actionable AI prediction (BUY/SELL) is recorded in the `model_performance` table with the price at signal time
-- A daily evaluation job (6 PM ET) checks pending predictions against actual price movements
-- Tracks price after 1, 5, and 10 days; marks predictions as "correct" or "incorrect"
-- Per-model statistics: total predictions, accuracy, buy/sell/hold accuracy, average return on buy/sell signals
-- Viewable via `GET /api/model-stats`
+Returns a `TradeDecision` with decision (BUY/SELL/HOLD), conviction score, reasoning, risks, suggested stop-loss/take-profit (ATR-based), and position sizing.
 
 ### 5. Trade Plan / Pre-Entry Blueprint
 
@@ -615,41 +580,6 @@ Pre-entry trade blueprints. Indexed on `(symbol, status)`.
 | expiresAt | TEXT | Plan expiration time |
 | createdAt | TEXT | Plan creation timestamp |
 
-### `ai_research`
-
-AI market research reports. Indexed on `(timestamp)`.
-
-| Column | Type | Description |
-|--------|------|-------------|
-| id | INTEGER | Auto-increment primary key |
-| timestamp | TEXT | Research timestamp |
-| query | TEXT | Research query/focus |
-| symbols | TEXT | JSON array of analyzed symbols |
-| results | TEXT | JSON array of research results |
-| aiModel | TEXT | AI model used |
-| marketContext | TEXT | JSON: SPY trend, VIX, sector rotation, themes |
-| createdAt | TEXT | Row creation timestamp |
-
-### `model_performance`
-
-AI prediction tracking. Indexed on `(aiModel, signalTimestamp)`.
-
-| Column | Type | Description |
-|--------|------|-------------|
-| id | INTEGER | Auto-increment primary key |
-| aiModel | TEXT | AI model identifier |
-| symbol | TEXT | Stock symbol |
-| decision | TEXT | BUY, SELL, or HOLD |
-| conviction | REAL | AI conviction at signal time |
-| signalTimestamp | TEXT | When the prediction was made |
-| priceAtSignal | REAL | Price when prediction was made |
-| priceAfter1d | REAL | Price 1 day after signal |
-| priceAfter5d | REAL | Price 5 days after signal |
-| priceAfter10d | REAL | Price 10 days after signal |
-| actualOutcome | TEXT | correct, incorrect, or pending |
-| actualReturnPct | REAL | Actual return since signal |
-| evaluatedAt | TEXT | When the evaluation was done |
-
 ### `audit_log`
 
 Bot action audit trail / session replay. Indexed on `(timestamp, eventType)`.
@@ -833,35 +763,6 @@ All secrets and deployment-specific configuration are managed via `.env` file (n
 | `API_SECRET_KEY` | **Recommended** | Bearer token for REST API authentication. Required in production (`NODE_ENV=production`). Disabled if empty |
 | `CORS_ORIGINS` | No | Comma-separated allowed origins. Default: `http://localhost:3000` |
 
-### AI Providers
-
-Configure ONE of these providers via `AI_PROVIDER` env var (`anthropic`, `ollama`, `openai-compatible`, or `rules`).
-
-#### Anthropic Claude
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `ANTHROPIC_API_KEY` | **Yes** (if using Anthropic) | Anthropic API key from console.anthropic.com |
-| `ANTHROPIC_MODEL` | No | Model name. Default: `claude-3-5-sonnet-20241022` |
-| `AI_PROVIDER` | **Yes** | Set to `anthropic` |
-
-#### Ollama (Local LLM)
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `OLLAMA_BASE_URL` | **Yes** (if using Ollama) | Ollama server URL. Default: `http://localhost:11434` |
-| `OLLAMA_MODEL` | **Yes** | Model name (e.g., `llama2`, `mistral`, `phi`) |
-| `AI_PROVIDER` | **Yes** | Set to `ollama` |
-
-#### OpenAI-Compatible (LM Studio, LocalAI, etc.)
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `OPENAI_COMPAT_BASE_URL` | **Yes** (if using OpenAI-compatible) | API base URL (e.g., `http://localhost:1234/v1`) |
-| `OPENAI_COMPAT_API_KEY` | No | API key (use `not-needed` for local servers) |
-| `OPENAI_COMPAT_MODEL` | **Yes** | Model name (e.g., `llama-3-8b-instruct-finance-rag`) |
-| `AI_PROVIDER` | **Yes** | Set to `openai-compatible` |
-
 ### Data Sources
 
 | Variable | Required | Description |
@@ -894,12 +795,6 @@ T212_ACCOUNT_TYPE=INVEST
 API_SECRET_KEY=your_strong_random_key_here
 CORS_ORIGINS=http://localhost:3000,http://your-vps-ip:3000
 
-# AI (using local LM Studio)
-AI_PROVIDER=openai-compatible
-OPENAI_COMPAT_BASE_URL=http://localhost:1234/v1
-OPENAI_COMPAT_API_KEY=not-needed
-OPENAI_COMPAT_MODEL=llama-3-8b-instruct-finance-rag
-
 # Data Sources
 FINNHUB_API_KEY=key1,key2,key3
 MARKETAUX_API_TOKEN=token1,token2
@@ -911,24 +806,21 @@ TELEGRAM_CHAT_ID=123456789
 
 ## Scheduler Jobs
 
-The bot runs 14 scheduled jobs via node-cron:
+The bot runs 11 scheduled jobs via node-cron:
 
 | Job | Schedule | Market Hours Only | Description |
 |-----|----------|-------------------|-------------|
 | `pairlistRefresh` | Every N min (default: 30) | Yes | Refresh stock pairlist |
-| `analysisLoop` | Every N min (default: 15) | Yes | Full analysis + AI on each stock |
+| `analysisLoop` | Every N min (default: 15) | Yes | Full analysis + decision engine on each stock |
 | `positionMonitor` | Every N min (default: 5) | Yes | Update positions, trailing stops |
 | `t212Sync` | Every N min (default: 10) | Yes | Sync positions with T212 API |
 | `dailySummary` | Configurable time (default: 16:30 ET) | No | Daily Telegram summary |
 | `preMarketAlert` | Configurable time (default: 09:00 ET) | No | Pre-market Telegram alert |
 | `weeklyReport` | Fridays 5 PM ET | No | Weekly performance report |
 | `offHoursNews` | Every N min (default: 60) | No | 24/7 news monitoring |
-| `positionReEval` | Every N min (default: 30) | Yes | AI re-evaluation of positions |
-| `marketResearch` | Every N min (default: 120) | Yes | AI market research |
-| `modelEvaluation` | Daily at 6 PM ET | No | Evaluate AI prediction accuracy |
+| `positionReEval` | Every N min (default: 30) | Yes | Decision engine re-evaluation of positions |
 | `expirePlans` | Every 5 min | No | Expire old pending trade plans |
 | `conditionalOrders` | Configurable interval | Yes | Monitor and trigger conditional orders |
-| `aiSelfImprovement` | Daily at 6:30 PM ET | No | AI self-improvement feedback loop |
 
 Jobs marked "Market Hours Only" are skipped when the US market is closed (weekends, NYSE holidays).
 
@@ -947,11 +839,10 @@ The Express server at `:3001` also hosts a WebSocket server for real-time update
 | `config_changed` | Server -> Client | Config value changed |
 | `bot_status` | Server -> Client | Bot health/status changes |
 | `alert` | Server -> Client | Alert/notification |
-| `research_completed` | Server -> Client | AI research report finished |
 
 ## REST API Endpoints
 
-The Express server exposes 60+ REST endpoints at `:3001/api/*`. All endpoints except `/api/status` require Bearer token authentication via `API_SECRET_KEY` env var.
+The Express server exposes 55+ REST endpoints at `:3001/api/*`. All endpoints except `/api/status` require Bearer token authentication via `API_SECRET_KEY` env var.
 
 ### Status & Health
 
@@ -1319,18 +1210,6 @@ Fundamental data scraping via Steer headless browser:
 
 Managed via `src/data/web-researcher.ts`.
 
-### AI Self-Improvement
-
-AI analyzes its own performance and adapts:
-
-- Analyzes past decisions and outcomes
-- Identifies patterns (e.g., "overtrading tech stocks", "poor exits in volatile conditions")
-- Generates insights and strategy updates
-- Adjusts internal confidence thresholds
-- Logs all insights to `audit_log` for review
-
-Managed via `src/ai/self-improvement.ts`.
-
 ### Webhooks
 
 External integrations for notifications and automation:
@@ -1372,17 +1251,6 @@ src/
 |   +-- finnhub.ts            # Finnhub adapter
 |   +-- marketaux.ts          # Marketaux adapter
 |   +-- ticker-mapper.ts      # Symbol <-> T212 ticker mapping
-+-- ai/
-|   +-- agent.ts              # AI orchestrator
-|   +-- prompt-builder.ts     # Structured prompt construction
-|   +-- decision-processor.ts # Parse + validate AI responses
-|   +-- market-research.ts    # AI market research for stock discovery
-|   +-- rules-engine.ts       # Deterministic rules-based decision engine
-|   +-- self-improvement.ts   # AI self-improvement feedback loop
-|   +-- adapters/
-|       +-- anthropic.ts      # Anthropic Claude adapter
-|       +-- ollama.ts         # Ollama adapter
-|       +-- openai-compat.ts  # OpenAI-compatible adapter
 +-- execution/
 |   +-- order-manager.ts      # Order placement + dry-run sim (with paper trading slippage)
 |   +-- risk-guard.ts         # Pre-trade risk validation
@@ -1399,6 +1267,7 @@ src/
 |   +-- risk-parity.ts        # Risk parity position sizing
 |   +-- roi-table.ts          # Time-based ROI targets
 +-- analysis/
+|   +-- decision-engine.ts    # Deterministic 4-strategy consensus decision engine
 |   +-- analyzer.ts           # Analysis orchestrator
 |   +-- correlation.ts        # Pearson correlation analyzer
 |   +-- multi-timeframe.ts    # Weekly/monthly confluence scoring
@@ -1417,7 +1286,6 @@ src/
 +-- monitoring/
 |   +-- telegram.ts           # Telegram notifications + commands
 |   +-- performance.ts        # Performance tracking + summaries
-|   +-- model-tracker.ts      # AI model accuracy tracking
 |   +-- audit-log.ts          # Audit log (session replay)
 |   +-- attribution.ts        # Performance attribution (alpha, beta, factors)
 |   +-- trade-journal.ts      # Trade journal with tags and notes

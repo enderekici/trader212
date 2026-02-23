@@ -71,7 +71,7 @@ describe('PartialExitManager', () => {
     convictionScore: 0.8,
     stopOrderId: 'stop123',
     takeProfitOrderId: 'tp123',
-    aiExitConditions: null,
+    exitConditions: null,
     accountType: 'INVEST' as const,
     dcaCount: 0,
     totalInvested: null,

@@ -51,16 +51,8 @@ test/
 |   +-- steer-client.test.ts           # Steer headless browser client
 |   +-- web-researcher.test.ts         # Web research via Steer
 |   +-- price-streamer.test.ts         # Real-time price streaming
-|   +-- # AI
-|   +-- ai-agent.test.ts              # AI orchestrator + createAIAgent()
-|   +-- ai-prompt-builder.test.ts      # Prompt construction
-|   +-- ai-decision-processor.test.ts  # Decision parsing
-|   +-- ai-market-research.test.ts     # AI market research
-|   +-- ai-anthropic.test.ts           # Anthropic adapter
-|   +-- ai-ollama.test.ts              # Ollama adapter
-|   +-- ai-openai-compat.test.ts       # OpenAI-compatible adapter
-|   +-- rules-engine.test.ts           # Rules-based decision engine
-|   +-- self-improvement.test.ts       # AI self-improvement
+|   +-- # Decision Engine
+|   +-- decision-engine.test.ts        # Deterministic decision engine
 |   +-- # Analysis
 |   +-- analyzer.test.ts               # Analysis orchestrator
 |   +-- technical-indicators.test.ts   # Technical indicators
@@ -95,7 +87,6 @@ test/
 |   +-- walk-forward.test.ts           # Walk-forward analysis
 |   +-- # Monitoring
 |   +-- audit-log.test.ts              # Audit log
-|   +-- model-tracker.test.ts          # Model performance tracking
 |   +-- performance.test.ts            # Performance tracker
 |   +-- performance-metrics.test.ts    # Performance metrics
 |   +-- attribution.test.ts            # Performance attribution

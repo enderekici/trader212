@@ -53,9 +53,8 @@ function createTables(sqlite: InstanceType<typeof Database>) {
       stopLoss REAL,
       takeProfit REAL,
       exitReason TEXT,
-      aiReasoning TEXT,
+      reasoning TEXT,
       convictionScore REAL,
-      aiModel TEXT,
       intendedPrice REAL,
       slippage REAL,
       accountType TEXT NOT NULL CHECK(accountType IN ('INVEST','ISA')),
@@ -80,10 +79,10 @@ function createTables(sqlite: InstanceType<typeof Database>) {
       roc REAL, forceIndex REAL, volumeRatio REAL,
       supportLevel REAL, resistanceLevel REAL,
       technicalScore REAL, sentimentScore REAL, fundamentalScore REAL,
-      aiScore REAL, convictionTotal REAL,
+      decisionScore REAL, convictionTotal REAL,
       decision TEXT CHECK(decision IN ('BUY','SELL','HOLD')),
       executed INTEGER DEFAULT 0,
-      aiReasoning TEXT, aiModel TEXT,
+      reasoning TEXT,
       suggestedStopLossPct REAL, suggestedPositionSizePct REAL, suggestedTakeProfitPct REAL,
       extraIndicators TEXT, newsHeadlines TEXT
     );
@@ -99,7 +98,7 @@ function createTables(sqlite: InstanceType<typeof Database>) {
       entryTime TEXT NOT NULL,
       currentPrice REAL, pnl REAL, pnlPct REAL,
       stopLoss REAL, trailingStop REAL, takeProfit REAL,
-      convictionScore REAL, stopOrderId TEXT, takeProfitOrderId TEXT, aiExitConditions TEXT,
+      convictionScore REAL, stopOrderId TEXT, takeProfitOrderId TEXT, exitConditions TEXT,
       accountType TEXT NOT NULL CHECK(accountType IN ('INVEST','ISA')),
       dcaCount INTEGER DEFAULT 0, totalInvested REAL, partialExitCount INTEGER DEFAULT 0,
       version INTEGER DEFAULT 1,
@@ -196,9 +195,8 @@ function createTables(sqlite: InstanceType<typeof Database>) {
       maxLossDollars REAL NOT NULL,
       riskRewardRatio REAL NOT NULL,
       maxHoldDays INTEGER,
-      aiConviction REAL NOT NULL,
-      aiReasoning TEXT,
-      aiModel TEXT,
+      conviction REAL NOT NULL,
+      reasoning TEXT,
       risks TEXT,
       urgency TEXT,
       exitConditions TEXT,
@@ -213,36 +211,6 @@ function createTables(sqlite: InstanceType<typeof Database>) {
     );
     CREATE INDEX IF NOT EXISTS idx_trade_plans_symbol ON trade_plans(symbol, status);
     CREATE INDEX IF NOT EXISTS idx_trade_plans_expires ON trade_plans(expiresAt, status);
-
-    CREATE TABLE IF NOT EXISTS ai_research (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      timestamp TEXT NOT NULL,
-      query TEXT NOT NULL,
-      symbols TEXT NOT NULL,
-      results TEXT NOT NULL,
-      aiModel TEXT,
-      marketContext TEXT,
-      createdAt TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_research_ts ON ai_research(timestamp);
-
-    CREATE TABLE IF NOT EXISTS model_performance (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      aiModel TEXT NOT NULL,
-      symbol TEXT NOT NULL,
-      decision TEXT NOT NULL CHECK(decision IN ('BUY','SELL','HOLD')),
-      conviction REAL NOT NULL,
-      signalTimestamp TEXT NOT NULL,
-      priceAtSignal REAL NOT NULL,
-      priceAfter1d REAL,
-      priceAfter5d REAL,
-      priceAfter10d REAL,
-      actualOutcome TEXT,
-      actualReturnPct REAL,
-      evaluatedAt TEXT
-    );
-    CREATE INDEX IF NOT EXISTS idx_model_perf ON model_performance(aiModel, signalTimestamp);
-    CREATE INDEX IF NOT EXISTS idx_model_perf_model ON model_performance(aiModel);
 
     CREATE TABLE IF NOT EXISTS pair_locks (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -368,23 +336,11 @@ function createTables(sqlite: InstanceType<typeof Database>) {
     );
     CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(timestamp, eventType);
 
-    CREATE TABLE IF NOT EXISTS research_watchlist (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      symbol TEXT NOT NULL UNIQUE,
-      notes TEXT,
-      added_at TEXT NOT NULL
-    );
   `);
 
   log.debug('All tables created/verified');
 
   // Idempotent column migrations
-  try {
-    sqlite.exec(`ALTER TABLE ai_research ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'`);
-  } catch {
-    // Column already exists — ignore
-  }
-
   try {
     sqlite.exec(`ALTER TABLE positions ADD COLUMN version INTEGER DEFAULT 1`);
   } catch {

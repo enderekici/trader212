@@ -12,7 +12,6 @@ const CATEGORY_ORDER = [
   'pairlist',
   'dataSources',
   'analysis',
-  'ai',
   'risk',
   'execution',
   'exit',
@@ -29,7 +28,6 @@ const CATEGORY_ORDER = [
   'portfolioOptimization',
   'socialSentiment',
   'conditionalOrders',
-  'aiSelfImprovement',
   'reports',
   'webResearch',
   'monitoring',
@@ -40,7 +38,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   pairlist: 'Pairlist',
   dataSources: 'Data Sources',
   analysis: 'Analysis',
-  ai: 'AI Model',
+  ai: 'Decision Engine',
   risk: 'Risk Management',
   execution: 'Execution',
   monitoring: 'Monitoring',
@@ -58,7 +56,6 @@ const CATEGORY_LABELS: Record<string, string> = {
   portfolioOptimization: 'Portfolio Optimization',
   socialSentiment: 'Social Sentiment',
   conditionalOrders: 'Conditional / OCO Orders',
-  aiSelfImprovement: 'AI Self-Improvement',
   reports: 'Scheduled Reports',
   webResearch: 'Web Research (Steer)',
 };
@@ -67,7 +64,6 @@ const CATEGORY_LABELS: Record<string, string> = {
 const QUICK_KEYS = [
   't212.environment',
   't212.accountType',
-  'ai.provider',
   'pairlist.mode',
   'pairlist.maxPairs',
   'risk.maxPositions',
@@ -76,7 +72,7 @@ const QUICK_KEYS = [
 ];
 
 // Categories expanded by default
-const DEFAULT_OPEN = new Set(['trading212', 'ai', 'risk']);
+const DEFAULT_OPEN = new Set(['trading212', 'risk']);
 
 export default function SettingsPage() {
   const { data: config, mutate } = useSWR<ConfigResponse>('/api/config', fetcher);

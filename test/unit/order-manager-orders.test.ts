@@ -97,9 +97,8 @@ function makeBuyParams(overrides: Partial<BuyParams> = {}): BuyParams {
     price: 150,
     stopLossPct: 0.05,
     takeProfitPct: 0.10,
-    aiReasoning: 'Strong technical indicators',
+    reasoning: 'Strong technical indicators',
     conviction: 85,
-    aiModel: 'claude-sonnet-4-5-20250929',
     accountType: 'INVEST',
     ...overrides,
   };

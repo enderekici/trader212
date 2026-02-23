@@ -99,26 +99,9 @@ const scoringSchemas = new Map<string, z.ZodType>([
   ['scoring.sentiment.finraWeight', z.number().min(0).max(1)],
 ]);
 
-// ── AI ───────────────────────────────────────────────────────────────────────
+// ── Decision Engine ──────────────────────────────────────────────────────────
 const aiSchemas = new Map<string, z.ZodType>([
   ['ai.enabled', z.boolean()],
-  ['ai.provider', z.enum(['anthropic', 'ollama', 'openai-compatible', 'rules'])],
-  ['ai.model', z.string().min(1).max(200)],
-  ['ai.ollama.baseUrl', z.string().url()],
-  ['ai.ollama.model', z.string().min(1).max(200)],
-  ['ai.openaiCompat.baseUrl', z.string().min(1).max(500)],
-  ['ai.openaiCompat.model', z.string().min(1).max(200)],
-  ['ai.openaiCompat.apiKey', z.string().max(500)],
-  ['ai.maxConcurrentCalls', z.number().int().min(1).max(20)],
-  ['ai.timeoutSeconds', z.number().int().min(5).max(600)],
-  ['ai.includeHistoricalSignals', z.boolean()],
-  ['ai.historicalSignalCount', z.number().int().min(1).max(100)],
-  ['ai.temperature', z.number().min(0).max(2)],
-  ['ai.research.enabled', z.boolean()],
-  ['ai.research.intervalMinutes', z.number().int().min(1).max(1440)],
-  ['ai.research.topStocksCount', z.number().int().min(1).max(500)],
-  ['ai.research.detailedThreshold', z.number().int().min(1).max(100)],
-  ['ai.research.maxConcurrentFetches', z.number().int().min(1).max(20)],
   ['ai.minConvictionScore', z.number().int().min(0).max(100)],
   ['ai.rules.buyTechMin', z.number().int().min(0).max(100)],
   ['ai.rules.buyFundMin', z.number().int().min(0).max(100)],
@@ -285,13 +268,6 @@ const conditionalOrderSchemas = new Map<string, z.ZodType>([
   ['conditionalOrders.checkIntervalSeconds', z.number().int().min(1).max(600)],
 ]);
 
-// ── AI Self-Improvement ──────────────────────────────────────────────────────
-const aiSelfImprovementSchemas = new Map<string, z.ZodType>([
-  ['aiSelfImprovement.enabled', z.boolean()],
-  ['aiSelfImprovement.feedbackWindow', z.number().int().min(1).max(365)],
-  ['aiSelfImprovement.minSamples', z.number().int().min(1).max(1000)],
-]);
-
 // ── Reports ──────────────────────────────────────────────────────────────────
 const reportsSchemas = new Map<string, z.ZodType>([
   ['reports.enabled', z.boolean()],
@@ -367,7 +343,6 @@ export const configSchemas: Map<string, z.ZodType> = new Map([
   ...portfolioOptSchemas,
   ...socialSentimentSchemas,
   ...conditionalOrderSchemas,
-  ...aiSelfImprovementSchemas,
   ...reportsSchemas,
   ...webResearchSchemas,
   ...streamingSchemas,

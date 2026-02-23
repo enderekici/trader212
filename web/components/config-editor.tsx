@@ -12,7 +12,6 @@ import { HELP } from '@/lib/help-content';
 const ENUM_OPTIONS: Record<string, string[]> = {
   't212.environment': ['demo', 'live'],
   't212.accountType': ['INVEST', 'ISA'],
-  'ai.provider': ['anthropic', 'ollama', 'openai-compatible', 'rules'],
   'pairlist.mode': ['dynamic', 'static', 'hybrid'],
   'reports.schedule': ['daily', 'weekly', 'both'],
   'monitoring.weeklyReportDay': [

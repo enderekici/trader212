@@ -121,7 +121,7 @@ export function getDominantFactor(
   const technical = signal.technicalScore ?? 0;
   const fundamental = signal.fundamentalScore ?? 0;
   const sentiment = signal.sentimentScore ?? 0;
-  const ai = signal.aiScore ?? 0;
+  const ai = signal.decisionScore ?? 0;
 
   // Require score > 0.6 to be considered dominant
   const threshold = 0.6;
@@ -397,7 +397,7 @@ export function computeFactorCorrelations(
     scores[0].push(signal.technicalScore ?? 0);
     scores[1].push(signal.fundamentalScore ?? 0);
     scores[2].push(signal.sentimentScore ?? 0);
-    scores[3].push(signal.aiScore ?? 0);
+    scores[3].push(signal.decisionScore ?? 0);
   }
 
   const matrix: number[][] = [];

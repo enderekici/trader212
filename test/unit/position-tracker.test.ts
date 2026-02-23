@@ -457,7 +457,7 @@ describe('PositionTracker', () => {
           stopLoss: 95,
           trailingStop: null,
           takeProfit: 200,
-          aiExitConditions: null,
+          exitConditions: null,
         },
       ]);
 
@@ -474,7 +474,7 @@ describe('PositionTracker', () => {
           stopLoss: 95,
           trailingStop: 110,
           takeProfit: 200,
-          aiExitConditions: null,
+          exitConditions: null,
         },
       ]);
 
@@ -491,7 +491,7 @@ describe('PositionTracker', () => {
           stopLoss: 95,
           trailingStop: null,
           takeProfit: 180,
-          aiExitConditions: null,
+          exitConditions: null,
         },
       ]);
 
@@ -510,7 +510,7 @@ describe('PositionTracker', () => {
           stopLoss: 95,
           trailingStop: null,
           takeProfit: 200,
-          aiExitConditions: JSON.stringify({ maxHoldDays: 30 }),
+          exitConditions: JSON.stringify({ maxHoldDays: 30 }),
         },
       ]);
 
@@ -528,7 +528,7 @@ describe('PositionTracker', () => {
           stopLoss: 95,
           trailingStop: null,
           takeProfit: 250,
-          aiExitConditions: JSON.stringify({ priceTarget: 190 }),
+          exitConditions: JSON.stringify({ priceTarget: 190 }),
         },
       ]);
 
@@ -545,7 +545,7 @@ describe('PositionTracker', () => {
           stopLoss: 95,
           trailingStop: null,
           takeProfit: 200,
-          aiExitConditions: null,
+          exitConditions: null,
         },
       ]);
 
@@ -554,7 +554,7 @@ describe('PositionTracker', () => {
       expect(result.positionsToClose).toHaveLength(0);
     });
 
-    it('handles malformed aiExitConditions JSON gracefully', async () => {
+    it('handles malformed exitConditions JSON gracefully', async () => {
       mockDbAll.mockReturnValueOnce([
         {
           symbol: 'AAPL',
@@ -563,7 +563,7 @@ describe('PositionTracker', () => {
           stopLoss: 95,
           trailingStop: null,
           takeProfit: 200,
-          aiExitConditions: 'not valid json{{{',
+          exitConditions: 'not valid json{{{',
         },
       ]);
 
@@ -582,7 +582,7 @@ describe('PositionTracker', () => {
           stopLoss: 95,
           trailingStop: null,
           takeProfit: 200,
-          aiExitConditions: JSON.stringify({ maxHoldDays: 30, priceTarget: 300 }),
+          exitConditions: JSON.stringify({ maxHoldDays: 30, priceTarget: 300 }),
         },
       ]);
 
@@ -599,7 +599,7 @@ describe('PositionTracker', () => {
           stopLoss: null,
           trailingStop: null,
           takeProfit: null,
-          aiExitConditions: null,
+          exitConditions: null,
         },
       ]);
 
@@ -616,7 +616,7 @@ describe('PositionTracker', () => {
           stopLoss: 95,
           trailingStop: null,
           takeProfit: 200,
-          aiExitConditions: null,
+          exitConditions: null,
         },
       ]);
 
@@ -633,7 +633,7 @@ describe('PositionTracker', () => {
           stopLoss: 95,
           trailingStop: null,
           takeProfit: 180,
-          aiExitConditions: null,
+          exitConditions: null,
         },
       ]);
 
@@ -655,7 +655,7 @@ describe('PositionTracker', () => {
           stopLoss: null,
           trailingStop: null,
           takeProfit: null,
-          aiExitConditions: null,
+          exitConditions: null,
         },
       ]);
 
@@ -680,7 +680,7 @@ describe('PositionTracker', () => {
           stopLoss: null,
           trailingStop: null,
           takeProfit: null,
-          aiExitConditions: null,
+          exitConditions: null,
         },
       ]);
 
@@ -704,7 +704,7 @@ describe('PositionTracker', () => {
           stopLoss: null,
           trailingStop: null,
           takeProfit: null,
-          aiExitConditions: null,
+          exitConditions: null,
         },
       ]);
 
@@ -729,7 +729,7 @@ describe('PositionTracker', () => {
           stopLoss: 95,
           trailingStop: null,
           takeProfit: null,
-          aiExitConditions: null,
+          exitConditions: null,
         },
       ]);
 
@@ -752,7 +752,7 @@ describe('PositionTracker', () => {
           stopLoss: null,
           trailingStop: null,
           takeProfit: null,
-          aiExitConditions: null,
+          exitConditions: null,
         },
       ]);
 
@@ -782,7 +782,7 @@ describe('PositionTracker', () => {
           stopLoss: null,
           trailingStop: null,
           takeProfit: null,
-          aiExitConditions: 'profit% > 10',
+          exitConditions: 'profit% > 10',
         },
       ]);
 
@@ -826,7 +826,7 @@ describe('PositionTracker', () => {
           stopLoss: null,
           trailingStop: null,
           takeProfit: null,
-          aiExitConditions: 'profit% > 10',
+          exitConditions: 'profit% > 10',
         },
       ]);
 
@@ -856,7 +856,7 @@ describe('PositionTracker', () => {
           stopLoss: null,
           trailingStop: null,
           takeProfit: null,
-          aiExitConditions: 'price above 410',
+          exitConditions: 'price above 410',
         },
       ]);
 
@@ -869,11 +869,11 @@ describe('PositionTracker', () => {
       // DSL functions should never be called
       expect(mockParseExitConditionText).not.toHaveBeenCalled();
       expect(mockEvaluateExitCondition).not.toHaveBeenCalled();
-      // aiExitConditions is not valid JSON, so JSON.parse will throw and be caught
+      // exitConditions is not valid JSON, so JSON.parse will throw and be caught
       expect(result.positionsToClose).toHaveLength(0);
     });
 
-    it('skips DSL evaluation when aiExitConditions is null', async () => {
+    it('skips DSL evaluation when exitConditions is null', async () => {
       const entryTime = new Date().toISOString();
       mockDbAll.mockReturnValueOnce([
         {
@@ -885,7 +885,7 @@ describe('PositionTracker', () => {
           stopLoss: null,
           trailingStop: null,
           takeProfit: null,
-          aiExitConditions: null,
+          exitConditions: null,
         },
       ]);
 
@@ -899,7 +899,7 @@ describe('PositionTracker', () => {
       expect(result.positionsToClose).toHaveLength(0);
     });
 
-    it('skips DSL evaluation when aiExitConditions is empty string', async () => {
+    it('skips DSL evaluation when exitConditions is empty string', async () => {
       const entryTime = new Date().toISOString();
       mockDbAll.mockReturnValueOnce([
         {
@@ -911,7 +911,7 @@ describe('PositionTracker', () => {
           stopLoss: null,
           trailingStop: null,
           takeProfit: null,
-          aiExitConditions: '',
+          exitConditions: '',
         },
       ]);
 
@@ -921,7 +921,7 @@ describe('PositionTracker', () => {
 
       const result = await tracker.checkExitConditions();
 
-      // Empty string is falsy, so the DSL block (dslEnabled && pos.aiExitConditions) is skipped
+      // Empty string is falsy, so the DSL block (dslEnabled && pos.exitConditions) is skipped
       expect(mockParseExitConditionText).not.toHaveBeenCalled();
       expect(result.positionsToClose).toHaveLength(0);
     });
@@ -938,7 +938,7 @@ describe('PositionTracker', () => {
           stopLoss: null,
           trailingStop: null,
           takeProfit: null,
-          aiExitConditions: 'some unparseable gibberish !@#$',
+          exitConditions: 'some unparseable gibberish !@#$',
         },
       ]);
 
@@ -969,7 +969,7 @@ describe('PositionTracker', () => {
           stopLoss: null,
           trailingStop: null,
           takeProfit: null,
-          aiExitConditions: 'rsi above 70',
+          exitConditions: 'rsi above 70',
         },
       ]);
 
@@ -1001,7 +1001,7 @@ describe('PositionTracker', () => {
           stopLoss: null,
           trailingStop: null,
           takeProfit: null,
-          aiExitConditions: 'profit% > 5',
+          exitConditions: 'profit% > 5',
         },
       ]);
 
@@ -1033,7 +1033,7 @@ describe('PositionTracker', () => {
           stopLoss: null,
           trailingStop: null,
           takeProfit: null,
-          aiExitConditions: '{"maxHoldDays": 30}',
+          exitConditions: '{"maxHoldDays": 30}',
         },
       ]);
 
@@ -1064,7 +1064,7 @@ describe('PositionTracker', () => {
           stopLoss: null,
           trailingStop: null,
           takeProfit: null,
-          aiExitConditions: 'profit% > 10 and days held > 3',
+          exitConditions: 'profit% > 10 and days held > 3',
         },
       ]);
 
@@ -1099,7 +1099,7 @@ describe('PositionTracker', () => {
           trailingStop: null,
           takeProfit: null,
           // This string is both valid DSL and would parse as JSON fail
-          aiExitConditions: 'profit% > 5',
+          exitConditions: 'profit% > 5',
         },
       ]);
 
@@ -1130,7 +1130,7 @@ describe('PositionTracker', () => {
           stopLoss: null,
           trailingStop: null,
           takeProfit: null,
-          aiExitConditions: 'price above 520',
+          exitConditions: 'price above 520',
         },
       ]);
 

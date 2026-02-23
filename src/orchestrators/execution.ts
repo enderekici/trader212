@@ -1,7 +1,6 @@
 import { desc, eq, gte } from 'drizzle-orm';
-import type { AIDecision } from '../ai/agent.js';
-import { getActiveModelName } from '../ai/agent.js';
 import type { CorrelationAnalyzer } from '../analysis/correlation.js';
+import type { TradeDecision } from '../analysis/decision-engine.js';
 import { getWebhookManager } from '../api/webhooks.js';
 import type { WebSocketManager } from '../api/websocket.js';
 import { configManager } from '../config/manager.js';
@@ -14,7 +13,6 @@ import { getProtectionManager } from '../execution/protections.js';
 import type { PortfolioState, RiskGuard, TradeProposal } from '../execution/risk-guard.js';
 import type { TradePlan, TradePlanner } from '../execution/trade-planner.js';
 import { getAuditLogger } from '../monitoring/audit-log.js';
-import type { ModelTracker } from '../monitoring/model-tracker.js';
 import { getTaxTracker } from '../monitoring/tax-tracker.js';
 import type { TelegramNotifier } from '../monitoring/telegram.js';
 import { getTradeJournalManager } from '../monitoring/trade-journal.js';
@@ -27,7 +25,6 @@ export interface ExecutionOrchestratorDeps {
   riskGuard: RiskGuard;
   tradePlanner: TradePlanner;
   approvalManager: ApprovalManager;
-  modelTracker: ModelTracker;
   correlationAnalyzer: CorrelationAnalyzer;
   telegram: TelegramNotifier;
   wsManager: WebSocketManager;
@@ -42,7 +39,7 @@ export class ExecutionOrchestrator {
     symbol: string,
     t212Ticker: string,
     data: StockData,
-    decision: AIDecision,
+    decision: TradeDecision,
     portfolio: PortfolioState,
     technicalScore?: number,
     fundamentalScore?: number,
@@ -64,15 +61,6 @@ export class ExecutionOrchestrator {
       audit.logRisk(`Daily trade limit: ${todayTradeCount}/${maxDailyTrades}`);
       return;
     }
-
-    // Record AI prediction for model tracking
-    this.deps.modelTracker.recordPrediction({
-      aiModel: getActiveModelName(),
-      symbol,
-      decision: decision.decision,
-      conviction: decision.conviction,
-      priceAtSignal: price,
-    });
 
     // Check portfolio correlation for BUY orders
     if (decision.decision === 'BUY') {
@@ -132,7 +120,7 @@ export class ExecutionOrchestrator {
       {
         planId: plan.id,
         riskReward: plan.riskRewardRatio,
-        conviction: plan.aiConviction,
+        conviction: plan.conviction,
       },
     );
 
@@ -192,7 +180,7 @@ export class ExecutionOrchestrator {
         side: plan.side,
         shares: plan.shares,
         price: plan.entryPrice,
-        conviction: plan.aiConviction,
+        conviction: plan.conviction,
       },
       'Executing trade from plan',
     );
@@ -248,14 +236,13 @@ export class ExecutionOrchestrator {
           price: plan.entryPrice,
           stopLossPct: plan.stopLossPct,
           takeProfitPct: plan.takeProfitPct,
-          aiReasoning: plan.aiReasoning ?? '',
-          conviction: plan.aiConviction,
-          aiModel: plan.aiModel ?? '',
+          reasoning: plan.reasoning ?? '',
+          conviction: plan.conviction,
           accountType,
         };
         await this.deps.orderManager.executeBuy(buyParams);
       } else {
-        const exitReason = plan.aiReasoning ?? 'AI sell signal';
+        const exitReason = plan.reasoning ?? 'AI sell signal';
         const closeParams: CloseParams = {
           symbol: plan.symbol,
           t212Ticker: plan.t212Ticker,
@@ -290,7 +277,7 @@ export class ExecutionOrchestrator {
         shares: plan.shares,
         price: plan.entryPrice,
         stopLoss: plan.stopLossPrice,
-        reasoning: plan.aiReasoning ?? '',
+        reasoning: plan.reasoning ?? '',
       });
 
       this.deps.wsManager.broadcast('trade_executed', {
@@ -321,8 +308,8 @@ export class ExecutionOrchestrator {
           {
             price: plan.entryPrice,
             shares: plan.shares,
-            conviction: plan.aiConviction,
-            reasoning: plan.aiReasoning,
+            conviction: plan.conviction,
+            reasoning: plan.reasoning,
           },
         );
       } catch (jErr) {

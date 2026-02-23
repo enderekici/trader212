@@ -14,7 +14,6 @@ const EVENT_TYPES = [
   { value: 'config', label: 'Config' },
   { value: 'error', label: 'Error' },
   { value: 'control', label: 'Control' },
-  { value: 'research', label: 'Research' },
 ];
 
 const SEVERITY_STYLES: Record<string, string> = {
@@ -30,7 +29,6 @@ const EVENT_BADGE_STYLES: Record<string, string> = {
   config: 'bg-zinc-500/20 text-zinc-400',
   error: 'bg-red-500/20 text-red-400',
   control: 'bg-orange-500/20 text-orange-400',
-  research: 'bg-cyan-500/20 text-cyan-400',
 };
 
 function todayStr(): string {

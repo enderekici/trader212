@@ -16,7 +16,6 @@ export function insertTrade(
     entryPrice: 150.0,
     entryTime: now(),
     accountType: 'INVEST',
-    aiModel: 'claude-test',
     convictionScore: 75,
     intendedPrice: 150.0,
     slippage: 0,
@@ -63,11 +62,10 @@ export function insertSignal(
     technicalScore: 72,
     sentimentScore: 65,
     fundamentalScore: 80,
-    aiScore: 75,
+    decisionScore: 75,
     convictionTotal: 73,
     decision: 'BUY',
-    aiReasoning: 'Test signal',
-    aiModel: 'claude-test',
+    reasoning: 'Test signal',
   };
   const values = { ...defaults, ...overrides };
   db.insert(schema.signals).values(values).run();
@@ -162,9 +160,8 @@ export function insertTradePlan(
     takeProfitPct: 0.1,
     maxLossDollars: 75,
     riskRewardRatio: 2.0,
-    aiConviction: 75,
-    aiReasoning: 'Test plan',
-    aiModel: 'claude-test',
+    conviction: 75,
+    reasoning: 'Test plan',
     accountType: 'INVEST',
     expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
     createdAt: now(),

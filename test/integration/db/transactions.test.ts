@@ -16,9 +16,9 @@ describe('OrderManager Transactions', () => {
       price: 150,
       stopLossPct: 0.05,
       takeProfitPct: 0.1,
-      aiReasoning: 'Integration test buy',
+      reasoning: 'Integration test buy',
       conviction: 80,
-      aiModel: 'test-model',
+
       accountType: 'INVEST',
     });
 
@@ -33,7 +33,7 @@ describe('OrderManager Transactions', () => {
     expect(trades[0].entryPrice).toBe(150);
     expect(trades[0].stopLoss).toBeCloseTo(142.5);
     expect(trades[0].takeProfit).toBeCloseTo(165);
-    expect(trades[0].aiReasoning).toBe('Integration test buy');
+    expect(trades[0].reasoning).toBe('Integration test buy');
     expect(trades[0].convictionScore).toBe(80);
     expect(trades[0].accountType).toBe('INVEST');
     expect(trades[0].slippage).toBe(0);
@@ -68,9 +68,9 @@ describe('OrderManager Transactions', () => {
       price: 200,
       stopLossPct: 0.05,
       takeProfitPct: 0.1,
-      aiReasoning: 'First buy',
+      reasoning: 'First buy',
       conviction: 70,
-      aiModel: 'test-model',
+
       accountType: 'INVEST',
     });
     expect(first.success).toBe(true);
@@ -83,9 +83,9 @@ describe('OrderManager Transactions', () => {
       price: 210,
       stopLossPct: 0.05,
       takeProfitPct: 0.1,
-      aiReasoning: 'Duplicate buy',
+      reasoning: 'Duplicate buy',
       conviction: 60,
-      aiModel: 'test-model',
+
       accountType: 'INVEST',
     });
     expect(second.success).toBe(false);
@@ -167,9 +167,9 @@ describe('OrderManager Transactions', () => {
       price: 50,
       stopLossPct: 0.1,
       takeProfitPct: 0.2,
-      aiReasoning: 'Lifecycle test',
+      reasoning: 'Lifecycle test',
       conviction: 85,
-      aiModel: 'test-model',
+
       accountType: 'ISA',
     });
     expect(buyResult.success).toBe(true);
@@ -219,9 +219,8 @@ describe('OrderManager Transactions', () => {
         price: 100,
         stopLossPct: 0.05,
         takeProfitPct: 0.1,
-        aiReasoning: 'test',
+        reasoning: 'test',
         conviction: 70,
-        aiModel: 'test',
         accountType: 'INVEST',
       });
       expect(result.success).toBe(false);

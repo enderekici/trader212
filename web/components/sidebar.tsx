@@ -11,11 +11,9 @@ import {
   ListFilter,
   Radio,
   ScrollText,
-  Search,
   Settings,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { SetupGuideButton } from '@/components/SetupGuideButton';
 
 const navItems = [
   { href: '/', label: 'Overview', icon: LayoutDashboard },
@@ -23,7 +21,6 @@ const navItems = [
   { href: '/trades', label: 'Trades', icon: History },
   { href: '/signals', label: 'Signals', icon: Radio },
   { href: '/pairlist', label: 'Pairlist', icon: ListFilter },
-  { href: '/research', label: 'Research', icon: Search },
   { href: '/analytics', label: 'Analytics', icon: BarChart3 },
   { href: '/audit', label: 'Activity', icon: ScrollText },
   { href: '/settings', label: 'Settings', icon: Settings },
@@ -64,9 +61,8 @@ export function Sidebar() {
       </nav>
 
       <div className="border-t border-border p-3 space-y-1">
-        <SetupGuideButton />
         <div className="rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-          AI Trading Bot v1.0
+          Trading Bot v1.0
         </div>
       </div>
     </aside>

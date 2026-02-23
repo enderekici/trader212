@@ -30,7 +30,7 @@ interface Position {
   convictionScore: number | null;
   stopOrderId: string | null;
   takeProfitOrderId: string | null;
-  aiExitConditions: string | null;
+  exitConditions: string | null;
   accountType: 'INVEST' | 'ISA';
   dcaCount: number | null;
   totalInvested: number | null;

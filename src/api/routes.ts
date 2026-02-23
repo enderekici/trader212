@@ -1,7 +1,6 @@
 import { and, desc, eq, gte, lte, sql } from 'drizzle-orm';
 import { Router } from 'express';
 import { z } from 'zod';
-import { getAISelfImprovement } from '../ai/self-improvement.js';
 import { CorrelationAnalyzer } from '../analysis/correlation.js';
 import { createMonteCarloSimulator } from '../analysis/monte-carlo.js';
 import { getPortfolioOptimizer } from '../analysis/portfolio-optimizer.js';
@@ -23,7 +22,6 @@ import {
   getOrdersBySymbol,
   getRecentOrders,
 } from '../db/repositories/orders.js';
-import { getResearchWatchlistRepo } from '../db/repositories/research-watchlist.js';
 import * as schema from '../db/schema.js';
 import { getConditionalOrderManager } from '../execution/conditional-orders.js';
 import { getPairLockManager } from '../execution/pair-locks.js';
@@ -60,13 +58,6 @@ const staticSymbolSchema = z.object({
     .regex(/^[A-Za-z]{1,5}(\.[A-Za-z]{1,2})?$/, 'Invalid symbol format (e.g. AAPL, BRK.B)')
     .transform((s) => s.toUpperCase()),
 });
-
-const researchRunSchema = z
-  .object({
-    focus: z.string().max(500).optional(),
-    symbols: z.array(z.string().min(1).max(10)).max(20).optional(),
-  })
-  .optional();
 
 const backtestSchema = z.object({
   symbols: z.array(z.string().min(1).max(10)).min(1).max(50),
@@ -121,9 +112,6 @@ export interface BotCallbacks {
   getTradePlans: () => unknown[];
   approveTradePlan: (id: number) => unknown;
   rejectTradePlan: (id: number) => void;
-  runResearch: (params?: { focus?: string; symbols?: string[] }) => Promise<unknown>;
-  getResearchReports: () => unknown[];
-  getModelStats: () => unknown[];
 }
 
 let callbacks: BotCallbacks = {
@@ -140,9 +128,6 @@ let callbacks: BotCallbacks = {
   rejectTradePlan: () => {
     /* noop */
   },
-  runResearch: async () => null,
-  getResearchReports: () => [],
-  getModelStats: () => [],
 };
 
 export function registerBotCallbacks(cb: BotCallbacks): void {
@@ -699,159 +684,6 @@ export function createRouter(): Router {
     }
   });
 
-  // ── AI Research ───────────────────────────────────────────────────
-  router.get('/api/research', (_req, res) => {
-    try {
-      const reports = callbacks.getResearchReports();
-      res.json({ reports });
-    } catch (err) {
-      log.error({ err }, 'Error fetching research');
-      res.status(500).json({ error: 'Failed to fetch research' });
-    }
-  });
-
-  router.post('/api/research/run', async (req, res) => {
-    try {
-      const parsed = researchRunSchema.safeParse(req.body);
-      if (parsed.success === false) {
-        res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Invalid request body' });
-        return;
-      }
-      const { focus, symbols } = parsed.data ?? {};
-      const report = await callbacks.runResearch({ focus, symbols });
-      res.json({ report });
-    } catch (err) {
-      log.error({ err }, 'Error running research');
-      res.status(500).json({ error: 'Failed to run research' });
-    }
-  });
-
-  // ── Research Watchlist ────────────────────────────────────────────
-  router.get('/api/research/watchlist', (_req, res) => {
-    try {
-      const repo = getResearchWatchlistRepo();
-      res.json(repo.getAll());
-    } catch (err) {
-      log.error({ err }, 'Error fetching research watchlist');
-      res.status(500).json({ error: String(err) });
-    }
-  });
-
-  router.post('/api/research/watchlist', (req, res) => {
-    try {
-      const { symbol, notes } = req.body as { symbol: string; notes?: string };
-      if (!symbol) {
-        res.status(400).json({ error: 'symbol required' });
-        return;
-      }
-      const repo = getResearchWatchlistRepo();
-      const entry = repo.add(symbol, notes);
-      res.status(201).json(entry);
-    } catch (err) {
-      log.error({ err }, 'Error adding to research watchlist');
-      res.status(500).json({ error: String(err) });
-    }
-  });
-
-  router.delete('/api/research/watchlist/:symbol', (req, res) => {
-    try {
-      const repo = getResearchWatchlistRepo();
-      const removed = repo.remove(req.params.symbol);
-      if (!removed) {
-        res.status(404).json({ error: 'Not found' });
-        return;
-      }
-      res.json({ ok: true });
-    } catch (err) {
-      log.error({ err }, 'Error removing from research watchlist');
-      res.status(500).json({ error: String(err) });
-    }
-  });
-
-  // ── Research Screener ─────────────────────────────────────────────
-  router.post('/api/research/screen', (_req, res) => {
-    try {
-      const db = getDb();
-      // Get latest signal per symbol (ordered by timestamp desc, dedup by symbol)
-      const rows = db
-        .select()
-        .from(schema.signals)
-        .orderBy(desc(schema.signals.timestamp))
-        .limit(500)
-        .all();
-
-      const seen = new Set<string>();
-      const results: Array<{
-        symbol: string;
-        price: number | null;
-        sector: string | null;
-        marketCap: number | null;
-        peRatio: number | null;
-        score: number | null;
-        updatedAt: string;
-      }> = [];
-
-      for (const row of rows) {
-        if (seen.has(row.symbol)) continue;
-        seen.add(row.symbol);
-
-        // Try to enrich with fundamentals cache
-        const fund = db
-          .select()
-          .from(schema.fundamentalCache)
-          .where(eq(schema.fundamentalCache.symbol, row.symbol))
-          .orderBy(desc(schema.fundamentalCache.fetchedAt))
-          .limit(1)
-          .get();
-
-        results.push({
-          symbol: row.symbol,
-          price: null, // price not stored directly on signals
-          sector: fund?.sector ?? null,
-          marketCap: fund?.marketCap ?? null,
-          peRatio: fund?.peRatio ?? null,
-          score: row.technicalScore ?? null,
-          updatedAt: row.timestamp,
-        });
-      }
-
-      res.json({ results, screenerUpdatedAt: results[0]?.updatedAt ?? null });
-    } catch (err) {
-      log.error({ err }, 'Error running screener');
-      res.status(500).json({ error: String(err) });
-    }
-  });
-
-  // ── Update research idea status ───────────────────────────────────
-  router.post('/api/research/ideas/:id/status', (req, res) => {
-    try {
-      const id = parseInt(req.params.id, 10);
-      const { status } = req.body as { status: string };
-      const validStatuses = ['pending', 'completed', 'rejected', 'watching'];
-      if (!validStatuses.includes(status)) {
-        res.status(400).json({ error: `status must be one of: ${validStatuses.join(', ')}` });
-        return;
-      }
-      const db = getDb();
-      db.update(schema.aiResearch).set({ status }).where(eq(schema.aiResearch.id, id)).run();
-      res.json({ ok: true });
-    } catch (err) {
-      log.error({ err }, 'Error updating research idea status');
-      res.status(500).json({ error: String(err) });
-    }
-  });
-
-  // ── Model Performance ─────────────────────────────────────────────
-  router.get('/api/model-stats', (_req, res) => {
-    try {
-      const stats = callbacks.getModelStats();
-      res.json({ stats });
-    } catch (err) {
-      log.error({ err }, 'Error fetching model stats');
-      res.status(500).json({ error: 'Failed to fetch model stats' });
-    }
-  });
-
   // ── Pairlist: Static symbols management ───────────────────────────
   router.get('/api/pairlist/static', (_req, res) => {
     try {
@@ -1368,40 +1200,6 @@ export function createRouter(): Router {
     }
   });
 
-  // ── AI Self-Improvement ──────────────────────────────────────────
-  router.get('/ai/feedback', async (_req, res) => {
-    try {
-      const engine = getAISelfImprovement();
-      const feedback = await engine.generateFeedback();
-      res.json(feedback);
-    } catch (err) {
-      log.error({ err }, 'Error generating AI feedback');
-      res.status(500).json({ error: 'Failed to generate AI feedback' });
-    }
-  });
-
-  router.get('/ai/calibration', async (_req, res) => {
-    try {
-      const engine = getAISelfImprovement();
-      const curve = await engine.getCalibrationCurve();
-      res.json(curve);
-    } catch (err) {
-      log.error({ err }, 'Error generating calibration curve');
-      res.status(500).json({ error: 'Failed to generate calibration curve' });
-    }
-  });
-
-  router.get('/ai/model-comparison', async (_req, res) => {
-    try {
-      const engine = getAISelfImprovement();
-      const comparison = await engine.compareModels();
-      res.json(comparison);
-    } catch (err) {
-      log.error({ err }, 'Error comparing models');
-      res.status(500).json({ error: 'Failed to compare models' });
-    }
-  });
-
   // ── Risk Parity ──────────────────────────────────────────────────
   router.get('/risk-parity/rebalance', (_req, res) => {
     try {
@@ -1456,82 +1254,6 @@ export function createRouter(): Router {
     } catch (err) {
       log.error({ err }, 'Error computing risk parity rebalance');
       res.status(500).json({ error: 'Failed to compute rebalance' });
-    }
-  });
-
-  // ── AI Models (Phase 2E) ─────────────────────────────────────────
-  router.get('/ai/models', (_req, res) => {
-    try {
-      const modelsJson = configManager.get<string>('ai.models');
-      const models = safeJsonParse(modelsJson, []);
-      res.json(models);
-    } catch (err) {
-      log.error({ err }, 'Error fetching AI models');
-      res.status(500).json({ error: 'Failed to fetch AI models' });
-    }
-  });
-
-  router.post('/ai/models', async (req, res) => {
-    try {
-      const profiles = req.body;
-      if (!Array.isArray(profiles)) {
-        res.status(400).json({ error: 'Body must be an array of ModelProfile objects' });
-        return;
-      }
-      await configManager.set('ai.models', JSON.stringify(profiles));
-      res.json({ ok: true, count: profiles.length });
-    } catch (err) {
-      log.error({ err }, 'Error saving AI models');
-      res.status(500).json({ error: 'Failed to save AI models' });
-    }
-  });
-
-  router.post('/ai/test', async (req, res) => {
-    try {
-      const { profileId } = req.body as { profileId?: string };
-      const modelsJson = configManager.get<string>('ai.models');
-      const models = safeJsonParse<
-        {
-          id: string;
-          baseUrl: string;
-          model: string;
-          apiKey: string;
-          weight: number;
-          enabled: boolean;
-          timeoutSeconds?: number;
-        }[]
-      >(modelsJson, []);
-      const profile = models.find((m) => m.id === profileId);
-      if (!profile) {
-        res.status(404).json({ error: `Profile '${profileId}' not found` });
-        return;
-      }
-      const { OpenAICompatibleAdapter } = await import('../ai/adapters/openai-compat.js');
-      const adapter = new OpenAICompatibleAdapter(profile);
-      const start = Date.now();
-      try {
-        await adapter.rawChat('You are a test assistant.', 'Reply with only the word: pong');
-        res.json({ ok: true, latencyMs: Date.now() - start });
-      } catch (callErr) {
-        res.json({ ok: false, latencyMs: Date.now() - start, error: String(callErr) });
-      }
-    } catch (err) {
-      log.error({ err }, 'Error testing AI model');
-      res.status(500).json({ error: 'Failed to test AI model' });
-    }
-  });
-
-  router.get('/api/setup/status', (_req, res) => {
-    try {
-      const modelsJson = configManager.get<string>('ai.models');
-      const models = safeJsonParse<{ enabled: boolean }[]>(modelsJson, []);
-      const hasEnabledModel = models.some((m) => m.enabled);
-      const provider = configManager.get<string>('ai.provider');
-      const hasLegacyProvider = Boolean(provider && provider !== 'anthropic');
-      res.json({ configured: hasEnabledModel || hasLegacyProvider });
-    } catch (err) {
-      log.error({ err }, 'Error fetching setup status');
-      res.status(500).json({ error: 'Failed to fetch setup status' });
     }
   });
 

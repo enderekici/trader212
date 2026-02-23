@@ -257,87 +257,13 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
     description: 'S/R lookback bars',
   },
 
-  // AI
-  { key: 'ai.enabled', value: 'true', category: 'ai', description: 'Enable AI analysis' },
+  // Decision Engine
   {
-    key: 'ai.provider',
-    value: '"anthropic"',
+    key: 'ai.enabled',
+    value: 'true',
     category: 'ai',
-    description: 'anthropic | ollama | openai-compatible',
+    description: 'Enable decision engine analysis',
   },
-  {
-    key: 'ai.model',
-    value: '"claude-sonnet-4-5-20250929"',
-    category: 'ai',
-    description: 'AI model identifier',
-  },
-  {
-    key: 'ai.ollama.baseUrl',
-    value: '"http://localhost:11434"',
-    category: 'ai',
-    description: 'Ollama base URL',
-  },
-  {
-    key: 'ai.ollama.model',
-    value: '"palmyra-fin"',
-    category: 'ai',
-    description: 'Ollama model name',
-  },
-  {
-    key: 'ai.openaiCompat.baseUrl',
-    value: '"http://localhost:8317/v1"',
-    category: 'ai',
-    description: 'OpenAI-compatible base URL',
-  },
-  {
-    key: 'ai.openaiCompat.model',
-    value: '"claude-sonnet-4-5-20250929"',
-    category: 'ai',
-    description: 'OpenAI-compatible model name',
-  },
-  {
-    key: 'ai.openaiCompat.apiKey',
-    value: '""',
-    category: 'ai',
-    description: 'OpenAI-compatible API key',
-  },
-  {
-    key: 'ai.models',
-    value: '"[]"',
-    category: 'ai',
-    description: 'JSON array of ModelProfile objects for multi-model support',
-  },
-  {
-    key: 'ai.primaryModel',
-    value: '""',
-    category: 'ai',
-    description: 'ID of the primary model profile (empty = use legacy ai.provider)',
-  },
-  {
-    key: 'ai.consensus.enabled',
-    value: 'false',
-    category: 'ai',
-    description: 'Enable consensus mode (requires multiple enabled model profiles)',
-  },
-  {
-    key: 'ai.consensus.mode',
-    value: '"weighted"',
-    category: 'ai',
-    description: 'Consensus mode: majority | weighted | unanimous',
-  },
-  {
-    key: 'ai.consensus.minAgree',
-    value: '2',
-    category: 'ai',
-    description: 'Minimum number of models that must agree in consensus mode',
-  },
-  {
-    key: 'ai.maxConcurrentCalls',
-    value: '2',
-    category: 'ai',
-    description: 'Max concurrent AI calls',
-  },
-  { key: 'ai.timeoutSeconds', value: '60', category: 'ai', description: 'AI call timeout' },
   {
     key: 'ai.includeHistoricalSignals',
     value: 'false',
@@ -350,7 +276,6 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
     category: 'ai',
     description: 'Previous signals sent to AI',
   },
-  { key: 'ai.temperature', value: '0', category: 'ai', description: 'AI temperature' },
 
   // Risk
   { key: 'risk.maxPositions', value: '5', category: 'risk', description: 'Max open positions' },
@@ -537,40 +462,6 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
     value: '30',
     category: 'execution',
     description: 'Position re-evaluation interval',
-  },
-
-  // AI market research
-  {
-    key: 'ai.research.enabled',
-    value: 'true',
-    category: 'ai',
-    description: 'Enable AI market research feature',
-  },
-  {
-    key: 'ai.research.intervalMinutes',
-    value: '120',
-    category: 'ai',
-    description: 'Market research interval',
-  },
-  {
-    key: 'ai.research.topStocksCount',
-    value: '50',
-    category: 'ai',
-    description: 'Number of top stocks to analyze in research',
-  },
-
-  // AI research data enrichment
-  {
-    key: 'ai.research.detailedThreshold',
-    value: '3',
-    category: 'ai',
-    description: 'Symbol count cutoff for detailed vs condensed research prompt',
-  },
-  {
-    key: 'ai.research.maxConcurrentFetches',
-    value: '3',
-    category: 'ai',
-    description: 'Max concurrent data fetches during research (pLimit)',
   },
 
   // Risk - loss cool-down recovery
@@ -999,26 +890,6 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
     value: '30',
     category: 'conditionalOrders',
     description: 'How often to check trigger conditions',
-  },
-
-  // AI Self-Improvement
-  {
-    key: 'aiSelfImprovement.enabled',
-    value: 'false',
-    category: 'aiSelfImprovement',
-    description: 'Feed accuracy stats back into AI prompts',
-  },
-  {
-    key: 'aiSelfImprovement.feedbackWindow',
-    value: '30',
-    category: 'aiSelfImprovement',
-    description: 'Days of history to include in feedback',
-  },
-  {
-    key: 'aiSelfImprovement.minSamples',
-    value: '10',
-    category: 'aiSelfImprovement',
-    description: 'Min predictions before generating feedback',
   },
 
   // Scheduled Reports

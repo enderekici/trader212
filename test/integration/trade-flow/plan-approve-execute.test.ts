@@ -2,10 +2,6 @@ import { describe, it, expect, vi } from 'vitest';
 import { getDb } from '../../../src/db/index.js';
 import * as schema from '../../../src/db/schema.js';
 
-vi.mock('../../../src/ai/agent.js', () => ({
-  getActiveModelName: () => 'test-model',
-}));
-
 // Import after mock is set up
 const { TradePlanner } = await import('../../../src/execution/trade-planner.js');
 const { OrderManager } = await import('../../../src/execution/order-manager.js');
@@ -54,7 +50,7 @@ describe('Trade plan → approve → execute', () => {
     expect(plan!.symbol).toBe('AAPL');
     expect(plan!.side).toBe('BUY');
     expect(plan!.shares).toBeGreaterThan(0);
-    expect(plan!.aiModel).toBe('test-model');
+    expect(plan!.conviction).toBeGreaterThan(0);
   });
 
   it('approves a pending plan and records approval metadata', () => {
@@ -99,9 +95,8 @@ describe('Trade plan → approve → execute', () => {
       price: plan!.entryPrice,
       stopLossPct: plan!.stopLossPct,
       takeProfitPct: plan!.takeProfitPct,
-      aiReasoning: plan!.aiReasoning ?? '',
-      conviction: plan!.aiConviction,
-      aiModel: plan!.aiModel ?? 'test-model',
+      reasoning: plan!.reasoning ?? '',
+      conviction: plan!.conviction,
       accountType: plan!.accountType,
     });
 
@@ -149,9 +144,8 @@ describe('Trade plan → approve → execute', () => {
       price: 170,
       stopLossPct: 0.05,
       takeProfitPct: 0.1,
-      aiReasoning: 'test',
+      reasoning: 'test',
       conviction: 80,
-      aiModel: 'test-model',
       accountType: 'INVEST' as const,
     };
 

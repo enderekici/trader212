@@ -1,13 +1,12 @@
 import type { Metadata } from 'next';
 import { Sidebar } from '@/components/sidebar';
 import { HeaderBar } from '@/components/header-bar';
-import { WizardMount } from '@/components/WizardMount';
 import { Providers } from '@/components/providers';
 import './globals.css';
 
 export const metadata: Metadata = {
   title: 'Trader212 Dashboard',
-  description: 'AI-powered autonomous trading bot dashboard',
+  description: 'Autonomous trading bot dashboard',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -20,7 +19,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <HeaderBar />
             {children}
           </main>
-          <WizardMount />
         </Providers>
       </body>
     </html>

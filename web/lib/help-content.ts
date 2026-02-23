@@ -18,14 +18,6 @@ export const HELP: Record<string, string> = {
   'risk.maxOpenPositions': 'Maximum number of positions the bot can hold simultaneously.',
   'risk.maxCorrelation': 'Maximum allowed correlation between a new position and existing positions.',
 
-  // AI settings
-  'ai.provider': 'The AI provider to use for trading decisions. Options: anthropic, openai-compatible, ollama, rules.',
-  'ai.models': 'Named model profiles for multi-provider support. Each profile has a base URL, model name, and API key.',
-  'ai.primaryModel': 'The ID of the primary model profile to use for decisions.',
-  'ai.consensus.enabled': 'When enabled, multiple AI models vote on each decision (requires 2+ enabled profiles).',
-  'ai.consensus.mode': 'How consensus is reached: majority (vote count), weighted (by model weight), unanimous (all must agree).',
-  'ai.temperature': 'AI creativity level (0=deterministic, 1=creative). Lower values give more consistent decisions.',
-
   // Execution settings
   'execution.requireApproval': 'If enabled, all trade plans require manual approval before execution.',
   'execution.approvalTimeoutMinutes': 'Minutes before a pending trade plan auto-expires.',
@@ -59,7 +51,6 @@ export const HELP: Record<string, string> = {
   'page.positions': 'All currently open positions with P&L, stop losses, and trailing stops.',
   'page.trades': 'Complete history of all executed trades with entry/exit details.',
   'page.signals': 'Analysis signals generated for each stock, including scores and AI decisions.',
-  'page.research': 'AI market research reports, watchlist management, and stock screener.',
   'page.analytics': 'Performance metrics including win rate, Sharpe ratio, and drawdown.',
   'page.pairlist': 'Manage the list of stocks the bot monitors and trades.',
   'page.audit': 'Detailed activity log of all bot actions, errors, and system events.',
@@ -83,11 +74,6 @@ export const HELP: Record<string, string> = {
   'analytics.sharpe': 'Sharpe ratio: risk-adjusted return. Higher is better (>1 is good, >2 is excellent).',
   'analytics.maxDrawdown': 'Largest peak-to-trough decline. Lower is better.',
   'analytics.profitFactor': 'Gross profit divided by gross loss. >1.5 is considered good.',
-
-  // AI research
-  'research.watchlist': 'Symbols you want the AI to monitor and include in research reports.',
-  'research.screener': 'Scan cached fundamental data to discover potential trade candidates.',
-  'research.ideas': 'AI-generated trade ideas and market research reports.',
 
   // Protections
   'protections.cooldown': 'Minimum time between trades on the same symbol.',

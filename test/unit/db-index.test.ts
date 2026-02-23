@@ -77,8 +77,6 @@ describe('db/index', () => {
     expect(sql).toContain('CREATE TABLE IF NOT EXISTS pairlist_history');
     expect(sql).toContain('CREATE TABLE IF NOT EXISTS config');
     expect(sql).toContain('CREATE TABLE IF NOT EXISTS trade_plans');
-    expect(sql).toContain('CREATE TABLE IF NOT EXISTS ai_research');
-    expect(sql).toContain('CREATE TABLE IF NOT EXISTS model_performance');
     expect(sql).toContain('CREATE TABLE IF NOT EXISTS audit_log');
   });
 
@@ -109,7 +107,7 @@ describe('db/index', () => {
     expect(mockDrizzle).toHaveBeenCalledWith(mockSqliteInstance, expect.objectContaining({ schema: expect.any(Object) }));
   });
 
-  it('creates indexes for price_cache, news_cache, earnings, insider, fundamental, trade_plans, ai_research, model_performance, and audit_log', async () => {
+  it('creates indexes for price_cache, news_cache, earnings, insider, fundamental, trade_plans, and audit_log', async () => {
     const mod = await import('../../src/db/index.js');
     mod.initDatabase('/tmp/test.db');
     const sql = mockExec.mock.calls[0][0] as string;
@@ -119,8 +117,6 @@ describe('db/index', () => {
     expect(sql).toContain('CREATE INDEX IF NOT EXISTS idx_insider_symbol');
     expect(sql).toContain('CREATE INDEX IF NOT EXISTS idx_fund_symbol');
     expect(sql).toContain('CREATE INDEX IF NOT EXISTS idx_trade_plans_symbol');
-    expect(sql).toContain('CREATE INDEX IF NOT EXISTS idx_research_ts');
-    expect(sql).toContain('CREATE INDEX IF NOT EXISTS idx_model_perf');
     expect(sql).toContain('CREATE INDEX IF NOT EXISTS idx_audit_ts');
   });
 });

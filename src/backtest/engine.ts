@@ -284,7 +284,7 @@ export class BacktestEngine {
             (position.highWaterMark - position.entryPrice) / position.entryPrice;
           const tiers = this.config.dynamicTrailingTiers ?? [
             { profitPct: 0.12, trailPct: 0.06 },
-            { profitPct: 0.20, trailPct: 0.05 },
+            { profitPct: 0.2, trailPct: 0.05 },
           ];
           // Apply last matching tier (sorted ascending by profitPct)
           const sortedTiers = [...tiers].sort((a, b) => a.profitPct - b.profitPct);

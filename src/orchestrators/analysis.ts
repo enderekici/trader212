@@ -1,7 +1,10 @@
 import { desc, eq } from 'drizzle-orm';
-import type { AIAgent, AIContext, AIDecision } from '../ai/agent.js';
-import { getActiveModelName } from '../ai/agent.js';
 import type { CorrelationAnalyzer } from '../analysis/correlation.js';
+import type {
+  DecisionContext,
+  DecisionEngine,
+  TradeDecision,
+} from '../analysis/decision-engine.js';
 import { scoreFundamentals } from '../analysis/fundamental/scorer.js';
 import type { MultiTimeframeResult } from '../analysis/multi-timeframe.js';
 import { createMultiTimeframeAnalyzer } from '../analysis/multi-timeframe.js';
@@ -29,7 +32,7 @@ const log = createLogger('analysis-orchestrator');
 
 export interface AnalysisOrchestratorDeps {
   dataAggregator: DataAggregator;
-  aiAgent: AIAgent;
+  decisionEngine: DecisionEngine;
   correlationAnalyzer: CorrelationAnalyzer;
   pairlistPipeline: PairlistPipeline;
   tickerMapper: TickerMapper;
@@ -65,7 +68,7 @@ export class AnalysisOrchestrator {
     spyCandles: OHLCVCandle[] = [],
   ): Promise<{
     shouldTrade: boolean;
-    decision: AIDecision;
+    decision: TradeDecision;
     data: StockData;
     technicalScore: number;
     fundamentalScore: number;
@@ -176,7 +179,7 @@ export class AnalysisOrchestrator {
     }
 
     // 4. Build AI context (portfolio passed from caller)
-    const aiContext = this.buildAIContext(
+    const aiContext = this.buildDecisionContext(
       symbol,
       data,
       techAnalysis,
@@ -191,27 +194,11 @@ export class AnalysisOrchestrator {
       socialSentimentResult,
     );
 
-    // 5. AI decision
-    const aiEnabled = configManager.get<boolean>('ai.enabled');
-    let decision: AIDecision = {
-      decision: 'HOLD',
-      conviction: 0,
-      reasoning: 'AI disabled',
-      risks: [],
-      suggestedStopLossPct: 0.05,
-      suggestedPositionSizePct: 0.1,
-      suggestedTakeProfitPct: 0.15,
-      urgency: 'no_rush',
-      exitConditions: '',
-    };
-
-    if (aiEnabled) {
-      const aiDecision = await this.deps.aiAgent.analyze(aiContext);
-      if (!aiDecision) {
-        log.warn({ symbol }, 'AI decision parsing failed -- skipping symbol');
-        return null;
-      }
-      decision = aiDecision;
+    // 5. Decision engine
+    const decision = await this.deps.decisionEngine.analyze(aiContext);
+    if (!decision) {
+      log.warn({ symbol }, 'Decision engine returned null -- skipping symbol');
+      return null;
     }
 
     // 6. Store signal in DB
@@ -250,13 +237,12 @@ export class AnalysisOrchestrator {
         technicalScore,
         sentimentScore,
         fundamentalScore,
-        aiScore: decision.conviction,
+        decisionScore: decision.conviction,
         convictionTotal:
           (technicalScore + fundamentalScore + sentimentScore + decision.conviction) / 4,
         decision: decision.decision,
         executed: false,
-        aiReasoning: decision.reasoning,
-        aiModel: getActiveModelName(),
+        reasoning: decision.reasoning,
         suggestedStopLossPct: decision.suggestedStopLossPct,
         suggestedPositionSizePct: decision.suggestedPositionSizePct,
         suggestedTakeProfitPct: decision.suggestedTakeProfitPct,
@@ -319,7 +305,7 @@ export class AnalysisOrchestrator {
     };
   }
 
-  buildAIContext(
+  buildDecisionContext(
     symbol: string,
     data: StockData,
     techAnalysis: ReturnType<typeof analyzeTechnicals>,
@@ -332,7 +318,7 @@ export class AnalysisOrchestrator {
     regimeAnalysis?: RegimeAnalysis | null,
     multiTimeframeResult?: MultiTimeframeResult | null,
     socialSentimentResult?: SocialSentimentResult | null,
-  ): AIContext {
+  ): DecisionContext {
     const candles = data.candles;
     const latest = candles[candles.length - 1];
     const fiveDaysAgo = candles.length >= 5 ? candles[candles.length - 5] : latest;

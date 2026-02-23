@@ -1,11 +1,7 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { getDb } from '../../../src/db/index.js';
 import * as schema from '../../../src/db/schema.js';
 import { insertTradePlan } from '../helpers/fixtures.js';
-
-vi.mock('../../../src/ai/agent.js', () => ({
-  getActiveModelName: () => 'test-model',
-}));
 
 const { TradePlanner } = await import('../../../src/execution/trade-planner.js');
 

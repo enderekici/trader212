@@ -1,5 +1,5 @@
 import { and, desc, eq, lte } from 'drizzle-orm';
-import { type AIDecision, getActiveModelName } from '../ai/agent.js';
+import type { TradeDecision } from '../analysis/decision-engine.js';
 import { configManager } from '../config/manager.js';
 import { getDb } from '../db/index.js';
 import { tradePlans } from '../db/schema.js';
@@ -26,9 +26,8 @@ export interface TradePlan {
   maxLossDollars: number;
   riskRewardRatio: number;
   maxHoldDays: number | null;
-  aiConviction: number;
-  aiReasoning: string | null;
-  aiModel: string | null;
+  conviction: number;
+  reasoning: string | null;
   risks: string[];
   urgency: string | null;
   exitConditions: string | null;
@@ -47,7 +46,7 @@ export class TradePlanner {
     symbol: string;
     t212Ticker: string;
     price: number;
-    decision: AIDecision;
+    decision: TradeDecision;
     portfolio: PortfolioState;
     technicalScore?: number;
     fundamentalScore?: number;
@@ -107,9 +106,8 @@ export class TradePlanner {
         maxLossDollars,
         riskRewardRatio,
         maxHoldDays,
-        aiConviction: decision.conviction,
-        aiReasoning: decision.reasoning,
-        aiModel: getActiveModelName(),
+        conviction: decision.conviction,
+        reasoning: decision.reasoning,
         risks: JSON.stringify(decision.risks),
         urgency: decision.urgency,
         exitConditions: decision.exitConditions,
@@ -212,8 +210,8 @@ export class TradePlanner {
       `Take Profit: $${plan.takeProfitPrice.toFixed(2)} (+${(plan.takeProfitPct * 100).toFixed(1)}%)`,
       `Risk/Reward: 1:${plan.riskRewardRatio.toFixed(1)}`,
       plan.maxHoldDays ? `Max Hold: ${plan.maxHoldDays} trading days` : '',
-      `AI Conviction: ${plan.aiConviction}/100`,
-      `Reasoning: ${plan.aiReasoning ?? 'N/A'}`,
+      `Conviction: ${plan.conviction}/100`,
+      `Reasoning: ${plan.reasoning ?? 'N/A'}`,
       plan.risks.length > 0 ? `Risks: ${plan.risks.join(', ')}` : '',
     ]
       .filter(Boolean)

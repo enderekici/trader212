@@ -36,7 +36,6 @@
     "node": ">=24.0.0"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.78.0",
     "axios": "^1.13.5",
     "axios-retry": "^4.5.0",
     "better-sqlite3": "^12.6.2",

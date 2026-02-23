@@ -1,11 +1,201 @@
 import { configManager } from '../config/manager.js';
 import { createLogger } from '../utils/logger.js';
-import type { AIAgent, AIContext, AIDecision } from './agent.js';
 
-const log = createLogger('rules-engine');
+const log = createLogger('decision-engine');
 
 // ---------------------------------------------------------------------------
 // Types
+// ---------------------------------------------------------------------------
+
+export const DECISION_ENGINE_MODEL_NAME = 'rules-engine';
+
+export interface DecisionContext {
+  symbol: string;
+  currentPrice: number;
+  priceChange1d: number;
+  priceChange5d: number;
+  priceChange1m: number;
+  dayHigh: number | null;
+  dayLow: number | null;
+  volume: number | null;
+  avgVolume: number | null;
+  technical: {
+    rsi: number | null;
+    macdValue: number | null;
+    macdSignal: number | null;
+    macdHistogram: number | null;
+    sma20: number | null;
+    sma50: number | null;
+    sma200: number | null;
+    ema12: number | null;
+    ema26: number | null;
+    bollingerUpper: number | null;
+    bollingerMiddle: number | null;
+    bollingerLower: number | null;
+    atr: number | null;
+    adx: number | null;
+    stochasticK: number | null;
+    stochasticD: number | null;
+    williamsR: number | null;
+    mfi: number | null;
+    cci: number | null;
+    obv: number | null;
+    vwap: number | null;
+    parabolicSar: number | null;
+    roc: number | null;
+    forceIndex: number | null;
+    volumeRatio: number | null;
+    perfWeek: number | null;
+    perfMonth: number | null;
+    perfQuarter: number | null;
+    perfYear: number | null;
+    ichimoku: {
+      tenkanSen: number;
+      kijunSen: number;
+      senkouSpanA: number;
+      senkouSpanB: number;
+      chikouSpan: number;
+    } | null;
+    adl: number | null;
+    awesomeOscillator: number | null;
+    support: number | null;
+    resistance: number | null;
+    candlestickBullish: string | null;
+    candlestickBearish: string | null;
+    candlestickNeutral: string | null;
+    score: number;
+  };
+  fundamental: {
+    peRatio: number | null;
+    forwardPE: number | null;
+    pegRatio: number | null;
+    revenueGrowthYoY: number | null;
+    profitMargin: number | null;
+    operatingMargin: number | null;
+    debtToEquity: number | null;
+    currentRatio: number | null;
+    marketCap: number | null;
+    sector: string | null;
+    beta: number | null;
+    dividendYield: number | null;
+    industry: string | null;
+    earningsSurprise: number | null;
+    roe: number | null;
+    roa: number | null;
+    freeCashflow: number | null;
+    analystBuy: number | null;
+    analystSell: number | null;
+    analystTargetPrice: number | null;
+    analystConsensus: string | null;
+    analystCount: number | null;
+    shortInterestPct: number | null;
+    institutionalOwnershipPct: number | null;
+    score: number;
+  };
+  sentiment: {
+    headlines: Array<{ title: string; score: number; source: string; relevanceScore?: number }>;
+    insiderNetBuying: number;
+    daysToEarnings: number | null;
+    epsEstimateNextQ: number | null;
+    revenueEstimateNextQ: number | null;
+    sentimentBreakdown: { positive: number; negative: number; neutral: number } | null;
+    topKeywords: string[];
+    finraShortVolumePct: number | null;
+    score: number;
+  };
+  historicalSignals: Array<{
+    timestamp: string;
+    technicalScore: number;
+    sentimentScore: number;
+    fundamentalScore: number;
+    decision: string;
+    rsi: number | null;
+    macdHistogram: number | null;
+  }>;
+  portfolio: {
+    cashAvailable: number;
+    portfolioValue: number;
+    openPositions: number;
+    maxPositions: number;
+    todayPnl: number;
+    todayPnlPct: number;
+    sectorExposure: Record<string, number>;
+    sectorExposureValue: Record<string, number>;
+    existingPositions: Array<{
+      symbol: string;
+      pnlPct: number;
+      entryPrice: number;
+      currentPrice: number;
+      shares: number;
+      stopLoss: number | null;
+      trailingStop: number | null;
+      holdDays: number;
+      dcaCount: number;
+      partialExitCount: number;
+    }>;
+  };
+  marketContext: {
+    spyPrice: number;
+    spyChange1d: number;
+    vixLevel: number;
+    marketTrend: string;
+  };
+  riskConstraints: {
+    maxPositionSizePct: number;
+    maxStopLossPct: number;
+    minStopLossPct: number;
+    maxRiskPerTradePct: number;
+    dailyLossLimitPct: number;
+  };
+  correlationWarnings?: string[];
+  portfolioCorrelations?: Array<{
+    symbol: string;
+    correlation: number;
+  }>;
+  regime?: {
+    regime: string;
+    confidence: number;
+    spyTrend: string;
+    volatilityPctile: number;
+    newEntriesAllowed: boolean;
+    positionSizeMultiplier: number;
+    stopLossMultiplier: number;
+    entryThresholdAdjustment: number;
+    breadthScore: number;
+  };
+  multiTimeframe?: {
+    compositeScore: number;
+    alignment: string;
+    timeframeScores: Record<string, number>;
+    timeframeDetails: Array<{
+      timeframe: string;
+      score: number;
+      signal: string;
+      candleCount: number;
+    }>;
+  };
+  socialSentiment?: {
+    overallScore: number;
+    buzzScore: number;
+    mentionCount: number;
+    trendDirection: string;
+  };
+}
+
+export interface TradeDecision {
+  decision: 'BUY' | 'SELL' | 'HOLD';
+  conviction: number;
+  reasoning: string;
+  risks: string[];
+  suggestedStopLossPct: number;
+  suggestedPositionSizePct: number;
+  suggestedTakeProfitPct: number;
+  urgency: 'immediate' | 'wait_for_dip' | 'no_rush';
+  exitConditions: string;
+}
+
+// ---------------------------------------------------------------------------
+// Internal Types
 // ---------------------------------------------------------------------------
 
 type StrategyType = 'MEAN_REVERSION' | 'TREND_FOLLOWING' | 'MOMENTUM' | 'BREAKOUT';
@@ -42,7 +232,7 @@ function getConfigSafe<T>(key: string, defaultValue: T): T {
 }
 
 /**
- * Map regime string from the AIContext to strategy weights.
+ * Map regime string to strategy weights.
  * In strong trends, favor momentum/trend-following.
  * In sideways markets, favor mean-reversion/breakout.
  */
@@ -60,10 +250,10 @@ function getRegimeWeights(regime: string | undefined): StrategyWeights {
 }
 
 // ---------------------------------------------------------------------------
-// Strategy Scorers (operate on pre-computed indicators from AIContext)
+// Strategy Scorers
 // ---------------------------------------------------------------------------
 
-function scoreMeanReversion(ctx: AIContext): StrategySignal {
+function scoreMeanReversion(ctx: DecisionContext): StrategySignal {
   const reasons: string[] = [];
   let longScore = 0;
   let shortScore = 0;
@@ -71,7 +261,6 @@ function scoreMeanReversion(ctx: AIContext): StrategySignal {
   let agreeing = 0;
   const t = ctx.technical;
 
-  // RSI
   if (t.rsi != null) {
     subSignals++;
     if (t.rsi < 35) {
@@ -85,7 +274,6 @@ function scoreMeanReversion(ctx: AIContext): StrategySignal {
     }
   }
 
-  // Bollinger %B
   if (t.bollingerUpper != null && t.bollingerLower != null) {
     const range = t.bollingerUpper - t.bollingerLower;
     if (range > 0) {
@@ -111,7 +299,6 @@ function scoreMeanReversion(ctx: AIContext): StrategySignal {
     }
   }
 
-  // Stochastic
   if (t.stochasticK != null) {
     subSignals++;
     if (t.stochasticK < 20) {
@@ -125,7 +312,6 @@ function scoreMeanReversion(ctx: AIContext): StrategySignal {
     }
   }
 
-  // Williams %R
   if (t.williamsR != null) {
     subSignals++;
     if (t.williamsR < -80) {
@@ -139,7 +325,6 @@ function scoreMeanReversion(ctx: AIContext): StrategySignal {
     }
   }
 
-  // CCI
   if (t.cci != null) {
     subSignals++;
     if (t.cci < -100) {
@@ -175,7 +360,7 @@ function scoreMeanReversion(ctx: AIContext): StrategySignal {
   };
 }
 
-function scoreTrendFollowing(ctx: AIContext): StrategySignal {
+function scoreTrendFollowing(ctx: DecisionContext): StrategySignal {
   const reasons: string[] = [];
   let longScore = 0;
   let shortScore = 0;
@@ -183,7 +368,6 @@ function scoreTrendFollowing(ctx: AIContext): StrategySignal {
   let agreeing = 0;
   const t = ctx.technical;
 
-  // EMA alignment
   if (t.ema12 != null && t.sma50 != null && t.sma200 != null) {
     subSignals++;
     if (t.ema12 > t.sma50 && t.sma50 > t.sma200) {
@@ -197,7 +381,6 @@ function scoreTrendFollowing(ctx: AIContext): StrategySignal {
     }
   }
 
-  // ADX > 25 confirms trend
   if (t.adx != null) {
     subSignals++;
     if (t.adx > 25) {
@@ -209,7 +392,6 @@ function scoreTrendFollowing(ctx: AIContext): StrategySignal {
     }
   }
 
-  // MACD
   if (t.macdHistogram != null && t.macdValue != null && t.macdSignal != null) {
     subSignals++;
     if (t.macdValue > t.macdSignal && t.macdHistogram > 0) {
@@ -225,7 +407,6 @@ function scoreTrendFollowing(ctx: AIContext): StrategySignal {
     }
   }
 
-  // Price vs SMA200
   if (t.sma200 != null && t.sma200 > 0) {
     subSignals++;
     const pctFromSma = (ctx.currentPrice - t.sma200) / t.sma200;
@@ -240,7 +421,6 @@ function scoreTrendFollowing(ctx: AIContext): StrategySignal {
     }
   }
 
-  // Volume confirmation
   if (t.volumeRatio != null && t.volumeRatio > 1.0) {
     subSignals++;
     const s = clamp((t.volumeRatio - 1.0) / 1.5);
@@ -272,7 +452,7 @@ function scoreTrendFollowing(ctx: AIContext): StrategySignal {
   };
 }
 
-function scoreMomentum(ctx: AIContext): StrategySignal {
+function scoreMomentum(ctx: DecisionContext): StrategySignal {
   const reasons: string[] = [];
   let longScore = 0;
   let shortScore = 0;
@@ -280,7 +460,6 @@ function scoreMomentum(ctx: AIContext): StrategySignal {
   let agreeing = 0;
   const t = ctx.technical;
 
-  // ROC
   if (t.roc != null) {
     subSignals++;
     if (t.roc > 3) {
@@ -294,7 +473,6 @@ function scoreMomentum(ctx: AIContext): StrategySignal {
     }
   }
 
-  // RSI in momentum zone
   if (t.rsi != null) {
     subSignals++;
     if (t.rsi >= 50 && t.rsi <= 70) {
@@ -308,7 +486,6 @@ function scoreMomentum(ctx: AIContext): StrategySignal {
     }
   }
 
-  // Volume participation
   if (t.volumeRatio != null && t.volumeRatio > 1.2) {
     subSignals++;
     const s = clamp((t.volumeRatio - 1.2) / 1.5);
@@ -318,7 +495,6 @@ function scoreMomentum(ctx: AIContext): StrategySignal {
     reasons.push(`Above-average volume (${t.volumeRatio.toFixed(2)}x)`);
   }
 
-  // MFI confirmation
   if (t.mfi != null) {
     subSignals++;
     if (t.mfi > 50 && longScore > shortScore) {
@@ -332,7 +508,6 @@ function scoreMomentum(ctx: AIContext): StrategySignal {
     }
   }
 
-  // Performance metrics (weekly/monthly momentum)
   if (t.perfWeek != null && t.perfMonth != null) {
     subSignals++;
     if (t.perfWeek > 1 && t.perfMonth > 3) {
@@ -372,7 +547,7 @@ function scoreMomentum(ctx: AIContext): StrategySignal {
   };
 }
 
-function scoreBreakout(ctx: AIContext): StrategySignal {
+function scoreBreakout(ctx: DecisionContext): StrategySignal {
   const reasons: string[] = [];
   let longScore = 0;
   let shortScore = 0;
@@ -380,7 +555,6 @@ function scoreBreakout(ctx: AIContext): StrategySignal {
   let agreeing = 0;
   const t = ctx.technical;
 
-  // Support/resistance proximity (Donchian proxy)
   if (t.support != null && t.resistance != null && t.resistance > t.support) {
     subSignals++;
     const range = t.resistance - t.support;
@@ -405,7 +579,6 @@ function scoreBreakout(ctx: AIContext): StrategySignal {
     }
   }
 
-  // Volume surge
   if (t.volumeRatio != null && t.volumeRatio > 1.3) {
     subSignals++;
     const s = clamp((t.volumeRatio - 1.3) / 2);
@@ -415,7 +588,6 @@ function scoreBreakout(ctx: AIContext): StrategySignal {
     reasons.push(`Volume surge (${t.volumeRatio.toFixed(2)}x)`);
   }
 
-  // ADX rising into trend territory
   if (t.adx != null && t.adx > 20 && t.adx < 40) {
     subSignals++;
     const s = clamp((t.adx - 20) / 20);
@@ -425,7 +597,6 @@ function scoreBreakout(ctx: AIContext): StrategySignal {
     reasons.push(`ADX emerging trend (${t.adx.toFixed(1)})`);
   }
 
-  // Bollinger bandwidth (squeeze/expansion)
   if (
     t.bollingerUpper != null &&
     t.bollingerLower != null &&
@@ -443,7 +614,6 @@ function scoreBreakout(ctx: AIContext): StrategySignal {
     }
   }
 
-  // ATR as volatility expansion indicator
   if (t.atr != null && ctx.currentPrice > 0) {
     subSignals++;
     const atrPct = t.atr / ctx.currentPrice;
@@ -489,7 +659,7 @@ interface FundamentalBucket {
   combined: number; // 0-1
 }
 
-function scoreFundamentalsStructured(ctx: AIContext): FundamentalBucket {
+function scoreFundamentalsStructured(ctx: DecisionContext): FundamentalBucket {
   const f = ctx.fundamental;
 
   // Quality (35%): profit margin, D/E ratio, current ratio
@@ -521,11 +691,11 @@ function scoreFundamentalsStructured(ctx: AIContext): FundamentalBucket {
 }
 
 // ---------------------------------------------------------------------------
-// Main Rules Engine
+// Main Decision Engine
 // ---------------------------------------------------------------------------
 
-export class RulesEngine implements AIAgent {
-  async analyze(context: AIContext): Promise<AIDecision | null> {
+export class DecisionEngine {
+  async analyze(context: DecisionContext): Promise<TradeDecision | null> {
     // ── 1. Run all 4 strategies ──────────────────────────────────────
     const signals: StrategySignal[] = [
       scoreMeanReversion(context),
@@ -599,7 +769,7 @@ export class RulesEngine implements AIAgent {
       decision = 'SELL';
     }
 
-    // Scale conviction to 0-100 for compatibility
+    // Scale conviction to 0-100
     const convictionPct = Math.round(conviction * 100);
 
     // ── 8. Stop-loss / take-profit from ATR ──────────────────────────
@@ -645,7 +815,7 @@ export class RulesEngine implements AIAgent {
         regime: regimeStr,
         best: bestStrategy,
       },
-      'Rules engine 4-strategy decision',
+      'Decision engine 4-strategy result',
     );
 
     return {
@@ -659,9 +829,5 @@ export class RulesEngine implements AIAgent {
       urgency: 'no_rush',
       exitConditions: '',
     };
-  }
-
-  async rawChat(_system: string, _user: string): Promise<string> {
-    return 'Rules engine does not support raw chat. Switch to an AI provider for conversational analysis.';
   }
 }

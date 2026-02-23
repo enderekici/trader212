@@ -2,10 +2,8 @@ import 'dotenv/config';
 
 import { and, desc, eq, gte, isNotNull } from 'drizzle-orm';
 import pLimit from 'p-limit';
-import { type AIAgent, createAIAgent, getActiveModelName } from './ai/agent.js';
-import { MarketResearcher } from './ai/market-research.js';
-import { getAISelfImprovement } from './ai/self-improvement.js';
 import { CorrelationAnalyzer } from './analysis/correlation.js';
+import { DecisionEngine } from './analysis/decision-engine.js';
 import { scoreFundamentals } from './analysis/fundamental/scorer.js';
 import { createMultiTimeframeAnalyzer } from './analysis/multi-timeframe.js';
 import { getRegimeDetector } from './analysis/regime-detector.js';
@@ -36,7 +34,6 @@ import { PositionTracker } from './execution/position-tracker.js';
 import { type PortfolioState, RiskGuard } from './execution/risk-guard.js';
 import { TradePlanner } from './execution/trade-planner.js';
 import { getAuditLogger } from './monitoring/audit-log.js';
-import { ModelTracker } from './monitoring/model-tracker.js';
 import { PerformanceTracker } from './monitoring/performance.js';
 import { getReportGenerator } from './monitoring/report-generator.js';
 import { TelegramNotifier } from './monitoring/telegram.js';
@@ -65,7 +62,7 @@ class TradingBot {
   private telegram!: TelegramNotifier;
   private apiServer!: ApiServer;
   private pairlistPipeline!: PairlistPipeline;
-  private aiAgent!: AIAgent;
+  private decisionEngine!: DecisionEngine;
   private orderManager!: OrderManager;
   private positionTracker!: PositionTracker;
   private riskGuard!: RiskGuard;
@@ -77,8 +74,6 @@ class TradingBot {
   private t212Client!: Trading212Client;
   private tradePlanner!: TradePlanner;
   private approvalManager!: ApprovalManager;
-  private marketResearcher!: MarketResearcher;
-  private modelTracker!: ModelTracker;
   private correlationAnalyzer!: CorrelationAnalyzer;
   private orderReplacer!: OrderReplacer;
   private priceStreamer!: PriceStreamer;
@@ -137,8 +132,8 @@ class TradingBot {
     // 7. Pairlist pipeline
     this.pairlistPipeline = createPairlistPipeline();
 
-    // 8. AI agent
-    this.aiAgent = createAIAgent();
+    // 8. Decision engine
+    this.decisionEngine = new DecisionEngine();
 
     // 9. Execution components
     this.orderManager = new OrderManager();
@@ -153,118 +148,7 @@ class TradingBot {
     this.tradePlanner = new TradePlanner();
     this.approvalManager = new ApprovalManager(this.tradePlanner);
 
-    // 10c. Market researcher (with enriched data fetcher for symbol-specific research)
-    this.marketResearcher = new MarketResearcher(this.aiAgent);
-    this.marketResearcher.setDataFetcher(async (symbols) => {
-      const results = new Map<string, import('./ai/market-research.js').ResearchSymbolData>();
-      const concurrency = configManager.get<number>('ai.research.maxConcurrentFetches') ?? 3;
-      const fetchLimit = pLimit(concurrency);
-
-      // Fetch shared earnings calendar once
-      const today = new Date().toISOString().split('T')[0];
-      const thirtyDaysAhead = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
-        .toISOString()
-        .split('T')[0];
-      let sharedEarnings: import('./data/finnhub.js').EarningsEvent[] = [];
-      try {
-        const finnhub = new FinnhubClient();
-        sharedEarnings = await finnhub.getEarningsCalendar(today, thirtyDaysAhead);
-      } catch (err) {
-        log.debug({ err }, 'Failed to fetch shared earnings for research');
-      }
-
-      await Promise.all(
-        symbols.map((sym) =>
-          fetchLimit(async () => {
-            try {
-              const data = await this.dataAggregator.getResearchData(sym, { sharedEarnings });
-              if (!data.quote) return;
-
-              const candles = data.candles;
-              const techAnalysis = candles.length > 0 ? analyzeTechnicals(candles) : null;
-              const fundScore = data.fundamentals ? scoreFundamentals(data.fundamentals) : 0;
-
-              const sentInput: SentimentInput = {
-                finnhubNews: data.finnhubNews,
-                marketauxNews: [],
-                insiderTransactions: data.insiderTransactions,
-                earnings: data.earnings,
-              };
-              const sentScore = scoreSentiment(sentInput);
-
-              // Price changes from candles
-              const fiveDaysAgo = candles.length >= 5 ? candles[candles.length - 5] : null;
-              const thirtyDaysAgoCandle =
-                candles.length >= 22 ? candles[candles.length - 22] : null;
-              const price = data.quote.price;
-              const change5dPct = fiveDaysAgo
-                ? ((price - fiveDaysAgo.close) / fiveDaysAgo.close) * 100
-                : null;
-              const change1mPct = thirtyDaysAgoCandle
-                ? ((price - thirtyDaysAgoCandle.close) / thirtyDaysAgoCandle.close) * 100
-                : null;
-
-              // Insider net buying
-              const insiderNetBuying = data.insiderTransactions.reduce(
-                (sum: number, tx) => sum + (tx.change ?? 0),
-                0,
-              );
-
-              // Days to earnings
-              const now = Date.now();
-              const nextEarningsTs = data.earnings
-                .map((e) => new Date(e.date).getTime())
-                .filter((t) => t > now)
-                .sort((a, b) => a - b)[0];
-              const daysToEarnings = nextEarningsTs
-                ? Math.ceil((nextEarningsTs - now) / (1000 * 60 * 60 * 24))
-                : null;
-
-              results.set(sym, {
-                price,
-                change1dPct: data.quote.changePercent,
-                change5dPct,
-                change1mPct,
-                technical: techAnalysis,
-                fundamentals: data.fundamentals
-                  ? {
-                      peRatio: data.fundamentals.peRatio,
-                      forwardPE: data.fundamentals.forwardPE,
-                      revenueGrowthYoY: data.fundamentals.revenueGrowthYoY,
-                      profitMargin: data.fundamentals.profitMargin,
-                      operatingMargin: data.fundamentals.operatingMargin,
-                      debtToEquity: data.fundamentals.debtToEquity,
-                      currentRatio: data.fundamentals.currentRatio,
-                      dividendYield: data.fundamentals.dividendYield,
-                      beta: data.fundamentals.beta,
-                      earningsSurprise: data.fundamentals.earningsSurprise,
-                    }
-                  : null,
-                fundamentalScore: fundScore,
-                sentimentScore: sentScore,
-                headlines: data.finnhubNews.slice(0, 5).map((n) => ({
-                  title: n.headline,
-                  score: 0,
-                  source: n.source,
-                })),
-                insiderNetBuying,
-                daysToEarnings,
-                sector: data.fundamentals?.sector ?? null,
-                marketCap: data.fundamentals?.marketCap ?? null,
-              });
-            } catch (err) {
-              log.debug({ err, symbol: sym }, 'Failed to fetch enriched data for research symbol');
-            }
-          }),
-        ),
-      );
-      return results;
-    });
-
-    // 10d. Model tracker
-    this.modelTracker = new ModelTracker();
-
-    // 10e. Correlation analyzer
+    // 10c. Correlation analyzer
     this.correlationAnalyzer = new CorrelationAnalyzer();
 
     // 10f. Order replacer (opt-in repricing of unfilled limit orders)
@@ -306,7 +190,7 @@ class TradingBot {
     // 10i. Create orchestrators
     this.analysisOrchestrator = new AnalysisOrchestrator({
       dataAggregator: this.dataAggregator,
-      aiAgent: this.aiAgent,
+      decisionEngine: this.decisionEngine,
       correlationAnalyzer: this.correlationAnalyzer,
       pairlistPipeline: this.pairlistPipeline,
       tickerMapper: this.tickerMapper,
@@ -318,7 +202,6 @@ class TradingBot {
       riskGuard: this.riskGuard,
       tradePlanner: this.tradePlanner,
       approvalManager: this.approvalManager,
-      modelTracker: this.modelTracker,
       correlationAnalyzer: this.correlationAnalyzer,
       telegram: this.telegram,
       wsManager: this.wsManager,
@@ -415,11 +298,6 @@ class TradingBot {
       getTradePlans: () => this.tradePlanner.getRecentPlans(),
       approveTradePlan: (id) => this.tradePlanner.approvePlan(id, 'dashboard'),
       rejectTradePlan: (id) => this.tradePlanner.rejectPlan(id),
-      runResearch: async (params) => {
-        return this.marketResearcher.runResearch(params);
-      },
-      getResearchReports: () => this.marketResearcher.getRecentResearch(),
-      getModelStats: () => this.modelTracker.getModelStats(),
     });
 
     // 13. Scheduler
@@ -512,28 +390,6 @@ class TradingBot {
       );
     }
 
-    // AI market research
-    const researchEnabled = configManager.get<boolean>('ai.research.enabled');
-    const researchMinutes = configManager.get<number>('ai.research.intervalMinutes');
-    if (researchEnabled) {
-      this.scheduler.registerJob(
-        'marketResearch',
-        minutesToWeekdayCron(researchMinutes),
-        () => this.runScheduledResearch(),
-        true,
-      );
-    }
-
-    // Model performance evaluation (daily)
-    this.scheduler.registerJob(
-      'modelEvaluation',
-      '0 18 * * 1-5', // 6 PM ET weekdays
-      async () => {
-        await this.modelTracker.evaluatePendingPredictions();
-      },
-      false,
-    );
-
     // Expire old trade plans + cleanup expired pair locks (every 5 min)
     this.scheduler.registerJob(
       'expirePlans',
@@ -558,17 +414,6 @@ class TradingBot {
         `*/${Math.max(1, Math.ceil(checkIntervalSec / 60))} * * * 1-5`,
         () => this.checkConditionalOrders(),
         true,
-      );
-    }
-
-    // AI self-improvement feedback (daily after model evaluation)
-    const aiSelfImprovementEnabled = configManager.get<boolean>('aiSelfImprovement.enabled');
-    if (aiSelfImprovementEnabled) {
-      this.scheduler.registerJob(
-        'aiSelfImprovement',
-        '30 18 * * 1-5', // 6:30 PM ET weekdays
-        () => this.runAISelfImprovement(),
-        false,
       );
     }
 
@@ -1042,7 +887,7 @@ class TradingBot {
         }
 
         const portfolio = await this.getPortfolioState();
-        const aiContext = this.analysisOrchestrator.buildAIContext(
+        const context = this.analysisOrchestrator.buildDecisionContext(
           pos.symbol,
           data,
           techAnalysis,
@@ -1056,17 +901,13 @@ class TradingBot {
           multiTimeframeResult,
         );
 
-        // Add position context to signal re-evaluation
-        const aiEnabled = configManager.get<boolean>('ai.enabled');
-        if (!aiEnabled) continue;
-
-        const decision = await this.aiAgent.analyze(aiContext);
+        const decision = await this.decisionEngine.analyze(context);
         if (!decision) {
-          log.warn({ symbol: pos.symbol }, 'AI re-evaluation parsing failed — skipping');
+          log.warn({ symbol: pos.symbol }, 'Re-evaluation failed — skipping');
           continue;
         }
 
-        // If AI suggests SELL for a position we hold, consider adjusting
+        // If decision engine suggests SELL for a position we hold, consider adjusting
         if (decision.decision === 'SELL' && decision.conviction > 60) {
           audit.logSignal(
             pos.symbol,
@@ -1084,8 +925,8 @@ class TradingBot {
             db.update(schema.positions)
               .set({
                 trailingStop: newStopLoss,
-                aiExitConditions: JSON.stringify({
-                  ...JSON.parse(pos.aiExitConditions ?? '{}'),
+                exitConditions: JSON.stringify({
+                  ...JSON.parse(pos.exitConditions ?? '{}'),
                   reEvalSuggestion: 'SELL',
                   reEvalConviction: decision.conviction,
                   reEvalReasoning: decision.reasoning,
@@ -1104,41 +945,6 @@ class TradingBot {
       } catch (err) {
         log.error({ symbol: pos.symbol, err }, 'Position re-evaluation failed');
       }
-    }
-  }
-
-  private async runScheduledResearch(): Promise<void> {
-    try {
-      const audit = getAuditLogger();
-
-      // Pre-fetch shared context (SPY/VIX + regime) once before research
-      try {
-        const marketCtx = await this.dataAggregator.getMarketContext();
-        this.marketResearcher.setMarketContext(marketCtx);
-      } catch (err) {
-        log.debug({ err }, 'Failed to fetch market context for research');
-      }
-
-      try {
-        const spyCandles = await this.yahoo.getHistoricalData('SPY', 90);
-        if (spyCandles.length > 0) {
-          const marketCtx = this.marketResearcher.getMarketContext();
-          const regime = getRegimeDetector().detect(spyCandles, marketCtx?.vixLevel ?? undefined);
-          this.marketResearcher.setRegime(regime);
-        }
-      } catch (err) {
-        log.debug({ err }, 'Failed to fetch regime for research');
-        this.marketResearcher.setRegime(null);
-      }
-
-      const report = await this.marketResearcher.runResearch();
-      audit.logResearch(`Market research completed: ${report.results.length} stocks analyzed`);
-      this.wsManager.broadcast('research_completed', {
-        reportId: report.id,
-        resultCount: report.results.length,
-      });
-    } catch (err) {
-      log.error({ err }, 'Scheduled market research failed');
     }
   }
 
@@ -1293,27 +1099,6 @@ class TradingBot {
       }
     } catch (err) {
       log.error({ err }, 'Conditional orders check failed');
-    }
-  }
-
-  private async runAISelfImprovement(): Promise<void> {
-    try {
-      const selfImprove = getAISelfImprovement();
-      const aiModel = getActiveModelName();
-      const feedback = await selfImprove.generateFeedback(aiModel);
-      if (feedback) {
-        log.info(
-          { biases: feedback.biases.length, suggestions: feedback.suggestions.length },
-          'AI self-improvement feedback generated',
-        );
-        const audit = getAuditLogger();
-        audit.logResearch('AI self-improvement feedback generated', {
-          biases: feedback.biases.length,
-          suggestions: feedback.suggestions.length,
-        });
-      }
-    } catch (err) {
-      log.error({ err }, 'AI self-improvement failed');
     }
   }
 

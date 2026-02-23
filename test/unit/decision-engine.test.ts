@@ -15,12 +15,12 @@ vi.mock('../../src/utils/logger.js', () => ({
   }),
 }));
 
-import { RulesEngine } from '../../src/ai/rules-engine.js';
+import { DecisionEngine } from '../../src/analysis/decision-engine.js';
 import { configManager } from '../../src/config/manager.js';
-import type { AIContext } from '../../src/ai/agent.js';
+import type { DecisionContext } from '../../src/analysis/decision-engine.js';
 
 /**
- * Helper to build AIContext with configurable indicator overrides.
+ * Helper to build DecisionContext with configurable indicator overrides.
  * Default values are neutral, generating HOLD decisions.
  */
 function makeContext(
@@ -50,9 +50,9 @@ function makeContext(
     currentPrice: number;
     atr: number | null;
     mfi: number | null;
-    regime: AIContext['regime'];
+    regime: DecisionContext['regime'];
   }> = {},
-): AIContext {
+): DecisionContext {
   return {
     symbol: overrides.symbol ?? 'AAPL',
     currentPrice: overrides.currentPrice ?? 150,
@@ -170,15 +170,15 @@ function makeContext(
   };
 }
 
-describe('RulesEngine', () => {
-  let engine: RulesEngine;
+describe('DecisionEngine', () => {
+  let engine: DecisionEngine;
 
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(configManager.get).mockImplementation(() => {
       throw new Error('config key not found');
     });
-    engine = new RulesEngine();
+    engine = new DecisionEngine();
   });
 
   describe('BUY decisions (multi-strategy consensus)', () => {
@@ -299,23 +299,8 @@ describe('RulesEngine', () => {
     });
   });
 
-  describe('rawChat', () => {
-    it('returns a non-support message', async () => {
-      const message = await engine.rawChat('system prompt', 'user message');
-      expect(message).toBe(
-        'Rules engine does not support raw chat. Switch to an AI provider for conversational analysis.',
-      );
-    });
-
-    it('ignores the system and user parameters', async () => {
-      const msg1 = await engine.rawChat('', '');
-      const msg2 = await engine.rawChat('foo', 'bar');
-      expect(msg1).toBe(msg2);
-    });
-  });
-
-  describe('AIDecision shape', () => {
-    it('returns all required AIDecision fields', async () => {
+  describe('TradeDecision shape', () => {
+    it('returns all required TradeDecision fields', async () => {
       const ctx = makeContext({
         rsi: 25,
         stochasticK: 15,

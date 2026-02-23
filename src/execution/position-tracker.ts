@@ -286,12 +286,12 @@ export class PositionTracker {
         /* use defaults */
       }
 
-      if (dslEnabled && pos.aiExitConditions) {
+      if (dslEnabled && pos.exitConditions) {
         try {
           const { parseExitConditionText, evaluateExitCondition } = await import(
             './exit-condition-dsl.js'
           );
-          const dslConditions = parseExitConditionText(pos.aiExitConditions);
+          const dslConditions = parseExitConditionText(pos.exitConditions);
 
           if (dslConditions.length > 0) {
             const pnlPct = (pos.currentPrice - pos.entryPrice) / pos.entryPrice;
@@ -314,7 +314,7 @@ export class PositionTracker {
             for (const cond of dslConditions) {
               if (evaluateExitCondition(cond, context)) {
                 log.info(
-                  { symbol: pos.symbol, condition: pos.aiExitConditions },
+                  { symbol: pos.symbol, condition: pos.exitConditions },
                   'DSL exit condition triggered',
                 );
                 positionsToClose.push(pos.symbol);
@@ -330,9 +330,9 @@ export class PositionTracker {
       }
 
       // Check AI-defined exit conditions (stored as JSON)
-      if (pos.aiExitConditions) {
+      if (pos.exitConditions) {
         try {
-          const conditions = JSON.parse(pos.aiExitConditions) as {
+          const conditions = JSON.parse(pos.exitConditions) as {
             maxHoldDays?: number;
             priceTarget?: number;
             stopOnReversal?: boolean;

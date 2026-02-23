@@ -57,10 +57,10 @@ vi.mock('../../src/db/schema.js', () => ({
 
 // ── Import SUT ──────────────────────────────────────────────────────────────
 import { TradePlanner } from '../../src/execution/trade-planner.js';
-import type { AIDecision } from '../../src/ai/agent.js';
+import type { TradeDecision } from '../../src/analysis/decision-engine.js';
 import type { PortfolioState } from '../../src/execution/risk-guard.js';
 
-function makeDecision(overrides: Partial<AIDecision> = {}): AIDecision {
+function makeDecision(overrides: Partial<TradeDecision> = {}): TradeDecision {
   return {
     decision: 'BUY',
     conviction: 80,
@@ -102,7 +102,7 @@ describe('TradePlanner', () => {
         'execution.maxHoldDays': 30,
         'execution.approvalTimeoutMinutes': 5,
         't212.accountType': 'INVEST',
-        'ai.model': 'claude-sonnet-4-5-20250929',
+
       };
       return defaults[key];
     });
@@ -129,9 +129,9 @@ describe('TradePlanner', () => {
         maxLossDollars: 500,
         riskRewardRatio: 3.0,
         maxHoldDays: 30,
-        aiConviction: 80,
-        aiReasoning: 'Bullish pattern',
-        aiModel: 'claude-sonnet-4-5-20250929',
+        conviction: 80,
+        reasoning: 'Bullish pattern',
+
         risks: '["Market volatility"]',
         urgency: 'immediate',
         exitConditions: 'Exit when RSI > 70',
@@ -224,9 +224,9 @@ describe('TradePlanner', () => {
         maxLossDollars: 1500,
         riskRewardRatio: 0.13,
         maxHoldDays: 30,
-        aiConviction: 80,
-        aiReasoning: 'Bearish pattern',
-        aiModel: 'claude-sonnet-4-5-20250929',
+        conviction: 80,
+        reasoning: 'Bearish pattern',
+
         risks: '[]',
         urgency: 'immediate',
         exitConditions: null,
@@ -274,9 +274,9 @@ describe('TradePlanner', () => {
         maxLossDollars: 500,
         riskRewardRatio: 3.0,
         maxHoldDays: 30,
-        aiConviction: 80,
-        aiReasoning: 'Bullish',
-        aiModel: 'test',
+        conviction: 80,
+        reasoning: 'Bullish',
+
         risks: '[]',
         urgency: 'immediate',
         exitConditions: null,
@@ -342,9 +342,9 @@ describe('TradePlanner', () => {
         maxLossDollars: 50,
         riskRewardRatio: 3.0,
         maxHoldDays: 30,
-        aiConviction: 80,
-        aiReasoning: 'Test',
-        aiModel: 'test',
+        conviction: 80,
+        reasoning: 'Test',
+
         risks: '[]',
         urgency: null,
         exitConditions: null,
@@ -381,9 +381,9 @@ describe('TradePlanner', () => {
         maxLossDollars: 50,
         riskRewardRatio: 3.0,
         maxHoldDays: 30,
-        aiConviction: 80,
-        aiReasoning: 'Test',
-        aiModel: 'test',
+        conviction: 80,
+        reasoning: 'Test',
+
         risks: '[]',
         urgency: null,
         exitConditions: null,
@@ -449,9 +449,9 @@ describe('TradePlanner', () => {
           maxLossDollars: 50,
           riskRewardRatio: 3.0,
           maxHoldDays: 30,
-          aiConviction: 80,
-          aiReasoning: 'Test',
-          aiModel: 'test',
+          conviction: 80,
+          reasoning: 'Test',
+  
           risks: '["risk1"]',
           urgency: null,
           exitConditions: null,
@@ -497,9 +497,9 @@ describe('TradePlanner', () => {
         maxLossDollars: 50,
         riskRewardRatio: 3.0,
         maxHoldDays: 30,
-        aiConviction: 80,
-        aiReasoning: 'Test',
-        aiModel: 'test',
+        conviction: 80,
+        reasoning: 'Test',
+
         risks: '["a","b"]',
         urgency: null,
         exitConditions: null,
@@ -535,9 +535,9 @@ describe('TradePlanner', () => {
         maxLossDollars: 50,
         riskRewardRatio: 3.0,
         maxHoldDays: 30,
-        aiConviction: 80,
-        aiReasoning: 'Test',
-        aiModel: 'test',
+        conviction: 80,
+        reasoning: 'Test',
+
         risks: null,
         urgency: null,
         exitConditions: null,
@@ -591,9 +591,9 @@ describe('TradePlanner', () => {
         maxLossDollars: 75,
         riskRewardRatio: 2.0,
         maxHoldDays: 30,
-        aiConviction: 80,
-        aiReasoning: 'Bullish breakout',
-        aiModel: 'test',
+        conviction: 80,
+        reasoning: 'Bullish breakout',
+
         risks: ['Market volatility', 'Earnings risk'],
         urgency: 'immediate',
         exitConditions: null,
@@ -614,7 +614,7 @@ describe('TradePlanner', () => {
       expect(msg).toContain('Entry Price: $150.00');
       expect(msg).toContain('Risk/Reward: 1:2.0');
       expect(msg).toContain('Max Hold: 30 trading days');
-      expect(msg).toContain('AI Conviction: 80/100');
+      expect(msg).toContain('Conviction: 80/100');
       expect(msg).toContain('Reasoning: Bullish breakout');
       expect(msg).toContain('Risks: Market volatility, Earnings risk');
     });
@@ -637,9 +637,9 @@ describe('TradePlanner', () => {
         maxLossDollars: 75,
         riskRewardRatio: 2.0,
         maxHoldDays: null,
-        aiConviction: 80,
-        aiReasoning: null,
-        aiModel: null,
+        conviction: 80,
+        reasoning: null,
+
         risks: [],
         urgency: null,
         exitConditions: null,

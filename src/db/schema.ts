@@ -17,9 +17,8 @@ export const trades = sqliteTable(
     stopLoss: real('stopLoss'),
     takeProfit: real('takeProfit'),
     exitReason: text('exitReason'),
-    aiReasoning: text('aiReasoning'),
+    reasoning: text('reasoning'),
     convictionScore: real('convictionScore'),
-    aiModel: text('aiModel'),
     intendedPrice: real('intendedPrice'),
     slippage: real('slippage'),
     accountType: text('accountType', { enum: ['INVEST', 'ISA'] }).notNull(),
@@ -70,12 +69,11 @@ export const signals = sqliteTable(
     technicalScore: real('technicalScore'),
     sentimentScore: real('sentimentScore'),
     fundamentalScore: real('fundamentalScore'),
-    aiScore: real('aiScore'),
+    decisionScore: real('decisionScore'),
     convictionTotal: real('convictionTotal'),
     decision: text('decision', { enum: ['BUY', 'SELL', 'HOLD'] }),
     executed: integer('executed', { mode: 'boolean' }).default(false),
-    aiReasoning: text('aiReasoning'),
-    aiModel: text('aiModel'),
+    reasoning: text('reasoning'),
     suggestedStopLossPct: real('suggestedStopLossPct'),
     suggestedPositionSizePct: real('suggestedPositionSizePct'),
     suggestedTakeProfitPct: real('suggestedTakeProfitPct'),
@@ -101,7 +99,7 @@ export const positions = sqliteTable('positions', {
   convictionScore: real('convictionScore'),
   stopOrderId: text('stopOrderId'),
   takeProfitOrderId: text('takeProfitOrderId'),
-  aiExitConditions: text('aiExitConditions'),
+  exitConditions: text('exitConditions'),
   accountType: text('accountType', { enum: ['INVEST', 'ISA'] }).notNull(),
   dcaCount: integer('dcaCount').default(0),
   totalInvested: real('totalInvested'),
@@ -255,9 +253,8 @@ export const tradePlans = sqliteTable(
     maxLossDollars: real('maxLossDollars').notNull(),
     riskRewardRatio: real('riskRewardRatio').notNull(),
     maxHoldDays: integer('maxHoldDays'),
-    aiConviction: real('aiConviction').notNull(),
-    aiReasoning: text('aiReasoning'),
-    aiModel: text('aiModel'),
+    conviction: real('conviction').notNull(),
+    reasoning: text('reasoning'),
     risks: text('risks'), // JSON array
     urgency: text('urgency'),
     exitConditions: text('exitConditions'),
@@ -273,56 +270,6 @@ export const tradePlans = sqliteTable(
   (table) => [
     index('idx_trade_plans_symbol').on(table.symbol, table.status),
     index('idx_trade_plans_expires').on(table.expiresAt, table.status),
-  ],
-);
-
-// ── AI Market Research ──────────────────────────────────────────────────
-export const aiResearch = sqliteTable(
-  'ai_research',
-  {
-    id: integer('id').primaryKey({ autoIncrement: true }),
-    timestamp: text('timestamp').notNull(),
-    query: text('query').notNull(),
-    symbols: text('symbols').notNull(), // JSON array of analyzed symbols
-    results: text('results').notNull(), // JSON array of research results
-    aiModel: text('aiModel'),
-    marketContext: text('marketContext'), // JSON: SPY, VIX, sector performance
-    createdAt: text('createdAt').notNull(),
-    status: text('status').notNull().default('pending'),
-    // possible values: 'pending' | 'completed' | 'rejected' | 'watching'
-  },
-  (table) => [index('idx_research_ts').on(table.timestamp)],
-);
-
-// ── Research Watchlist ──────────────────────────────────────────────────
-export const researchWatchlist = sqliteTable('research_watchlist', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
-  symbol: text('symbol').notNull().unique(),
-  notes: text('notes'),
-  addedAt: text('added_at').notNull(),
-});
-
-// ── AI Model Performance Tracking ───────────────────────────────────────
-export const modelPerformance = sqliteTable(
-  'model_performance',
-  {
-    id: integer('id').primaryKey({ autoIncrement: true }),
-    aiModel: text('aiModel').notNull(),
-    symbol: text('symbol').notNull(),
-    decision: text('decision', { enum: ['BUY', 'SELL', 'HOLD'] }).notNull(),
-    conviction: real('conviction').notNull(),
-    signalTimestamp: text('signalTimestamp').notNull(),
-    priceAtSignal: real('priceAtSignal').notNull(),
-    priceAfter1d: real('priceAfter1d'),
-    priceAfter5d: real('priceAfter5d'),
-    priceAfter10d: real('priceAfter10d'),
-    actualOutcome: text('actualOutcome'), // 'correct' | 'incorrect' | 'pending'
-    actualReturnPct: real('actualReturnPct'),
-    evaluatedAt: text('evaluatedAt'),
-  },
-  (table) => [
-    index('idx_model_perf').on(table.aiModel, table.signalTimestamp),
-    index('idx_model_perf_model').on(table.aiModel),
   ],
 );
 

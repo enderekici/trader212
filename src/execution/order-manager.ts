@@ -19,9 +19,8 @@ export interface BuyParams {
   price: number;
   stopLossPct: number;
   takeProfitPct: number;
-  aiReasoning: string;
+  reasoning: string;
   conviction: number;
-  aiModel: string;
   accountType: 'INVEST' | 'ISA';
 }
 
@@ -128,9 +127,8 @@ export class OrderManager {
             entryTime: now,
             stopLoss: effectiveStopLoss,
             takeProfit: effectiveTakeProfit,
-            aiReasoning: params.aiReasoning,
+            reasoning: params.reasoning,
             convictionScore: params.conviction,
-            aiModel: params.aiModel,
             intendedPrice: params.price,
             slippage: buySlippage,
             accountType: params.accountType,
@@ -384,9 +382,8 @@ export class OrderManager {
             entryTime: now,
             stopLoss: actualStopLoss,
             takeProfit: actualTakeProfit,
-            aiReasoning: params.aiReasoning,
+            reasoning: params.reasoning,
             convictionScore: params.conviction,
-            aiModel: params.aiModel,
             intendedPrice: params.price,
             slippage: buySlippage,
             accountType: params.accountType,

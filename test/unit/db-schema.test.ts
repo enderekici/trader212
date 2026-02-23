@@ -23,9 +23,8 @@ describe('db/schema', () => {
       expect(cols).toContain('stopLoss');
       expect(cols).toContain('takeProfit');
       expect(cols).toContain('exitReason');
-      expect(cols).toContain('aiReasoning');
+      expect(cols).toContain('reasoning');
       expect(cols).toContain('convictionScore');
-      expect(cols).toContain('aiModel');
       expect(cols).toContain('accountType');
       expect(cols).toContain('createdAt');
     });
@@ -70,12 +69,11 @@ describe('db/schema', () => {
       expect(cols).toContain('technicalScore');
       expect(cols).toContain('sentimentScore');
       expect(cols).toContain('fundamentalScore');
-      expect(cols).toContain('aiScore');
+      expect(cols).toContain('decisionScore');
       expect(cols).toContain('convictionTotal');
       expect(cols).toContain('decision');
       expect(cols).toContain('executed');
-      expect(cols).toContain('aiReasoning');
-      expect(cols).toContain('aiModel');
+      expect(cols).toContain('reasoning');
     });
 
     it('has suggestion columns', () => {
@@ -107,7 +105,7 @@ describe('db/schema', () => {
       expect(cols).toContain('takeProfit');
       expect(cols).toContain('convictionScore');
       expect(cols).toContain('stopOrderId');
-      expect(cols).toContain('aiExitConditions');
+      expect(cols).toContain('exitConditions');
       expect(cols).toContain('accountType');
       expect(cols).toContain('updatedAt');
     });
@@ -273,48 +271,9 @@ describe('db/schema', () => {
       expect(cols).toContain('takeProfitPct');
       expect(cols).toContain('maxLossDollars');
       expect(cols).toContain('riskRewardRatio');
-      expect(cols).toContain('aiConviction');
+      expect(cols).toContain('conviction');
       expect(cols).toContain('accountType');
       expect(cols).toContain('createdAt');
-    });
-  });
-
-  describe('aiResearch table', () => {
-    it('exports aiResearch table', () => {
-      expect(schema.aiResearch).toBeDefined();
-    });
-
-    it('has correct columns', () => {
-      const cols = Object.keys(schema.aiResearch);
-      expect(cols).toContain('timestamp');
-      expect(cols).toContain('query');
-      expect(cols).toContain('symbols');
-      expect(cols).toContain('results');
-      expect(cols).toContain('aiModel');
-      expect(cols).toContain('marketContext');
-      expect(cols).toContain('createdAt');
-    });
-  });
-
-  describe('modelPerformance table', () => {
-    it('exports modelPerformance table', () => {
-      expect(schema.modelPerformance).toBeDefined();
-    });
-
-    it('has correct columns', () => {
-      const cols = Object.keys(schema.modelPerformance);
-      expect(cols).toContain('aiModel');
-      expect(cols).toContain('symbol');
-      expect(cols).toContain('decision');
-      expect(cols).toContain('conviction');
-      expect(cols).toContain('signalTimestamp');
-      expect(cols).toContain('priceAtSignal');
-      expect(cols).toContain('priceAfter1d');
-      expect(cols).toContain('priceAfter5d');
-      expect(cols).toContain('priceAfter10d');
-      expect(cols).toContain('actualOutcome');
-      expect(cols).toContain('actualReturnPct');
-      expect(cols).toContain('evaluatedAt');
     });
   });
 

@@ -10,7 +10,7 @@ describe('schema-validator', () => {
 		it('contains schemas for known config keys', () => {
 			expect(configSchemas.has('t212.environment')).toBe(true);
 			expect(configSchemas.has('risk.maxPositions')).toBe(true);
-			expect(configSchemas.has('ai.provider')).toBe(true);
+			expect(configSchemas.has('ai.enabled')).toBe(true);
 			expect(configSchemas.has('execution.dryRun')).toBe(true);
 			expect(configSchemas.has('streaming.enabled')).toBe(true);
 		});
@@ -38,7 +38,6 @@ describe('schema-validator', () => {
 				'portfolioOptimization.enabled',
 				'socialSentiment.enabled',
 				'conditionalOrders.enabled',
-				'aiSelfImprovement.enabled',
 				'reports.enabled',
 				'webResearch.enabled',
 				'streaming.enabled',
@@ -139,27 +138,10 @@ describe('schema-validator', () => {
 			expect(validateConfigValue('analysis.sma.periods', 'twenty').valid).toBe(false);
 		});
 
-		// ── AI ─────────────────────────────────────────────────
-		it('validates ai.provider enum', () => {
-			expect(validateConfigValue('ai.provider', 'anthropic')).toEqual({ valid: true });
-			expect(validateConfigValue('ai.provider', 'ollama')).toEqual({ valid: true });
-			expect(validateConfigValue('ai.provider', 'openai-compatible')).toEqual({ valid: true });
-			expect(validateConfigValue('ai.provider', 'gpt4all').valid).toBe(false);
-		});
-
-		it('validates ai.temperature range', () => {
-			expect(validateConfigValue('ai.temperature', 0.1)).toEqual({ valid: true });
-			expect(validateConfigValue('ai.temperature', 0)).toEqual({ valid: true });
-			expect(validateConfigValue('ai.temperature', 2)).toEqual({ valid: true });
-			expect(validateConfigValue('ai.temperature', -0.1).valid).toBe(false);
-			expect(validateConfigValue('ai.temperature', 2.1).valid).toBe(false);
-		});
-
-		it('validates ai.model as non-empty string', () => {
-			expect(validateConfigValue('ai.model', 'claude-sonnet-4-5-20250929')).toEqual({
-				valid: true,
-			});
-			expect(validateConfigValue('ai.model', '').valid).toBe(false);
+		// ── Decision Engine ─────────────────────────────────────
+		it('validates ai.enabled as boolean', () => {
+			expect(validateConfigValue('ai.enabled', true)).toEqual({ valid: true });
+			expect(validateConfigValue('ai.enabled', false)).toEqual({ valid: true });
 		});
 
 		// ── Risk ──────────────────────────────────────────────

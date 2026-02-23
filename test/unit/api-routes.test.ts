@@ -32,16 +32,6 @@ vi.mock('../../src/db/index.js', () => ({
   getDb: () => mockDb,
 }));
 
-const mockWatchlistRepo = {
-  getAll: vi.fn((): unknown[] => []),
-  add: vi.fn((symbol: string, notes?: string) => ({ id: 1, symbol, notes: notes ?? null, addedAt: '2024-01-01T00:00:00.000Z' })),
-  remove: vi.fn(() => true),
-};
-
-vi.mock('../../src/db/repositories/research-watchlist.js', () => ({
-  getResearchWatchlistRepo: () => mockWatchlistRepo,
-}));
-
 vi.mock('../../src/db/schema.js', () => ({
   trades: { id: 'id', symbol: 'symbol', side: 'side', entryTime: 'entryTime', exitPrice: 'exitPrice', pnl: 'pnl', pnlPct: 'pnlPct' },
   signals: { id: 'id', symbol: 'symbol', timestamp: 'timestamp', technicalScore: 'technicalScore' },
@@ -50,7 +40,6 @@ vi.mock('../../src/db/schema.js', () => ({
   pairlistHistory: { timestamp: 'timestamp' },
   fundamentalCache: { symbol: 'symbol', fetchedAt: 'fetchedAt' },
   config: { key: 'key', category: 'category' },
-  aiResearch: { id: 'id', status: 'status' },
   priceCache: { symbol: 'symbol', timestamp: 'timestamp', open: 'open', high: 'high', low: 'low', close: 'close', volume: 'volume' },
 }));
 
@@ -340,21 +329,6 @@ vi.mock('../../src/execution/conditional-orders.js', () => ({
   getConditionalOrderManager: (...args: unknown[]) => mockGetConditionalOrderManager(...args),
 }));
 
-// ── AI Self-Improvement mock ──────────────────────────────────────────────
-
-const mockGenerateFeedback = vi.fn(async () => ({ feedback: 'improve stops' }));
-const mockGetCalibrationCurve = vi.fn(async () => [{ bucket: '0.5-0.6', accuracy: 0.55 }]);
-const mockCompareModels = vi.fn(async () => [{ model: 'claude', accuracy: 0.8 }]);
-const mockGetAISelfImprovement = vi.fn(() => ({
-  generateFeedback: mockGenerateFeedback,
-  getCalibrationCurve: mockGetCalibrationCurve,
-  compareModels: mockCompareModels,
-}));
-
-vi.mock('../../src/ai/self-improvement.js', () => ({
-  getAISelfImprovement: (...args: unknown[]) => mockGetAISelfImprovement(...args),
-}));
-
 // ── Risk parity mock ──────────────────────────────────────────────────────
 
 const mockSuggestRebalanceParity = vi.fn(() => [] as unknown[]);
@@ -389,16 +363,6 @@ vi.mock('../../src/utils/helpers.js', () => ({
   safeJsonParse: <T>(json: unknown, fallback: T) => mockSafeJsonParse(json, fallback),
   formatCurrency: vi.fn((v: number) => `$${v}`),
   formatPercent: vi.fn((v: number) => `${v}%`),
-}));
-
-// ── OpenAI Compat adapter mock ────────────────────────────────────────────
-
-const mockRawChat = vi.fn(async () => 'pong');
-
-vi.mock('../../src/ai/adapters/openai-compat.js', () => ({
-  OpenAICompatibleAdapter: vi.fn().mockImplementation(function (this: any) {
-    this.rawChat = mockRawChat;
-  }),
 }));
 
 const mockWalkForwardRun = vi.fn().mockResolvedValue({
@@ -490,9 +454,6 @@ describe('api/routes', () => {
         getTradePlans: vi.fn(),
         approveTradePlan: vi.fn(),
         rejectTradePlan: vi.fn(),
-        runResearch: vi.fn(),
-        getResearchReports: vi.fn(),
-        getModelStats: vi.fn(),
       });
 
       // Re-get routes after registering callbacks
@@ -526,9 +487,6 @@ describe('api/routes', () => {
         getTradePlans: vi.fn(),
         approveTradePlan: vi.fn(),
         rejectTradePlan: vi.fn(),
-        runResearch: vi.fn(),
-        getResearchReports: vi.fn(),
-        getModelStats: vi.fn(),
       });
 
       routes = await getRouteHandlers();
@@ -553,9 +511,6 @@ describe('api/routes', () => {
         getTradePlans: vi.fn(),
         approveTradePlan: vi.fn(),
         rejectTradePlan: vi.fn(),
-        runResearch: vi.fn(),
-        getResearchReports: vi.fn(),
-        getModelStats: vi.fn(),
       } as any);
 
       routes = await getRouteHandlers();
@@ -1267,9 +1222,6 @@ describe('api/routes', () => {
         getTradePlans: vi.fn(),
         approveTradePlan: vi.fn(),
         rejectTradePlan: vi.fn(),
-        runResearch: vi.fn(),
-        getResearchReports: vi.fn(),
-        getModelStats: vi.fn(),
       });
 
       routes = await getRouteHandlers();
@@ -1293,9 +1245,6 @@ describe('api/routes', () => {
         getTradePlans: vi.fn(),
         approveTradePlan: vi.fn(),
         rejectTradePlan: vi.fn(),
-        runResearch: vi.fn(),
-        getResearchReports: vi.fn(),
-        getModelStats: vi.fn(),
       } as any);
 
       routes = await getRouteHandlers();
@@ -1322,9 +1271,6 @@ describe('api/routes', () => {
         getTradePlans: vi.fn(),
         approveTradePlan: vi.fn(),
         rejectTradePlan: vi.fn(),
-        runResearch: vi.fn(),
-        getResearchReports: vi.fn(),
-        getModelStats: vi.fn(),
       });
 
       routes = await getRouteHandlers();
@@ -1348,9 +1294,6 @@ describe('api/routes', () => {
         getTradePlans: vi.fn(),
         approveTradePlan: vi.fn(),
         rejectTradePlan: vi.fn(),
-        runResearch: vi.fn(),
-        getResearchReports: vi.fn(),
-        getModelStats: vi.fn(),
       } as any);
 
       routes = await getRouteHandlers();
@@ -1377,9 +1320,6 @@ describe('api/routes', () => {
         getTradePlans: vi.fn(),
         approveTradePlan: vi.fn(),
         rejectTradePlan: vi.fn(),
-        runResearch: vi.fn(),
-        getResearchReports: vi.fn(),
-        getModelStats: vi.fn(),
       } as any);
 
       routes = await getRouteHandlers();
@@ -1403,9 +1343,6 @@ describe('api/routes', () => {
         getTradePlans: vi.fn(),
         approveTradePlan: vi.fn(),
         rejectTradePlan: vi.fn(),
-        runResearch: vi.fn(),
-        getResearchReports: vi.fn(),
-        getModelStats: vi.fn(),
       } as any);
 
       routes = await getRouteHandlers();
@@ -1431,9 +1368,6 @@ describe('api/routes', () => {
         getTradePlans: vi.fn(),
         approveTradePlan: vi.fn(),
         rejectTradePlan: vi.fn(),
-        runResearch: vi.fn(),
-        getResearchReports: vi.fn(),
-        getModelStats: vi.fn(),
       } as any);
 
       routes = await getRouteHandlers();
@@ -1457,9 +1391,6 @@ describe('api/routes', () => {
         getTradePlans: vi.fn(),
         approveTradePlan: vi.fn(),
         rejectTradePlan: vi.fn(),
-        runResearch: vi.fn(),
-        getResearchReports: vi.fn(),
-        getModelStats: vi.fn(),
       } as any);
 
       routes = await getRouteHandlers();
@@ -1485,9 +1416,6 @@ describe('api/routes', () => {
         getTradePlans: vi.fn(),
         approveTradePlan: vi.fn(),
         rejectTradePlan: vi.fn(),
-        runResearch: vi.fn(),
-        getResearchReports: vi.fn(),
-        getModelStats: vi.fn(),
       } as any);
 
       routes = await getRouteHandlers();
@@ -1511,9 +1439,6 @@ describe('api/routes', () => {
         getTradePlans: vi.fn(),
         approveTradePlan: vi.fn(),
         rejectTradePlan: vi.fn(),
-        runResearch: vi.fn(),
-        getResearchReports: vi.fn(),
-        getModelStats: vi.fn(),
       } as any);
 
       routes = await getRouteHandlers();
@@ -1539,9 +1464,6 @@ describe('api/routes', () => {
         getTradePlans: vi.fn(),
         approveTradePlan: vi.fn(),
         rejectTradePlan: vi.fn(),
-        runResearch: vi.fn(),
-        getResearchReports: vi.fn(),
-        getModelStats: vi.fn(),
       } as any);
 
       routes = await getRouteHandlers();
@@ -1566,9 +1488,6 @@ describe('api/routes', () => {
         getTradePlans: vi.fn(),
         approveTradePlan: vi.fn(),
         rejectTradePlan: vi.fn(),
-        runResearch: vi.fn(),
-        getResearchReports: vi.fn(),
-        getModelStats: vi.fn(),
       } as any);
 
       routes = await getRouteHandlers();
@@ -1593,9 +1512,6 @@ describe('api/routes', () => {
         getTradePlans: () => [{ id: 1, symbol: 'AAPL' }],
         approveTradePlan: vi.fn(),
         rejectTradePlan: vi.fn(),
-        runResearch: vi.fn(),
-        getResearchReports: vi.fn(),
-        getModelStats: vi.fn(),
       } as any);
 
       routes = await getRouteHandlers();
@@ -1618,9 +1534,6 @@ describe('api/routes', () => {
         getTradePlans: () => { throw new Error('fail'); },
         approveTradePlan: vi.fn(),
         rejectTradePlan: vi.fn(),
-        runResearch: vi.fn(),
-        getResearchReports: vi.fn(),
-        getModelStats: vi.fn(),
       } as any);
 
       routes = await getRouteHandlers();
@@ -1645,9 +1558,6 @@ describe('api/routes', () => {
         getTradePlans: vi.fn(),
         approveTradePlan: () => ({ id: 1, status: 'approved' }),
         rejectTradePlan: vi.fn(),
-        runResearch: vi.fn(),
-        getResearchReports: vi.fn(),
-        getModelStats: vi.fn(),
       } as any);
 
       routes = await getRouteHandlers();
@@ -1670,9 +1580,6 @@ describe('api/routes', () => {
         getTradePlans: vi.fn(),
         approveTradePlan: () => null,
         rejectTradePlan: vi.fn(),
-        runResearch: vi.fn(),
-        getResearchReports: vi.fn(),
-        getModelStats: vi.fn(),
       } as any);
 
       routes = await getRouteHandlers();
@@ -1695,9 +1602,6 @@ describe('api/routes', () => {
         getTradePlans: vi.fn(),
         approveTradePlan: () => { throw new Error('fail'); },
         rejectTradePlan: vi.fn(),
-        runResearch: vi.fn(),
-        getResearchReports: vi.fn(),
-        getModelStats: vi.fn(),
       } as any);
 
       routes = await getRouteHandlers();
@@ -1722,9 +1626,6 @@ describe('api/routes', () => {
         getTradePlans: vi.fn(),
         approveTradePlan: vi.fn(),
         rejectTradePlan: vi.fn(),
-        runResearch: vi.fn(),
-        getResearchReports: vi.fn(),
-        getModelStats: vi.fn(),
       } as any);
 
       routes = await getRouteHandlers();
@@ -1747,200 +1648,12 @@ describe('api/routes', () => {
         getTradePlans: vi.fn(),
         approveTradePlan: vi.fn(),
         rejectTradePlan: () => { throw new Error('fail'); },
-        runResearch: vi.fn(),
-        getResearchReports: vi.fn(),
-        getModelStats: vi.fn(),
       } as any);
 
       routes = await getRouteHandlers();
       const handler = findHandler(routes, 'post', '/api/trade-plans/:id/reject');
       const res = mockRes();
       handler(mockReq({ params: { id: '1' } }), res);
-
-      expect(res.status).toHaveBeenCalledWith(500);
-    });
-  });
-
-  describe('GET /api/research', () => {
-    it('returns research reports', async () => {
-      const { registerBotCallbacks } = await import('../../src/api/routes.js');
-      registerBotCallbacks({
-        getStatus: vi.fn(),
-        setPaused: vi.fn(),
-        closePosition: vi.fn(),
-        analyzeSymbol: vi.fn(),
-        refreshPairlist: vi.fn(),
-        emergencyStop: vi.fn(),
-        getTradePlans: vi.fn(),
-        approveTradePlan: vi.fn(),
-        rejectTradePlan: vi.fn(),
-        runResearch: vi.fn(),
-        getResearchReports: () => [{ id: 1 }],
-        getModelStats: vi.fn(),
-      } as any);
-
-      routes = await getRouteHandlers();
-      const handler = findHandler(routes, 'get', '/api/research');
-      const res = mockRes();
-      handler(mockReq(), res);
-
-      expect(res.json).toHaveBeenCalledWith({ reports: [{ id: 1 }] });
-    });
-
-    it('handles errors', async () => {
-      const { registerBotCallbacks } = await import('../../src/api/routes.js');
-      registerBotCallbacks({
-        getStatus: vi.fn(),
-        setPaused: vi.fn(),
-        closePosition: vi.fn(),
-        analyzeSymbol: vi.fn(),
-        refreshPairlist: vi.fn(),
-        emergencyStop: vi.fn(),
-        getTradePlans: vi.fn(),
-        approveTradePlan: vi.fn(),
-        rejectTradePlan: vi.fn(),
-        runResearch: vi.fn(),
-        getResearchReports: () => { throw new Error('fail'); },
-        getModelStats: vi.fn(),
-      } as any);
-
-      routes = await getRouteHandlers();
-      const handler = findHandler(routes, 'get', '/api/research');
-      const res = mockRes();
-      handler(mockReq(), res);
-
-      expect(res.status).toHaveBeenCalledWith(500);
-    });
-  });
-
-  describe('POST /api/research/run', () => {
-    it('runs research', async () => {
-      const { registerBotCallbacks } = await import('../../src/api/routes.js');
-      const runResearch = vi.fn().mockResolvedValue({ result: 'data' });
-      registerBotCallbacks({
-        getStatus: vi.fn(),
-        setPaused: vi.fn(),
-        closePosition: vi.fn(),
-        analyzeSymbol: vi.fn(),
-        refreshPairlist: vi.fn(),
-        emergencyStop: vi.fn(),
-        getTradePlans: vi.fn(),
-        approveTradePlan: vi.fn(),
-        rejectTradePlan: vi.fn(),
-        runResearch,
-        getResearchReports: vi.fn(),
-        getModelStats: vi.fn(),
-      } as any);
-
-      routes = await getRouteHandlers();
-      const handler = findHandler(routes, 'post', '/api/research/run');
-      const res = mockRes();
-      await handler(mockReq({ body: { focus: 'tech', symbols: ['AAPL'] } }), res);
-
-      expect(runResearch).toHaveBeenCalledWith({ focus: 'tech', symbols: ['AAPL'] });
-      expect(res.json).toHaveBeenCalledWith({ report: { result: 'data' } });
-    });
-
-    it('handles null body with validation error', async () => {
-      const { registerBotCallbacks } = await import('../../src/api/routes.js');
-      const runResearch = vi.fn().mockResolvedValue(null);
-      registerBotCallbacks({
-        getStatus: vi.fn(),
-        setPaused: vi.fn(),
-        closePosition: vi.fn(),
-        analyzeSymbol: vi.fn(),
-        refreshPairlist: vi.fn(),
-        emergencyStop: vi.fn(),
-        getTradePlans: vi.fn(),
-        approveTradePlan: vi.fn(),
-        rejectTradePlan: vi.fn(),
-        runResearch,
-        getResearchReports: vi.fn(),
-        getModelStats: vi.fn(),
-      } as any);
-
-      routes = await getRouteHandlers();
-      const handler = findHandler(routes, 'post', '/api/research/run');
-      const res = mockRes();
-      await handler(mockReq({ body: null }), res);
-
-      expect(res.status).toHaveBeenCalledWith(400);
-      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ error: expect.any(String) }));
-    });
-
-    it('handles errors', async () => {
-      const { registerBotCallbacks } = await import('../../src/api/routes.js');
-      registerBotCallbacks({
-        getStatus: vi.fn(),
-        setPaused: vi.fn(),
-        closePosition: vi.fn(),
-        analyzeSymbol: vi.fn(),
-        refreshPairlist: vi.fn(),
-        emergencyStop: vi.fn(),
-        getTradePlans: vi.fn(),
-        approveTradePlan: vi.fn(),
-        rejectTradePlan: vi.fn(),
-        runResearch: vi.fn().mockRejectedValue(new Error('fail')),
-        getResearchReports: vi.fn(),
-        getModelStats: vi.fn(),
-      } as any);
-
-      routes = await getRouteHandlers();
-      const handler = findHandler(routes, 'post', '/api/research/run');
-      const res = mockRes();
-      await handler(mockReq(), res);
-
-      expect(res.status).toHaveBeenCalledWith(500);
-    });
-  });
-
-  describe('GET /api/model-stats', () => {
-    it('returns model stats', async () => {
-      const { registerBotCallbacks } = await import('../../src/api/routes.js');
-      registerBotCallbacks({
-        getStatus: vi.fn(),
-        setPaused: vi.fn(),
-        closePosition: vi.fn(),
-        analyzeSymbol: vi.fn(),
-        refreshPairlist: vi.fn(),
-        emergencyStop: vi.fn(),
-        getTradePlans: vi.fn(),
-        approveTradePlan: vi.fn(),
-        rejectTradePlan: vi.fn(),
-        runResearch: vi.fn(),
-        getResearchReports: vi.fn(),
-        getModelStats: () => [{ model: 'claude', accuracy: 0.8 }],
-      } as any);
-
-      routes = await getRouteHandlers();
-      const handler = findHandler(routes, 'get', '/api/model-stats');
-      const res = mockRes();
-      handler(mockReq(), res);
-
-      expect(res.json).toHaveBeenCalledWith({ stats: [{ model: 'claude', accuracy: 0.8 }] });
-    });
-
-    it('handles errors', async () => {
-      const { registerBotCallbacks } = await import('../../src/api/routes.js');
-      registerBotCallbacks({
-        getStatus: vi.fn(),
-        setPaused: vi.fn(),
-        closePosition: vi.fn(),
-        analyzeSymbol: vi.fn(),
-        refreshPairlist: vi.fn(),
-        emergencyStop: vi.fn(),
-        getTradePlans: vi.fn(),
-        approveTradePlan: vi.fn(),
-        rejectTradePlan: vi.fn(),
-        runResearch: vi.fn(),
-        getResearchReports: vi.fn(),
-        getModelStats: () => { throw new Error('fail'); },
-      } as any);
-
-      routes = await getRouteHandlers();
-      const handler = findHandler(routes, 'get', '/api/model-stats');
-      const res = mockRes();
-      handler(mockReq(), res);
 
       expect(res.status).toHaveBeenCalledWith(500);
     });
@@ -2248,295 +1961,6 @@ describe('api/routes', () => {
       expect(res.status).toHaveBeenCalledWith(404);
     });
 
-    it('default runResearch returns null', async () => {
-      vi.resetModules();
-      const routesMod = await import('../../src/api/routes.js');
-      const router = routesMod.createRouter();
-
-      const route = (router as any).stack.find(
-        (l: any) => l.route?.path === '/api/research/run'
-      );
-      const handler = route.route.stack[0].handle;
-      const res = mockRes();
-      await handler(mockReq({ body: {} }), res);
-      expect(res.json).toHaveBeenCalledWith({ report: null });
-    });
-
-    it('default getResearchReports returns empty array', async () => {
-      vi.resetModules();
-      const routesMod = await import('../../src/api/routes.js');
-      const router = routesMod.createRouter();
-
-      const route = (router as any).stack.find(
-        (l: any) => l.route?.path === '/api/research' && l.route?.methods?.get
-      );
-      const handler = route.route.stack[0].handle;
-      const res = mockRes();
-      handler(mockReq(), res);
-      expect(res.json).toHaveBeenCalledWith({ reports: [] });
-    });
-
-    it('default getModelStats returns empty array', async () => {
-      vi.resetModules();
-      const routesMod = await import('../../src/api/routes.js');
-      const router = routesMod.createRouter();
-
-      const route = (router as any).stack.find(
-        (l: any) => l.route?.path === '/api/model-stats'
-      );
-      const handler = route.route.stack[0].handle;
-      const res = mockRes();
-      handler(mockReq(), res);
-      expect(res.json).toHaveBeenCalledWith({ stats: [] });
-    });
-  });
-
-  // ── Research Watchlist ──────────────────────────────────────────────────
-  describe('GET /api/research/watchlist', () => {
-    it('returns all watchlist entries', () => {
-      mockWatchlistRepo.getAll.mockReturnValue([
-        { id: 1, symbol: 'AAPL', notes: 'test', addedAt: '2024-01-01T00:00:00.000Z' },
-      ]);
-      const handler = findHandler(routes, 'get', '/api/research/watchlist');
-      const res = mockRes();
-      handler(mockReq(), res);
-      expect(res.json).toHaveBeenCalledWith([
-        { id: 1, symbol: 'AAPL', notes: 'test', addedAt: '2024-01-01T00:00:00.000Z' },
-      ]);
-    });
-
-    it('handles errors', () => {
-      mockWatchlistRepo.getAll.mockImplementation(() => { throw new Error('db error'); });
-      const handler = findHandler(routes, 'get', '/api/research/watchlist');
-      const res = mockRes();
-      handler(mockReq(), res);
-      expect(res.status).toHaveBeenCalledWith(500);
-    });
-  });
-
-  describe('POST /api/research/watchlist', () => {
-    it('adds a symbol to the watchlist', () => {
-      mockWatchlistRepo.add.mockReturnValue({ id: 2, symbol: 'MSFT', notes: null, addedAt: '2024-01-01T00:00:00.000Z' });
-      const handler = findHandler(routes, 'post', '/api/research/watchlist');
-      const res = mockRes();
-      handler(mockReq({ body: { symbol: 'MSFT' } }), res);
-      expect(res.status).toHaveBeenCalledWith(201);
-      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ symbol: 'MSFT' }));
-    });
-
-    it('returns 400 when symbol is missing', () => {
-      const handler = findHandler(routes, 'post', '/api/research/watchlist');
-      const res = mockRes();
-      handler(mockReq({ body: {} }), res);
-      expect(res.status).toHaveBeenCalledWith(400);
-    });
-
-    it('handles errors', () => {
-      mockWatchlistRepo.add.mockImplementation(() => { throw new Error('db error'); });
-      const handler = findHandler(routes, 'post', '/api/research/watchlist');
-      const res = mockRes();
-      handler(mockReq({ body: { symbol: 'AAPL' } }), res);
-      expect(res.status).toHaveBeenCalledWith(500);
-    });
-  });
-
-  describe('DELETE /api/research/watchlist/:symbol', () => {
-    it('removes a symbol from the watchlist', () => {
-      mockWatchlistRepo.remove.mockReturnValue(true);
-      const handler = findHandler(routes, 'delete', '/api/research/watchlist/:symbol');
-      const res = mockRes();
-      handler(mockReq({ params: { symbol: 'AAPL' } }), res);
-      expect(res.json).toHaveBeenCalledWith({ ok: true });
-    });
-
-    it('returns 404 when symbol not found', () => {
-      mockWatchlistRepo.remove.mockReturnValue(false);
-      const handler = findHandler(routes, 'delete', '/api/research/watchlist/:symbol');
-      const res = mockRes();
-      handler(mockReq({ params: { symbol: 'AAPL' } }), res);
-      expect(res.status).toHaveBeenCalledWith(404);
-    });
-
-    it('handles errors', () => {
-      mockWatchlistRepo.remove.mockImplementation(() => { throw new Error('db error'); });
-      const handler = findHandler(routes, 'delete', '/api/research/watchlist/:symbol');
-      const res = mockRes();
-      handler(mockReq({ params: { symbol: 'AAPL' } }), res);
-      expect(res.status).toHaveBeenCalledWith(500);
-    });
-  });
-
-  // ── Research Screener ───────────────────────────────────────────────────
-  describe('POST /api/research/screen', () => {
-    it('returns screener results from signals', () => {
-      const signalRow = { symbol: 'AAPL', technicalScore: 75, timestamp: '2024-01-15T10:00:00.000Z' };
-      mockDb.select.mockReturnValue(chain([signalRow]));
-      const handler = findHandler(routes, 'post', '/api/research/screen');
-      const res = mockRes();
-      handler(mockReq(), res);
-      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
-        results: expect.any(Array),
-      }));
-    });
-
-    it('returns null screenerUpdatedAt when no results', () => {
-      mockDb.select.mockReturnValue(chain([]));
-      const handler = findHandler(routes, 'post', '/api/research/screen');
-      const res = mockRes();
-      handler(mockReq(), res);
-      expect(res.json).toHaveBeenCalledWith({ results: [], screenerUpdatedAt: null });
-    });
-
-    it('handles errors', () => {
-      mockDb.select.mockImplementation(() => { throw new Error('db err'); });
-      const handler = findHandler(routes, 'post', '/api/research/screen');
-      const res = mockRes();
-      handler(mockReq(), res);
-      expect(res.status).toHaveBeenCalledWith(500);
-    });
-  });
-
-  // ── Research Idea Status ────────────────────────────────────────────────
-  describe('POST /api/research/ideas/:id/status', () => {
-    it('updates status for valid value', () => {
-      mockDb.update.mockReturnValue(chain({ changes: 1 }));
-      const handler = findHandler(routes, 'post', '/api/research/ideas/:id/status');
-      const res = mockRes();
-      handler(mockReq({ params: { id: '1' }, body: { status: 'completed' } }), res);
-      expect(res.json).toHaveBeenCalledWith({ ok: true });
-    });
-
-    it('returns 400 for invalid status', () => {
-      const handler = findHandler(routes, 'post', '/api/research/ideas/:id/status');
-      const res = mockRes();
-      handler(mockReq({ params: { id: '1' }, body: { status: 'invalid' } }), res);
-      expect(res.status).toHaveBeenCalledWith(400);
-    });
-
-    it('handles errors', () => {
-      mockDb.update.mockImplementation(() => { throw new Error('db error'); });
-      const handler = findHandler(routes, 'post', '/api/research/ideas/:id/status');
-      const res = mockRes();
-      handler(mockReq({ params: { id: '1' }, body: { status: 'watching' } }), res);
-      expect(res.status).toHaveBeenCalledWith(500);
-    });
-  });
-
-  // ── AI Models ───────────────────────────────────────────────────────────
-  describe('GET /ai/models', () => {
-    it('returns parsed models list', () => {
-      mockConfigManager.get.mockImplementation((key: string) => {
-        if (key === 'ai.models') return JSON.stringify([{ id: 'gpt4', enabled: true }]);
-        return null;
-      });
-      const handler = findHandler(routes, 'get', '/ai/models');
-      const res = mockRes();
-      handler(mockReq(), res);
-      expect(res.json).toHaveBeenCalledWith([{ id: 'gpt4', enabled: true }]);
-    });
-
-    it('returns empty array when models not configured', () => {
-      mockConfigManager.get.mockReturnValue(null);
-      const handler = findHandler(routes, 'get', '/ai/models');
-      const res = mockRes();
-      handler(mockReq(), res);
-      expect(res.json).toHaveBeenCalledWith([]);
-    });
-
-    it('handles errors', () => {
-      mockConfigManager.get.mockImplementation(() => { throw new Error('cfg err'); });
-      const handler = findHandler(routes, 'get', '/ai/models');
-      const res = mockRes();
-      handler(mockReq(), res);
-      expect(res.status).toHaveBeenCalledWith(500);
-    });
-  });
-
-  describe('POST /ai/models', () => {
-    it('saves models list', async () => {
-      mockConfigManager.set.mockResolvedValue(undefined);
-      const handler = findHandler(routes, 'post', '/ai/models');
-      const res = mockRes();
-      await handler(mockReq({ body: [{ id: 'gpt4', enabled: true }] }), res);
-      expect(mockConfigManager.set).toHaveBeenCalledWith('ai.models', expect.any(String));
-      expect(res.json).toHaveBeenCalledWith({ ok: true, count: 1 });
-    });
-
-    it('returns 400 when body is not an array', async () => {
-      const handler = findHandler(routes, 'post', '/ai/models');
-      const res = mockRes();
-      await handler(mockReq({ body: { id: 'gpt4' } }), res);
-      expect(res.status).toHaveBeenCalledWith(400);
-    });
-
-    it('handles errors', async () => {
-      mockConfigManager.set.mockRejectedValue(new Error('fail'));
-      const handler = findHandler(routes, 'post', '/ai/models');
-      const res = mockRes();
-      await handler(mockReq({ body: [{ id: 'gpt4' }] }), res);
-      expect(res.status).toHaveBeenCalledWith(500);
-    });
-  });
-
-  describe('POST /ai/test', () => {
-    it('returns 404 when profileId not found', async () => {
-      mockConfigManager.get.mockReturnValue(JSON.stringify([{ id: 'other', enabled: true }]));
-      const handler = findHandler(routes, 'post', '/ai/test');
-      const res = mockRes();
-      await handler(mockReq({ body: { profileId: 'notexist' } }), res);
-      expect(res.status).toHaveBeenCalledWith(404);
-    });
-
-    it('handles outer errors', async () => {
-      mockConfigManager.get.mockImplementation(() => { throw new Error('fail'); });
-      const handler = findHandler(routes, 'post', '/ai/test');
-      const res = mockRes();
-      await handler(mockReq({ body: { profileId: 'gpt4' } }), res);
-      expect(res.status).toHaveBeenCalledWith(500);
-    });
-  });
-
-  // ── Setup Status ────────────────────────────────────────────────────────
-  describe('GET /setup/status', () => {
-    it('returns configured: true when there is an enabled model', () => {
-      mockConfigManager.get.mockImplementation((key: string) => {
-        if (key === 'ai.models') return JSON.stringify([{ enabled: true }]);
-        if (key === 'ai.provider') return 'anthropic';
-        return null;
-      });
-      const handler = findHandler(routes, 'get', '/api/setup/status');
-      const res = mockRes();
-      handler(mockReq(), res);
-      expect(res.json).toHaveBeenCalledWith({ configured: true });
-    });
-
-    it('returns configured: true when legacy provider is non-default', () => {
-      mockConfigManager.get.mockImplementation((key: string) => {
-        if (key === 'ai.models') return JSON.stringify([{ enabled: false }]);
-        if (key === 'ai.provider') return 'ollama';
-        return null;
-      });
-      const handler = findHandler(routes, 'get', '/api/setup/status');
-      const res = mockRes();
-      handler(mockReq(), res);
-      expect(res.json).toHaveBeenCalledWith({ configured: true });
-    });
-
-    it('returns configured: false when nothing is set up', () => {
-      mockConfigManager.get.mockReturnValue(null);
-      const handler = findHandler(routes, 'get', '/api/setup/status');
-      const res = mockRes();
-      handler(mockReq(), res);
-      expect(res.json).toHaveBeenCalledWith({ configured: false });
-    });
-
-    it('handles errors', () => {
-      mockConfigManager.get.mockImplementation(() => { throw new Error('fail'); });
-      const handler = findHandler(routes, 'get', '/api/setup/status');
-      const res = mockRes();
-      handler(mockReq(), res);
-      expect(res.status).toHaveBeenCalledWith(500);
-    });
   });
 
   // ── Health ────────────────────────────────────────────────────────────
@@ -3604,72 +3028,6 @@ describe('api/routes', () => {
     });
   });
 
-  // ── GET /ai/feedback ──────────────────────────────────────────────────
-  describe('GET /ai/feedback', () => {
-    it('returns AI feedback', async () => {
-      const handler = findHandler(routes, 'get', '/ai/feedback');
-      const res = mockRes();
-      await handler(mockReq(), res);
-
-      expect(mockGenerateFeedback).toHaveBeenCalled();
-      expect(res.json).toHaveBeenCalledWith({ feedback: 'improve stops' });
-    });
-
-    it('handles errors', async () => {
-      mockGetAISelfImprovement.mockImplementationOnce(() => { throw new Error('fail'); });
-
-      const handler = findHandler(routes, 'get', '/ai/feedback');
-      const res = mockRes();
-      await handler(mockReq(), res);
-
-      expect(res.status).toHaveBeenCalledWith(500);
-    });
-  });
-
-  // ── GET /ai/calibration ───────────────────────────────────────────────
-  describe('GET /ai/calibration', () => {
-    it('returns calibration curve', async () => {
-      const handler = findHandler(routes, 'get', '/ai/calibration');
-      const res = mockRes();
-      await handler(mockReq(), res);
-
-      expect(mockGetCalibrationCurve).toHaveBeenCalled();
-      expect(res.json).toHaveBeenCalledWith([{ bucket: '0.5-0.6', accuracy: 0.55 }]);
-    });
-
-    it('handles errors', async () => {
-      mockGetAISelfImprovement.mockImplementationOnce(() => { throw new Error('fail'); });
-
-      const handler = findHandler(routes, 'get', '/ai/calibration');
-      const res = mockRes();
-      await handler(mockReq(), res);
-
-      expect(res.status).toHaveBeenCalledWith(500);
-    });
-  });
-
-  // ── GET /ai/model-comparison ──────────────────────────────────────────
-  describe('GET /ai/model-comparison', () => {
-    it('returns model comparison', async () => {
-      const handler = findHandler(routes, 'get', '/ai/model-comparison');
-      const res = mockRes();
-      await handler(mockReq(), res);
-
-      expect(mockCompareModels).toHaveBeenCalled();
-      expect(res.json).toHaveBeenCalledWith([{ model: 'claude', accuracy: 0.8 }]);
-    });
-
-    it('handles errors', async () => {
-      mockGetAISelfImprovement.mockImplementationOnce(() => { throw new Error('fail'); });
-
-      const handler = findHandler(routes, 'get', '/ai/model-comparison');
-      const res = mockRes();
-      await handler(mockReq(), res);
-
-      expect(res.status).toHaveBeenCalledWith(500);
-    });
-  });
-
   // ── GET /risk-parity/rebalance ────────────────────────────────────────
   describe('GET /risk-parity/rebalance', () => {
     it('returns empty actions when no positions', () => {
@@ -3791,87 +3149,6 @@ describe('api/routes', () => {
       handler(mockReq(), res);
 
       expect(res.status).toHaveBeenCalledWith(500);
-    });
-  });
-
-  // ── POST /ai/test (inner try/catch) ───────────────────────────────────
-  describe('POST /ai/test (inner try/catch)', () => {
-    it('returns ok:false when rawChat throws', async () => {
-      mockConfigManager.get.mockImplementation((key: string) => {
-        if (key === 'ai.models') return JSON.stringify([{ id: 'gpt4', enabled: true, baseUrl: 'http://test', model: 'gpt4', apiKey: 'key', weight: 1 }]);
-        return null;
-      });
-      mockRawChat.mockRejectedValueOnce(new Error('connection refused'));
-
-      const handler = findHandler(routes, 'post', '/ai/test');
-      const res = mockRes();
-      await handler(mockReq({ body: { profileId: 'gpt4' } }), res);
-
-      expect(res.json).toHaveBeenCalledWith(
-        expect.objectContaining({ ok: false, error: expect.stringContaining('connection refused') })
-      );
-    });
-
-    it('returns ok:true when rawChat succeeds', async () => {
-      mockConfigManager.get.mockImplementation((key: string) => {
-        if (key === 'ai.models') return JSON.stringify([{ id: 'mymodel', enabled: true, baseUrl: 'http://test', model: 'gpt4', apiKey: 'key', weight: 1 }]);
-        return null;
-      });
-      mockRawChat.mockResolvedValueOnce('pong');
-
-      const handler = findHandler(routes, 'post', '/ai/test');
-      const res = mockRes();
-      await handler(mockReq({ body: { profileId: 'mymodel' } }), res);
-
-      expect(res.json).toHaveBeenCalledWith(
-        expect.objectContaining({ ok: true, latencyMs: expect.any(Number) })
-      );
-    });
-  });
-
-  // ── Screener duplicate symbol ─────────────────────────────────────────
-  describe('POST /api/research/screen (duplicate symbols)', () => {
-    it('deduplicates symbols across signal rows', () => {
-      // Return two rows with the same symbol - second should be skipped
-      const signalRows = [
-        { symbol: 'AAPL', technicalScore: 75, timestamp: '2024-01-15T10:00:00.000Z' },
-        { symbol: 'AAPL', technicalScore: 60, timestamp: '2024-01-14T10:00:00.000Z' }, // duplicate
-        { symbol: 'MSFT', technicalScore: 80, timestamp: '2024-01-15T10:00:00.000Z' },
-      ];
-      let callCount = 0;
-      mockDb.select.mockImplementation(() => {
-        callCount++;
-        if (callCount === 1) return chain(signalRows);
-        // fundamental cache queries return undefined
-        return chain(undefined);
-      });
-
-      const handler = findHandler(routes, 'post', '/api/research/screen');
-      const res = mockRes();
-      handler(mockReq(), res);
-
-      const result = res.json.mock.calls[0][0];
-      // Should only have 2 results (AAPL deduplicated)
-      expect(result.results).toHaveLength(2);
-    });
-
-    it('handles null technicalScore', () => {
-      const signalRows = [
-        { symbol: 'AAPL', technicalScore: null, timestamp: '2024-01-15T10:00:00.000Z' },
-      ];
-      let callCount = 0;
-      mockDb.select.mockImplementation(() => {
-        callCount++;
-        if (callCount === 1) return chain(signalRows);
-        return chain(undefined);
-      });
-
-      const handler = findHandler(routes, 'post', '/api/research/screen');
-      const res = mockRes();
-      handler(mockReq(), res);
-
-      const result = res.json.mock.calls[0][0];
-      expect(result.results[0].score).toBeNull();
     });
   });
 
