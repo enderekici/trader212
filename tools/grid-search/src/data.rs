@@ -47,8 +47,8 @@ pub fn load_cached_symbols(cache_dir: &str) -> Result<Vec<(String, Vec<Candle>)>
 
         // Extract symbol name from filename (e.g., "AAPL.json" -> "AAPL")
         let symbol = match path.file_stem().and_then(|s| s.to_str()) {
-            Some(s) => s.to_string(),
-            None => continue,
+            Some(s) if !s.starts_with('_') => s.to_string(),
+            _ => continue,
         };
 
         let contents = fs::read_to_string(&path)

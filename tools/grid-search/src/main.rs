@@ -37,12 +37,15 @@ const MAX_POSITION_SIZE_PCTS: &[f64] = &[0.02, 0.03, 0.05, 0.08, 0.1, 0.15, 0.2,
 
 // ── Fixed Config ─────────────────────────────────────────────────────────────
 
-const START_DATE: &str = "2025-01-01";
+const START_DATE: &str = "2022-06-01";
 const END_DATE: &str = "2026-02-21";
 const INITIAL_CAPITAL: f64 = 10_000.0;
 const SLIPPAGE_PCT: f64 = 0.001;
 const SPREAD_BPS: f64 = 2.0;
 const COMMISSION: f64 = 1.0;
+const TOP_N_SYMBOLS: usize = 30;
+const MIN_PRICE: f64 = 5.0;
+const MIN_CANDLES: usize = 200;
 
 const CSV_HEADER: &str = "Strategy,Entry Threshold,Stop Loss %,Take Profit %,Max Positions,\
     Position Size %,Trades,Win Rate %,Return %,Profit Factor,Sharpe Ratio,Sortino Ratio,\
@@ -639,6 +642,41 @@ fn precompute_market_context(
     contexts
 }
 
+// ── Symbol Filtering ─────────────────────────────────────────────────────────
+
+/// Filter to top N symbols by average dollar volume, with minimum price and
+/// candle count requirements. Matches the TS validate-best.ts logic.
+fn filter_top_symbols(
+    data: Vec<(String, Vec<data::Candle>)>,
+    top_n: usize,
+    min_price: f64,
+    min_candles: usize,
+) -> Vec<(String, Vec<data::Candle>)> {
+    let mut scored: Vec<(String, Vec<data::Candle>, f64)> = data
+        .into_iter()
+        .filter_map(|(sym, candles)| {
+            if candles.len() < min_candles {
+                return None;
+            }
+            let last_price = candles.last().map(|c| c.close).unwrap_or(0.0);
+            if last_price < min_price {
+                return None;
+            }
+            let total_dol_vol: f64 = candles.iter().map(|c| c.close * c.volume).sum();
+            let avg_dol_vol = total_dol_vol / candles.len() as f64;
+            Some((sym, candles, avg_dol_vol))
+        })
+        .collect();
+
+    scored.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+    scored.truncate(top_n);
+
+    let names: Vec<&str> = scored.iter().map(|(s, _, _)| s.as_str()).collect();
+    println!("  Top {} symbols: {}", scored.len(), names.join(", "));
+
+    scored.into_iter().map(|(s, c, _)| (s, c)).collect()
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 fn main() -> anyhow::Result<()> {
@@ -666,6 +704,13 @@ fn main() -> anyhow::Result<()> {
     if symbol_data.is_empty() {
         anyhow::bail!("No symbol data found in cache directory: {}", args.cache_dir);
     }
+
+    // ── 1b. Filter to top N symbols by dollar volume ──────────────────
+    let symbol_data = filter_top_symbols(symbol_data, TOP_N_SYMBOLS, MIN_PRICE, MIN_CANDLES);
+    println!(
+        "  Filtered to top {} symbols by dollar volume (min price ${}, min {} candles)",
+        symbol_data.len(), MIN_PRICE, MIN_CANDLES
+    );
 
     // ── 2. Get common trading dates ──────────────────────────────────────
     let trading_dates = data::get_common_dates(&symbol_data, START_DATE, END_DATE);
