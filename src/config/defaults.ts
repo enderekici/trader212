@@ -353,10 +353,10 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
   { key: 'ai.temperature', value: '0', category: 'ai', description: 'AI temperature' },
 
   // Risk
-  { key: 'risk.maxPositions', value: '10', category: 'risk', description: 'Max open positions' },
+  { key: 'risk.maxPositions', value: '5', category: 'risk', description: 'Max open positions' },
   {
     key: 'risk.maxPositionSizePct',
-    value: '0.25',
+    value: '0.30',
     category: 'risk',
     description: 'Max position size (% of portfolio)',
   },
