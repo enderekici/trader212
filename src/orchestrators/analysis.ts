@@ -201,7 +201,31 @@ export class AnalysisOrchestrator {
       return null;
     }
 
-    // 6. Store signal in DB
+    // 6. Apply conviction gate — downgrade BUY to HOLD if conviction is too low
+    let shouldTrade = false;
+    let gatedDecision = decision.decision;
+    if (decision.decision === 'BUY') {
+      let minConviction = 65;
+      try {
+        minConviction = configManager.get<number>('ai.minConvictionScore');
+      } catch {
+        /* use defaults */
+      }
+
+      if (decision.conviction < minConviction) {
+        log.info(
+          { symbol, conviction: decision.conviction, minConviction },
+          'BUY conviction below threshold, downgrading to HOLD',
+        );
+        gatedDecision = 'HOLD' as const;
+      } else {
+        shouldTrade = true;
+      }
+    } else if (decision.decision === 'SELL') {
+      shouldTrade = true;
+    }
+
+    // 7. Store signal in DB (with gated decision)
     const db = getDb();
     db.insert(schema.signals)
       .values({
@@ -240,7 +264,7 @@ export class AnalysisOrchestrator {
         decisionScore: decision.conviction,
         convictionTotal:
           (technicalScore + fundamentalScore + sentimentScore + decision.conviction) / 4,
-        decision: decision.decision,
+        decision: gatedDecision,
         executed: false,
         reasoning: decision.reasoning,
         suggestedStopLossPct: decision.suggestedStopLossPct,
@@ -249,21 +273,21 @@ export class AnalysisOrchestrator {
       })
       .run();
 
-    // 7. Broadcast signal via WebSocket
+    // 8. Broadcast signal via WebSocket
     this.deps.wsManager.broadcast('signal_generated', {
       symbol,
-      decision: decision.decision,
+      decision: gatedDecision,
       conviction: decision.conviction,
       technicalScore,
       fundamentalScore,
       sentimentScore,
     });
 
-    // 7b. Webhook dispatch for signal
+    // 8b. Webhook dispatch for signal
     try {
       await getWebhookManager().sendOutbound('signal_generated', {
         symbol,
-        decision: decision.decision,
+        decision: gatedDecision,
         conviction: decision.conviction,
         technicalScore,
         fundamentalScore,
@@ -271,28 +295,6 @@ export class AnalysisOrchestrator {
       });
     } catch {
       // Non-critical, swallow webhook errors
-    }
-
-    // 8. Check conviction gate for BUY
-    let shouldTrade = false;
-    if (decision.decision === 'BUY') {
-      let minConviction = 65;
-      try {
-        minConviction = configManager.get<number>('ai.minConvictionScore');
-      } catch {
-        /* use defaults */
-      }
-
-      if (decision.conviction < minConviction) {
-        log.info(
-          { symbol, conviction: decision.conviction, minConviction },
-          'BUY conviction below threshold, holding',
-        );
-      } else {
-        shouldTrade = true;
-      }
-    } else if (decision.decision === 'SELL') {
-      shouldTrade = true;
     }
 
     return {
