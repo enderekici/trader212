@@ -1,3 +1,12 @@
+export interface MarketContext {
+  breadthAbove50dPct: number;
+  breadthAbove200dPct: number;
+  breadthSignal: 'oversold' | 'neutral' | 'overbought';
+  fomcDaysToNext: number;
+  fomcIsPreFOMC: boolean;
+  fomcIsFOMCDay: boolean;
+}
+
 export interface BacktestConfig {
   symbols: string[];
   startDate: string;
@@ -22,6 +31,11 @@ export interface BacktestConfig {
   dynamicTrailingTiers?: { profitPct: number; trailPct: number }[];
   // Portfolio heat limit
   maxPortfolioHeatPct?: number; // e.g. 0.06 = 6%
+  // Market context
+  enableMarketBreadth?: boolean;
+  enableFOMC?: boolean;
+  fomcBlockEntries?: boolean;
+  fomcEntryThresholdBoost?: number; // default 0.05
 }
 
 export interface BacktestTrade {

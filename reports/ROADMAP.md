@@ -113,9 +113,11 @@ _Inspired by Freqtrade's battle-tested protection system. These prevent catastro
 
 ### Backtesting Framework
 - [ ] Integrate backtesting engine with live data pipeline
-- [ ] Walk-forward analysis capability
+- [DONE] Walk-forward analysis capability
 - [ ] Paper trading environment for strategy validation
 - [ ] Compare backtest results vs actual fills (slippage analysis)
+- [DONE] Market breadth integration in backtest engine (opt-in SMA50 breadth dampening)
+- [DONE] FOMC calendar integration (2024-2028 meeting dates, entry blocking, threshold boost)
 
 ---
 

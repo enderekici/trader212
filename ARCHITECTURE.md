@@ -162,6 +162,13 @@ Three scoring layers run in parallel for each stock:
 - Source-weighted sentiment (Finnhub + Marketaux)
 - Earnings proximity warnings
 
+**Market Context (opt-in):**
+- Market Breadth: percentage of symbols above SMA(50) and SMA(200), classified as oversold/neutral/overbought
+- FOMC Calendar: proximity to Federal Reserve meetings (2024-2028), pre-FOMC window detection, FOMC day detection
+- Breadth adjustments: dampen bullish scores 10% when breadth is oversold (divergence), boost 3% when overbought (confirmation), extra 15% dampening below 20% breadth
+- FOMC adjustments: compress scores 15% toward neutral during pre-FOMC window, boost entry threshold by +0.05, optionally block entries on FOMC day
+- Enabled via `enableMarketBreadth` and `enableFOMC` config flags in BacktestConfig
+
 Each layer produces a normalized score (0-1). These are combined into a composite conviction score.
 
 #### Portfolio Correlation Analysis
@@ -1236,6 +1243,8 @@ Full strategy backtesting with historical data:
 - Strategy execution simulation with realistic fills
 - Performance reporting (Sharpe, Sortino, max drawdown, win rate)
 - Walk-forward analysis support
+- Market context integration (breadth + FOMC calendar) for signal-level score adjustments
+- Dollar-volume universe selection with minimum price and history filters
 - Comparison of multiple strategies side-by-side
 
 Managed via `src/backtest/` directory.
@@ -1394,6 +1403,8 @@ src/
 |   +-- correlation.ts        # Pearson correlation analyzer
 |   +-- multi-timeframe.ts    # Weekly/monthly confluence scoring
 |   +-- regime-detector.ts    # Bull/bear/sideways market regime
+|   +-- market-breadth.ts    # Market breadth (% above SMA50/SMA200)
+|   +-- sector-rotation.ts   # Sector rotation analysis
 |   +-- monte-carlo.ts        # Monte Carlo portfolio simulation
 |   +-- portfolio-optimizer.ts # Min-variance/max-Sharpe optimization
 |   +-- technical/
@@ -1423,6 +1434,7 @@ src/
 |   +-- steer-client.ts       # Steer headless browser client
 |   +-- web-researcher.ts     # Web research via Steer
 |   +-- price-streamer.ts     # Real-time price streaming
+|   +-- fred.ts              # FRED economic data client
 +-- api/
 |   +-- server.ts             # Express REST API server
 |   +-- routes.ts             # All REST endpoint definitions
@@ -1434,10 +1446,10 @@ src/
 |       +-- types.ts          # T212 type definitions
 |       +-- errors.ts         # T212 error handling
 +-- backtest/
-|   +-- engine.ts             # Backtest engine (with slippage/spread modeling)
-|   +-- data-loader.ts        # Historical data loader
-|   +-- reporter.ts           # Backtest result reporting
-|   +-- types.ts              # Backtest type definitions
+|   +-- engine.ts             # Backtest engine (slippage/spread, market context)
+|   +-- data-loader.ts        # Historical data loader (cacheOnly, date filtering)
+|   +-- reporter.ts           # Backtest reporting + profitability gates
+|   +-- types.ts              # Backtest types (MarketContext, BacktestConfig)
 |   +-- walk-forward.ts       # Walk-forward out-of-sample validation
 +-- config/
 |   +-- defaults.ts           # Default config values
@@ -1452,6 +1464,7 @@ src/
 |   +-- key-rotator.ts        # API key rotation
 |   +-- circuit-breaker.ts    # Circuit breaker for external APIs
 |   +-- error-handlers.ts     # Global error handlers
+|   +-- fomc-calendar.ts     # FOMC meeting calendar (2024-2028)
 +-- bot/
     +-- scheduler.ts          # Cron job scheduler
 

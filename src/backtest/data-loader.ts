@@ -53,9 +53,10 @@ export class BacktestDataLoader {
     const start = new Date(startDate);
     const end = new Date(endDate);
 
-    // Add 250 trading days (~365 calendar days) of lookback for indicator warmup
+    // Add ~310 trading days (~450 calendar days) of lookback for indicator warmup
+    // Required for: EMA(200) convergence + TRIX(14) triple-smooth + Ichimoku(52)
     const lookbackStart = new Date(start);
-    lookbackStart.setDate(lookbackStart.getDate() - 365);
+    lookbackStart.setDate(lookbackStart.getDate() - 450);
 
     // If we have cached data, filter it to the requested range
     if (candles.length > 0) {

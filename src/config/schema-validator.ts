@@ -96,6 +96,7 @@ const scoringSchemas = new Map<string, z.ZodType>([
   ['scoring.insider.clusterMinCount', z.number().int().min(1).max(20)],
   ['scoring.insider.clusterBonus', z.number().min(0).max(50)],
   ['scoring.insider.divisor', z.number().min(1).max(10_000)],
+  ['scoring.sentiment.finraWeight', z.number().min(0).max(1)],
 ]);
 
 // ── AI ───────────────────────────────────────────────────────────────────────
@@ -312,6 +313,19 @@ const streamingSchemas = new Map<string, z.ZodType>([
   ['streaming.intervalSeconds', z.number().int().min(5).max(300)],
 ]);
 
+// ── Sector Rotation ─────────────────────────────────────────────────────
+const sectorRotationSchemas = new Map<string, z.ZodType>([
+  ['sectorRotation.enabled', z.boolean()],
+  ['sectorRotation.convictionBoost', z.number().min(0).max(20)],
+  ['sectorRotation.convictionPenalty', z.number().min(0).max(20)],
+]);
+
+// ── FOMC ────────────────────────────────────────────────────────────────
+const fomcSchemas = new Map<string, z.ZodType>([
+  ['fomc.enabled', z.boolean()],
+  ['fomc.preFomcBoost', z.number().min(0).max(20)],
+]);
+
 // ── Trading ──────────────────────────────────────────────────────────────────
 const tradingSchemas = new Map<string, z.ZodType>([
   ['trading.slippageMarketPct', z.number().min(0).max(0.1)],
@@ -359,6 +373,8 @@ export const configSchemas: Map<string, z.ZodType> = new Map([
   ...streamingSchemas,
   ...tradingSchemas,
   ...monitoringSchemas,
+  ...sectorRotationSchemas,
+  ...fomcSchemas,
 ]);
 
 /**

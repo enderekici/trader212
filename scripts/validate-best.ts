@@ -6,7 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { BacktestDataLoader } from '../src/backtest/data-loader.js';
-import { BacktestEngine, type ScoreFn } from '../src/backtest/engine.js';
+import { BacktestEngine, type ContextualScoreFn } from '../src/backtest/engine.js';
 import {
   evaluateProfitabilityGates,
   formatGateResults,
@@ -20,34 +20,37 @@ import type {
 } from '../src/backtest/types.js';
 import { createMonteCarloSimulator } from '../src/analysis/monte-carlo.js';
 
-function getTopSymbolsByVolume(topN: number): string[] {
+function getTopSymbolsByDollarVolume(topN: number, minPrice = 5): string[] {
   const cacheDir = './data/backtest_cache';
   const allSymbols = fs.readdirSync(cacheDir)
     .filter(f => f.endsWith('.json'))
     .map(f => f.replace('.json', ''));
 
-  const volumes: { symbol: string; avgVol: number }[] = [];
+  const volumes: { symbol: string; avgDolVol: number }[] = [];
   for (const sym of allSymbols) {
     try {
       const candles = JSON.parse(fs.readFileSync(path.join(cacheDir, `${sym}.json`), 'utf-8'));
-      if (candles.length > 0) {
-        const totalVol = candles.reduce((s: number, c: { volume: number }) => s + c.volume, 0);
-        volumes.push({ symbol: sym, avgVol: totalVol / candles.length });
-      }
+      if (candles.length < 200) continue; // need sufficient history
+      const lastPrice = candles[candles.length - 1]?.close ?? 0;
+      if (lastPrice < minPrice) continue; // filter penny/low-priced stocks
+      const totalDolVol = candles.reduce(
+        (s: number, c: { close: number; volume: number }) => s + c.close * c.volume, 0,
+      );
+      volumes.push({ symbol: sym, avgDolVol: totalDolVol / candles.length });
     } catch { /* skip */ }
   }
 
-  return volumes.sort((a, b) => b.avgVol - a.avgVol).slice(0, topN).map(v => v.symbol);
+  return volumes.sort((a, b) => b.avgDolVol - a.avgDolVol).slice(0, topN).map(v => v.symbol);
 }
 
-async function runBacktest(config: BacktestConfig, scoreFn: ScoreFn): Promise<BacktestResult> {
+async function runBacktest(config: BacktestConfig, scoreFn: ContextualScoreFn): Promise<BacktestResult> {
   const engine = new BacktestEngine({ config, scoreFn, dataLoader: new BacktestDataLoader() });
   return engine.run();
 }
 
 async function runWalkForward(
   config: BacktestConfig,
-  scoreFn: ScoreFn,
+  scoreFn: ContextualScoreFn,
   windows: number,
   trainRatio: number,
 ): Promise<WalkForwardResult> {
@@ -62,7 +65,7 @@ async function runWalkForward(
     const te = ws + windowMs * trainRatio;
 
     const trainCfg = { ...config, startDate: new Date(ws).toISOString().split('T')[0], endDate: new Date(te).toISOString().split('T')[0] };
-    const testCfg = { ...config, startDate: new Date(te).toISOString().split('T')[0], endDate: new Date(we).toISOString().split('T')[0] };
+    const testCfg = { ...config, startDate: new Date(te + 86400000).toISOString().split('T')[0], endDate: new Date(we).toISOString().split('T')[0] };
 
     console.log(`  Window ${i + 1}/${windows}: train ${trainCfg.startDate}..${trainCfg.endDate} | test ${testCfg.startDate}..${testCfg.endDate}`);
 
@@ -101,8 +104,8 @@ async function main() {
   console.log('  BEST CONFIG VALIDATION: Top30 / entry0.50 / SL8% / 5 positions');
   console.log('='.repeat(70));
 
-  const symbols = getTopSymbolsByVolume(30);
-  console.log(`\nTop 30 by volume: ${symbols.join(', ')}`);
+  const symbols = getTopSymbolsByDollarVolume(30);
+  console.log(`\nTop 30 by dollar volume: ${symbols.join(', ')}`);
 
   const config: BacktestConfig = {
     symbols,
@@ -118,10 +121,12 @@ async function main() {
     commission: 0,
     slippagePct: 0.0015,
     spreadBps: 3,
+    enableMarketBreadth: true,
+    enableFOMC: true,
   };
 
-  const { scoreMultiStrategy } = await import('../src/analysis/technical/strategies.js');
-  const scoreFn = scoreMultiStrategy;
+  const { scoreMultiStrategyWithContext } = await import('../src/analysis/technical/strategies.js');
+  const scoreFn = scoreMultiStrategyWithContext;
 
   // Full backtest
   console.log('\n' + '─'.repeat(70));

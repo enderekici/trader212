@@ -18,6 +18,27 @@ pub struct SimConfig {
     pub slippage_pct: f64,
     pub spread_bps: f64,
     pub commission: f64,
+    // Market context flags
+    pub enable_market_breadth: bool,
+    pub enable_fomc: bool,
+    pub fomc_block_entries: bool,
+    pub fomc_entry_threshold_boost: f64,
+}
+
+/// Market-level context per trading day (breadth + FOMC).
+#[derive(Clone)]
+pub struct DayContext {
+    pub breadth_above_50d_pct: f64,
+    pub breadth_signal: BreadthSignal,
+    pub fomc_is_pre_fomc: bool,
+    pub fomc_is_fomc_day: bool,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum BreadthSignal {
+    Oversold,
+    Neutral,
+    Overbought,
 }
 
 /// Result metrics from a single simulation run.
@@ -59,6 +80,8 @@ pub struct MarketData {
     pub has_data: Vec<bool>,
     /// Pre-computed scores: `scores[symbol_idx][date_idx]`, -1.0 = no score
     pub scores: Vec<Vec<f64>>,
+    /// Market-level context per trading day. When empty, context adjustments are disabled.
+    pub market_context: Vec<DayContext>,
 }
 
 // ---------------------------------------------------------------------------
@@ -162,6 +185,42 @@ fn empty_result(initial_capital: f64) -> SimResult {
 }
 
 // ---------------------------------------------------------------------------
+// Market context adjustment
+// ---------------------------------------------------------------------------
+
+/// Apply market context adjustments to a pre-computed score.
+#[inline]
+fn apply_context_adjustment(score: f64, ctx: &DayContext, config: &SimConfig) -> f64 {
+    if !config.enable_market_breadth && !config.enable_fomc {
+        return score;
+    }
+
+    let mut adj = score;
+
+    // Breadth adjustments (only for bullish scores, i.e. normalized > 0.5)
+    if config.enable_market_breadth && adj > 0.5 {
+        let excess = adj - 0.5;
+        if ctx.breadth_signal == BreadthSignal::Oversold {
+            adj = 0.5 + excess * 0.90; // dampen 10%
+        } else if ctx.breadth_signal == BreadthSignal::Overbought {
+            adj = 0.5 + excess * 1.03; // boost 3%
+        }
+        // Extreme low breadth
+        if ctx.breadth_above_50d_pct < 20.0 {
+            let damp = 0.85 + (ctx.breadth_above_50d_pct / 20.0) * 0.15;
+            adj = 0.5 + (adj - 0.5) * damp;
+        }
+    }
+
+    // Pre-FOMC: compress toward neutral by 15%
+    if config.enable_fomc && ctx.fomc_is_pre_fomc {
+        adj = 0.5 + (adj - 0.5) * 0.85;
+    }
+
+    adj
+}
+
+// ---------------------------------------------------------------------------
 // Core simulation
 // ---------------------------------------------------------------------------
 
@@ -244,20 +303,49 @@ pub fn simulate(market: &MarketData, config: &SimConfig) -> SimResult {
         // 2. Generate entry signals (if room and next day exists)
         // -----------------------------------------------------------------
         if pos.len() < config.max_positions && di + 1 < n_dates {
+            // FOMC day: block all entries if configured
+            let fomc_blocked = config.fomc_block_entries
+                && !market.market_context.is_empty()
+                && market.market_context[di].fomc_is_fomc_day;
+
             sig_symbols.clear();
             sig_scores.clear();
 
+            if !fomc_blocked {
             for si in 0..n_symbols {
                 if pos.in_position[si] {
                     continue;
                 }
                 let sc = market.scores[si][di];
-                if sc < 0.0 || sc < config.entry_threshold {
+                if sc < 0.0 {
                     continue;
                 }
+
+                // Apply market context adjustment if available
+                let adjusted_sc = if !market.market_context.is_empty() {
+                    apply_context_adjustment(sc, &market.market_context[di], config)
+                } else {
+                    sc
+                };
+
+                // FOMC entry threshold boost
+                let effective_threshold = if config.enable_fomc
+                    && !market.market_context.is_empty()
+                    && market.market_context[di].fomc_is_pre_fomc
+                {
+                    config.entry_threshold + config.fomc_entry_threshold_boost
+                } else {
+                    config.entry_threshold
+                };
+
+                if adjusted_sc < effective_threshold {
+                    continue;
+                }
+
                 sig_symbols.push(si);
-                sig_scores.push(sc);
+                sig_scores.push(adjusted_sc);
             }
+            } // end if !fomc_blocked
 
             // Sort descending by score (insertion sort -- typically small N)
             for i in 1..sig_symbols.len() {

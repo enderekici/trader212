@@ -1235,6 +1235,48 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
     description: 'Enable paper trading realism (slippage, spread)',
   },
 
+  // FINRA Short Volume Sentiment Weight
+  {
+    key: 'scoring.sentiment.finraWeight',
+    value: '0.1',
+    category: 'scoring',
+    description: 'FINRA short volume weight in sentiment composite (0-1)',
+  },
+
+  // Sector Rotation
+  {
+    key: 'sectorRotation.enabled',
+    value: 'false',
+    category: 'sectorRotation',
+    description: 'Enable sector rotation analysis via ETF relative strength',
+  },
+  {
+    key: 'sectorRotation.convictionBoost',
+    value: '5',
+    category: 'sectorRotation',
+    description: 'Conviction boost for stocks in leading sectors (0-20)',
+  },
+  {
+    key: 'sectorRotation.convictionPenalty',
+    value: '5',
+    category: 'sectorRotation',
+    description: 'Conviction penalty for stocks in lagging sectors (0-20)',
+  },
+
+  // FOMC Calendar
+  {
+    key: 'fomc.enabled',
+    value: 'false',
+    category: 'fomc',
+    description: 'Enable FOMC proximity adjustments',
+  },
+  {
+    key: 'fomc.preFomcBoost',
+    value: '5',
+    category: 'fomc',
+    description: 'Entry threshold reduction during pre-FOMC drift window (0-20)',
+  },
+
   // Trading — Slippage & Spread
   {
     key: 'trading.slippageMarketPct',

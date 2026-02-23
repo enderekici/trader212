@@ -96,6 +96,11 @@ const backtestSchema = z.object({
     .optional(),
   // Portfolio heat limit
   maxPortfolioHeatPct: z.number().min(0.01).max(1).optional(),
+  // Market context
+  enableMarketBreadth: z.boolean().optional(),
+  enableFOMC: z.boolean().optional(),
+  fomcBlockEntries: z.boolean().optional(),
+  fomcEntryThresholdBoost: z.number().min(0).max(0.5).optional(),
   walkForward: z
     .object({
       windows: z.number().int().min(2).max(20).default(5),

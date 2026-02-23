@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-02-23
+
+### Added
+- **Market Context Layer**: Opt-in market breadth and FOMC calendar integration into the backtest engine
+  - Market breadth: computes % of symbols above SMA(50)/SMA(200), classifies as oversold/neutral/overbought
+  - FOMC calendar: detects proximity to Federal Reserve meetings (2024-2028), blocks entries on FOMC day, boosts entry threshold pre-FOMC
+  - Contextual scorer `scoreMultiStrategyWithContext()` applies breadth dampening (10-15%) and FOMC compression (15%)
+  - New `MarketContext` interface in backtest types with 4 opt-in config flags
+- **Rust FOMC Module**: Port of FOMC calendar to Rust grid search (`tools/grid-search/src/fomc.rs`)
+  - `DayContext` struct and `BreadthSignal` enum in simulation engine
+  - `--no-context` CLI flag for A/B comparison
+  - Pre-computed market context (SMA50 breadth + FOMC proximity) per trading date
+- **Market Breadth Module** (`src/analysis/market-breadth.ts`): `computeMarketBreadth()` for offline breadth calculation
+- **FOMC Calendar** (`src/utils/fomc-calendar.ts`): `getFOMCProximity()` with 2024-2028 meeting dates
+- **FRED Client** (`src/data/fred.ts`): Federal Reserve Economic Data adapter
+- **Sector Rotation** (`src/analysis/sector-rotation.ts`): Sector rotation analysis module
+- Dollar-volume universe selection with $5 minimum price and 200-candle history filters in validation script
+- 8 new contextual scorer tests in `test/unit/strategies-alignment.test.ts`
+- 4 new Rust FOMC tests in `tools/grid-search/src/fomc.rs`
+- New backtest API fields: `enableMarketBreadth`, `enableFOMC`, `fomcBlockEntries`, `fomcEntryThresholdBoost`
+
+### Changed
+- Backtest engine now supports `ContextualScoreFn` type (extends `ScoreFn` with optional `MarketContext` parameter)
+- Rust grid search: 70 tests (up from 66), supports market context in simulation
+- Validation script uses dollar-volume ranking instead of share-volume to avoid penny stock contamination
+- Test count: 3284 tests across 100 test files (up from 3172/94)
+
 ## [2.0.0] - 2026-02-16
 
 ### Added

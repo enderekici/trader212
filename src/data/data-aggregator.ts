@@ -75,7 +75,13 @@ export class DataAggregator {
       marketauxNews: [],
       earnings: [],
       insiderTransactions: [],
-      marketContext: { spyPrice: null, spyChange1d: null, vixLevel: null, marketTrend: 'neutral' },
+      marketContext: {
+        spyPrice: null,
+        spyChange1d: null,
+        vixLevel: null,
+        marketTrend: 'neutral',
+        vixTermStructure: null,
+      },
       finraShortVolume: null,
     };
 

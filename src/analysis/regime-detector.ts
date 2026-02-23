@@ -1,6 +1,9 @@
 import type { Candle } from '../backtest/types.js';
 import { configManager } from '../config/manager.js';
+import type { FredMacroData } from '../data/fred.js';
+import type { VixTermStructure } from '../data/yahoo-finance.js';
 import { createLogger } from '../utils/logger.js';
+import type { MarketBreadthData } from './market-breadth.js';
 
 const logger = createLogger('regime-detector');
 
@@ -17,6 +20,9 @@ export interface RegimeDetails {
   breadthScore: number;
   volatilityPctile: number;
   adjustments: RegimeAdjustments;
+  vixTermStructure?: VixTermStructure | null;
+  fredMacro?: FredMacroData | null;
+  marketBreadth?: MarketBreadthData | null;
 }
 
 export interface RegimeAdjustments {
@@ -34,9 +40,17 @@ export interface RegimeAnalysis {
 
 export class RegimeDetector {
   /**
-   * Detect current market regime based on SPY candles and optional VIX level
+   * Detect current market regime based on SPY candles and optional enrichment data
    */
-  detect(spyCandles: Candle[], vixLevel?: number): RegimeAnalysis | null {
+  detect(
+    spyCandles: Candle[],
+    vixLevel?: number,
+    enrichment?: {
+      vixTermStructure?: VixTermStructure | null;
+      fredMacro?: FredMacroData | null;
+      marketBreadth?: MarketBreadthData | null;
+    },
+  ): RegimeAnalysis | null {
     const enabled = configManager.get<boolean>('regime.enabled');
     if (!enabled) {
       logger.debug('Regime detection disabled');
@@ -75,8 +89,11 @@ export class RegimeDetector {
     // 5. Range-bound Detection (SPY within 3% range over lookback)
     const isRangeBound = this.detectRangeBound(recentCandles);
 
-    // 6. Breadth Score (placeholder - using volatility as proxy)
-    const breadthScore = Math.max(0, Math.min(100, 100 - volatilityPctile));
+    // 6. Breadth Score — use real breadth data if available, else volatility proxy
+    const realBreadth = enrichment?.marketBreadth;
+    const breadthScore = realBreadth
+      ? realBreadth.above50dPct
+      : Math.max(0, Math.min(100, 100 - volatilityPctile));
 
     // Classify regime
     let regime: MarketRegime;
@@ -103,6 +120,52 @@ export class RegimeDetector {
       confidence = 0.65;
     }
 
+    // Adjust regime based on VIX term structure
+    const vts = enrichment?.vixTermStructure;
+    if (vts) {
+      if (vts.signal === 'backwardation' && regime !== 'crash') {
+        // VIX backwardation signals stress — boost crash/high_vol probability
+        if (regime === 'trending_up') {
+          confidence *= 0.8; // reduce confidence in uptrend
+        }
+        if (regime === 'high_volatility') {
+          confidence = Math.min(0.95, confidence + 0.1);
+        }
+      } else if (vts.signal === 'contango' && regime === 'high_volatility') {
+        // Steep contango = complacency, may reduce vol regime confidence
+        confidence *= 0.85;
+      }
+    }
+
+    // Adjust based on FRED macro data
+    const fred = enrichment?.fredMacro;
+    if (fred) {
+      // Inverted yield curve boosts bearish/crash probability
+      if (fred.yieldCurve != null && fred.yieldCurve < -0.2) {
+        if (regime === 'trending_up') {
+          confidence *= 0.85; // less confident in bull with inverted curve
+        }
+      }
+      // High credit spread boosts volatility regime
+      if (fred.creditSpread != null && fred.creditSpread > 5) {
+        if (regime === 'high_volatility') {
+          confidence = Math.min(0.95, confidence + 0.05);
+        }
+      }
+    }
+
+    // Adjust based on market breadth
+    if (realBreadth) {
+      // Very low breadth in an uptrend = divergence, reduce confidence
+      if (regime === 'trending_up' && realBreadth.above50dPct < 30) {
+        confidence *= 0.8;
+      }
+      // Very high breadth in a downtrend = divergence
+      if (regime === 'trending_down' && realBreadth.above50dPct > 70) {
+        confidence *= 0.8;
+      }
+    }
+
     const adjustments = this.getAdjustments(regime);
 
     const details: RegimeDetails = {
@@ -111,6 +174,9 @@ export class RegimeDetector {
       breadthScore,
       volatilityPctile,
       adjustments,
+      vixTermStructure: vts,
+      fredMacro: fred,
+      marketBreadth: realBreadth,
     };
 
     logger.info(

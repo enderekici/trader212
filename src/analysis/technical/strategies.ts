@@ -732,3 +732,56 @@ export function scoreMultiStrategy(
   const netScore = weightedLong - weightedShort;
   return Math.round(50 + clamp(netScore * 10, -10, 10));
 }
+
+/**
+ * Contextual wrapper around scoreMultiStrategy that adjusts for market-level signals.
+ * - Breadth divergence: dampen bullish signals when breadth is oversold (10%)
+ * - Breadth confirmation: boost bullish signals when breadth is overbought (3%)
+ * - Extreme low breadth (<20%): dampen bullish up to 15%
+ * - Pre-FOMC: compress score 15% toward neutral (50)
+ */
+export function scoreMultiStrategyWithContext(
+  candles: {
+    date: string;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    volume: number;
+  }[],
+  context?: {
+    breadthAbove50dPct?: number;
+    breadthSignal?: string;
+    fomcIsPreFOMC?: boolean;
+  },
+): number {
+  const raw = scoreMultiStrategy(candles);
+  if (!context) return raw;
+
+  let adjusted = raw;
+
+  // Breadth adjustments (only apply to bullish scores > 50)
+  if (context.breadthAbove50dPct != null) {
+    if (adjusted > 50) {
+      if (context.breadthSignal === 'oversold') {
+        // Divergence: market breadth weak but symbol bullish → dampen 10%
+        adjusted = 50 + (adjusted - 50) * 0.9;
+      } else if (context.breadthSignal === 'overbought') {
+        // Confirmation: broad market strong → boost 3%
+        adjusted = 50 + (adjusted - 50) * 1.03;
+      }
+      // Extreme low breadth: extra dampening
+      if (context.breadthAbove50dPct < 20) {
+        const dampFactor = 0.85 + (context.breadthAbove50dPct / 20) * 0.15; // 0.85-1.0
+        adjusted = 50 + (adjusted - 50) * dampFactor;
+      }
+    }
+  }
+
+  // Pre-FOMC: compress toward neutral by 15%
+  if (context.fomcIsPreFOMC) {
+    adjusted = 50 + (adjusted - 50) * 0.85;
+  }
+
+  return Math.round(Math.max(0, Math.min(100, adjusted)));
+}

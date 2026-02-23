@@ -63,6 +63,37 @@ The results include:
 -   **Sharpe Ratio:** Risk-adjusted return metric.
 -   **Expectancy:** Average dollar value per trade.
 
+## Market Context
+
+The backtest engine supports opt-in market-level context that adjusts entry scores based on broader market conditions:
+
+### Market Breadth
+When `enableMarketBreadth: true`, the engine pre-computes the percentage of symbols above their 50-day SMA for each trading date. This breadth signal is classified as:
+- **Oversold** (< 30%): Dampens bullish scores by 10% (divergence from broad market weakness)
+- **Neutral** (30-70%): No adjustment
+- **Overbought** (> 70%): Boosts bullish scores by 3% (confirmation from broad participation)
+- **Extreme low** (< 20%): Additional dampening up to 15%
+
+### FOMC Calendar
+When `enableFOMC: true`, the engine detects proximity to Federal Reserve meetings (2024-2028 calendar):
+- **Pre-FOMC window** (T-1 day): Compresses scores 15% toward neutral, boosts entry threshold by +0.05
+- **FOMC day**: Optionally blocks all entries when `fomcBlockEntries: true`
+
+### API Parameters
+```typescript
+POST /api/backtest
+{
+  // ... standard params ...
+  enableMarketBreadth: true,   // Enable breadth-based score adjustments
+  enableFOMC: true,            // Enable FOMC proximity detection
+  fomcBlockEntries: false,     // Block all entries on FOMC day
+  fomcEntryThresholdBoost: 0.05 // Threshold boost during pre-FOMC window
+}
+```
+
+### Impact
+Market context adjustments are intentionally mild (3-15% dampening). They act as a safety net during extreme conditions rather than a daily filter. On the standard top-30 dollar-volume universe (2022-2026), enabling context produces near-identical results to the baseline.
+
 ## Troubleshooting
 -   **"No data found"**: Occasional 404s for specific tickers (e.g., delisted stocks like DISH or PARA) are normal and handled gracefully.
 -   **Rate Limiting**: The script includes delays between batches to respect Yahoo Finance rate limits.

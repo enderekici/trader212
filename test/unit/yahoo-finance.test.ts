@@ -716,6 +716,7 @@ describe('YahooFinanceClient', () => {
         spyChange1d: null,
         vixLevel: null,
         marketTrend: 'neutral',
+        vixTermStructure: null,
       });
     });
   });

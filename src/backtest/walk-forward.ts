@@ -42,7 +42,7 @@ export class WalkForwardAnalyzer {
 
       const testConfig: BacktestConfig = {
         ...this.config,
-        startDate: new Date(trainEnd).toISOString().split('T')[0],
+        startDate: new Date(trainEnd + 86400000).toISOString().split('T')[0],
         endDate: new Date(windowEnd).toISOString().split('T')[0],
       };
 

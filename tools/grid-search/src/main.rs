@@ -15,6 +15,7 @@
 
 mod candlesticks;
 mod data;
+mod fomc;
 mod indicators;
 mod strategies;
 mod simulation;
@@ -61,6 +62,7 @@ struct CliArgs {
     strategy: StrategyMode,
     cache_dir: String,
     output_dir: String,
+    no_context: bool,
 }
 
 fn parse_args() -> CliArgs {
@@ -68,6 +70,7 @@ fn parse_args() -> CliArgs {
     let mut strategy = StrategyMode::Both;
     let mut cache_dir = String::from("./data/backtest_cache");
     let mut output_dir = String::from("./data/backtest_results/grid-wide-rs");
+    let mut no_context = false;
 
     let mut i = 1;
     while i < args.len() {
@@ -98,6 +101,9 @@ fn parse_args() -> CliArgs {
                     output_dir = args[i].clone();
                 }
             }
+            "--no-context" => {
+                no_context = true;
+            }
             other => {
                 eprintln!("Unknown argument: {}", other);
             }
@@ -109,6 +115,7 @@ fn parse_args() -> CliArgs {
         strategy,
         cache_dir,
         output_dir,
+        no_context,
     }
 }
 
@@ -565,6 +572,73 @@ fn make_bar(avg: f64) -> String {
     }
 }
 
+// ── Market Context Pre-computation ───────────────────────────────────────────
+
+fn precompute_market_context(
+    symbol_data: &[(String, Vec<data::Candle>)],
+    trading_dates: &[String],
+    n_symbols: usize,
+    closes: &[f64],
+    has_data: &[bool],
+) -> Vec<simulation::DayContext> {
+    let n_dates = trading_dates.len();
+    let mut contexts = Vec::with_capacity(n_dates);
+
+    for di in 0..n_dates {
+        // --- Breadth: % of symbols where close > SMA(50) ---
+        let mut above_50 = 0u32;
+        let mut total_with_data = 0u32;
+
+        for si in 0..n_symbols {
+            // Need at least 50 data points for SMA(50)
+            // Collect closes for this symbol up to and including this date
+            let mut sym_closes: Vec<f64> = Vec::new();
+            for d in 0..=di {
+                let idx = d * n_symbols + si;
+                if has_data[idx] {
+                    sym_closes.push(closes[idx]);
+                }
+            }
+            if sym_closes.len() < 50 {
+                continue;
+            }
+            total_with_data += 1;
+            // SMA(50) = average of last 50 closes
+            let sma50: f64 = sym_closes[sym_closes.len() - 50..].iter().sum::<f64>() / 50.0;
+            if *sym_closes.last().unwrap() > sma50 {
+                above_50 += 1;
+            }
+        }
+
+        let breadth_pct = if total_with_data > 0 {
+            (above_50 as f64 / total_with_data as f64) * 100.0
+        } else {
+            50.0
+        };
+
+        let breadth_signal = if breadth_pct < 20.0 {
+            simulation::BreadthSignal::Oversold
+        } else if breadth_pct > 80.0 {
+            simulation::BreadthSignal::Overbought
+        } else {
+            simulation::BreadthSignal::Neutral
+        };
+
+        // --- FOMC proximity ---
+        let fomc_prox = fomc::get_fomc_proximity(&trading_dates[di]);
+
+        contexts.push(simulation::DayContext {
+            breadth_above_50d_pct: breadth_pct,
+            breadth_signal,
+            fomc_is_pre_fomc: fomc_prox.is_pre_fomc,
+            fomc_is_fomc_day: fomc_prox.is_fomc_day,
+        });
+    }
+
+    let _ = symbol_data; // used indirectly via n_symbols
+    contexts
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 fn main() -> anyhow::Result<()> {
@@ -636,6 +710,18 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
+    // ── 3b. Pre-compute market context ─────────────────────────────────
+    let market_context = if args.no_context {
+        println!("  Market context: DISABLED (--no-context)");
+        Vec::new()
+    } else {
+        println!("  Pre-computing market context (breadth + FOMC)...");
+        let ctx_start = Instant::now();
+        let ctx = precompute_market_context(&symbol_data, &trading_dates, n_symbols, &closes, &has_data);
+        println!("  Market context computed in {:.1}s", ctx_start.elapsed().as_secs_f64());
+        ctx
+    };
+
     // ── Grid stats ───────────────────────────────────────────────────────
     let combos_per_threshold = STOP_LOSS_PCTS.len()
         * TAKE_PROFIT_PCTS.len()
@@ -663,6 +749,10 @@ fn main() -> anyhow::Result<()> {
             .join(", ")
     );
     println!("  Trailing Stop:    Always OFF");
+    println!(
+        "  Market Context:   {}",
+        if args.no_context { "DISABLED" } else { "breadth + FOMC" }
+    );
     println!(
         "  Slippage:         {:.1}%  |  Spread: {} bps  |  Commission: ${}",
         SLIPPAGE_PCT * 100.0,
@@ -804,6 +894,7 @@ fn main() -> anyhow::Result<()> {
             closes: closes.clone(),
             has_data: has_data.clone(),
             scores: score_matrix,
+            market_context: market_context.clone(),
         };
 
         // ── 4c. Run simulation grid ─────────────────────────────────────
@@ -829,6 +920,10 @@ fn main() -> anyhow::Result<()> {
                     slippage_pct: SLIPPAGE_PCT,
                     spread_bps: SPREAD_BPS,
                     commission: COMMISSION,
+                    enable_market_breadth: !args.no_context,
+                    enable_fomc: !args.no_context,
+                    fomc_block_entries: !args.no_context,
+                    fomc_entry_threshold_boost: 0.05,
                 };
                 let result = simulation::simulate(&market_data, &config);
 

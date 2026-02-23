@@ -68,6 +68,7 @@ Autonomous AI trading bot for Trading212. ESM TypeScript, Node.js 24+.
     - `stocktwits.ts` - StockTwitsClient: fetches StockTwits symbol stream data directly
     - `finra.ts` - FinraClient: fetches FINRA short interest/volume data from cdn.finra.org
     - `price-streamer.ts` - Real-time price streaming via WebSocket
+    - `fred.ts` - FRED (Federal Reserve Economic Data) client
     - `ticker-mapper.ts` - Symbol <-> Trading212 ticker mapping
   - `src/ai/` - AI decision engine
     - `agent.ts` - AI orchestrator, AIAgent interface, createAIAgent() factory
@@ -101,7 +102,7 @@ Autonomous AI trading bot for Trading212. ESM TypeScript, Node.js 24+.
   - `src/analysis/` - Analysis engines
     - `analyzer.ts` - Main analysis orchestrator
     - `technical/indicators.ts` - 25+ technical indicators computation
-    - `technical/strategies.ts` - 4 modular strategy scorers for backtesting: scoreMeanReversion(), scoreTrendFollowing(), scoreMomentum(), scoreBreakout() — each returns { strategy, direction, strength, confidence, reasons }. Used by both TS backtest engine and Rust grid search
+    - `technical/strategies.ts` - 4 modular strategy scorers for backtesting: scoreMeanReversion(), scoreTrendFollowing(), scoreMomentum(), scoreBreakout() — each returns { strategy, direction, strength, confidence, reasons }. Used by both TS backtest engine and Rust grid search, scoreMultiStrategyWithContext() — context-aware scorer applying market breadth and FOMC adjustments
     - `technical/scorer.ts` - analyzeTechnicals(), scoreTechnicals()
     - `fundamental/scorer.ts` - scoreFundamentals()
     - `sentiment/scorer.ts` - scoreSentiment()
@@ -110,6 +111,8 @@ Autonomous AI trading bot for Trading212. ESM TypeScript, Node.js 24+.
     - `regime-detector.ts` - Market regime detection (bull/bear/sideways/volatile)
     - `monte-carlo.ts` - Monte Carlo simulation for portfolio risk scenarios
     - `portfolio-optimizer.ts` - Portfolio optimization (min-variance/max-Sharpe)
+    - `market-breadth.ts` - Market breadth calculation (% symbols above SMA50/SMA200)
+    - `sector-rotation.ts` - Sector rotation analysis
   - `src/monitoring/` - Monitoring and notifications
     - `telegram.ts` - TelegramNotifier: sendMessage(), sendAlert(), sendTradeNotification(), registerCommands()
     - `performance.ts` - PerformanceTracker: generateDailySummary(), generateWeeklySummary(), saveDailyMetrics(), getMetrics()
@@ -130,10 +133,10 @@ Autonomous AI trading bot for Trading212. ESM TypeScript, Node.js 24+.
     - `trading212/types.ts` - Trading212 type definitions
     - `trading212/errors.ts` - Trading212 error handling
   - `src/backtest/` - Backtesting engine
-    - `engine.ts` - Backtesting engine: runs strategies on historical data (with slippage/spread modeling)
+    - `engine.ts` - Backtesting engine: runs strategies on historical data (with slippage/spread modeling, market context precomputation for breadth and FOMC)
     - `data-loader.ts` - Historical data loader for backtests (supports cacheOnly mode for offline backtests, endDateMs for date range filtering)
     - `reporter.ts` - Backtest result reporting, visualization, and profitability gates (6 acceptance criteria: WF OOS CAGR>0%, profit factor>=1.4, Sharpe>=1.0, max DD<=18%, Monte Carlo P25>0, win rate>=45%)
-    - `types.ts` - Backtest-specific type definitions
+    - `types.ts` - Backtest-specific type definitions (including MarketContext interface)
     - `walk-forward.ts` - Walk-forward analysis: rolling train/test windows for out-of-sample validation
   - `src/utils/` - Utilities
     - `logger.ts` - Pino logger factory: createLogger('module-name')
@@ -143,6 +146,7 @@ Autonomous AI trading bot for Trading212. ESM TypeScript, Node.js 24+.
     - `key-rotator.ts` - KeyRotator class, createFinnhubRotator(), createMarketauxRotator()
     - `circuit-breaker.ts` - Circuit breaker pattern for external API calls
     - `error-handlers.ts` - Global error handlers for uncaught exceptions and unhandled rejections
+    - `fomc-calendar.ts` - FOMC meeting calendar and proximity detection (2024-2028)
   - `src/bot/` - Scheduler
     - `scheduler.ts` - Scheduler class, minutesToWeekdayCron(), timeToCron()
 - `web/` - Next.js 15 dashboard (App Router, Tailwind CSS v4, lucide-react icons)
@@ -177,12 +181,13 @@ Autonomous AI trading bot for Trading212. ESM TypeScript, Node.js 24+.
 - `test/` - Vitest tests (94 test files, 3153 tests total)
 - `tools/` - Performance-critical tooling
   - `tools/grid-search/` - Rust parallel grid search over backtest parameters (101,376 combos in ~9s)
-    - `src/main.rs` - CLI, orchestration, CSV I/O, analysis tables
+    - `src/main.rs` - CLI, orchestration, CSV I/O, analysis tables, `--no-context` flag for A/B comparison
     - `src/data.rs` - JSON data loader, common date intersection
     - `src/indicators.rs` - 28 technical indicators (pure Rust, no dependencies)
     - `src/candlesticks.rs` - 19 candlestick pattern detections
     - `src/strategies.rs` - Multi-Strategy (4 strategies, 38 sub-signals) and Legacy scorer
-    - `src/simulation.rs` - Portfolio simulation engine (SoA position tracking)
+    - `src/simulation.rs` - Portfolio simulation engine (SoA position tracking, market context adjustments)
+    - `src/fomc.rs` - FOMC meeting calendar (Rust port, 2024-2028 dates)
 
 ## Key Conventions
 - ESM modules with .js import extensions in source files
@@ -220,7 +225,8 @@ Key flows:
 - **Tax-Loss Harvesting**: automatically identifies candidates for tax-loss harvesting; tracks wash sales; supports FIFO/LIFO/HIFO
 - **Trade Journal**: records notes, tags, mood, and lessons for each trade; generates insights on common mistakes and patterns
 - **Backtesting**: full backtesting engine with historical data loader (cacheOnly offline mode), reporting with 6 profitability gates, transaction cost modeling (slippage/spread), and walk-forward out-of-sample validation
-- **Grid Search** (Rust): High-performance parallel grid search at `tools/grid-search/`. Pre-computes score matrices once per strategy, then runs 50,688 parameter combos per strategy in parallel via rayon. Multi-Strategy uses 4 regime-weighted strategies with 38 sub-signals (mean-reversion: RSI, Bollinger, Z-score, Stochastic, Williams %R, Keltner, CMF, candlesticks, VWAP; trend-following: EMA alignment, ADX, ROC, EMA200, volume, Ichimoku, Supertrend, TRIX, market structure; momentum: ROC dual, RSI zones, volume, OBV, MFI, AO, Force Index, Elder Ray, ADL; breakout: Donchian, volume surge, ATR expansion, ADX, BB bandwidth, squeeze, S/R breaks, Ichimoku cloud, Keltner expansion). Best config (Sharpe 1.69): entry 0.3, SL 12%, TP 20%, 10 positions, 25% size
+- **Market Context**: market context integration: opt-in market breadth (% above SMA50) and FOMC calendar (proximity detection, entry blocking) applied as score adjustments during signal generation
+- **Grid Search** (Rust): High-performance parallel grid search at `tools/grid-search/`. Pre-computes score matrices once per strategy, then runs 50,688 parameter combos per strategy in parallel via rayon. Multi-Strategy uses 4 regime-weighted strategies with 38 sub-signals (mean-reversion: RSI, Bollinger, Z-score, Stochastic, Williams %R, Keltner, CMF, candlesticks, VWAP; trend-following: EMA alignment, ADX, ROC, EMA200, volume, Ichimoku, Supertrend, TRIX, market structure; momentum: ROC dual, RSI zones, volume, OBV, MFI, AO, Force Index, Elder Ray, ADL; breakout: Donchian, volume surge, ATR expansion, ADX, BB bandwidth, squeeze, S/R breaks, Ichimoku cloud, Keltner expansion). Best config (Sharpe 1.69): entry 0.3, SL 12%, TP 20%, 10 positions, 25% size. Supports market context (breadth + FOMC) with --no-context flag for A/B comparison
 - **Webhooks**: send trade notifications and alerts to Discord, Slack, or custom endpoints
 - **Market Regime Detection**: identifies bull/bear/sideways market regimes and adjusts strategy parameters accordingly
 - **Performance Attribution**: breaks down returns by alpha, beta, sector contributions, and factor exposures
@@ -349,7 +355,7 @@ Market research uses the same provider via `src/ai/market-research.ts` (except `
 - GET `/api/correlation` - Portfolio correlation matrix
 
 ### Backtesting
-- POST `/api/backtest` - Run a backtest (body: { strategy, startDate, endDate, symbols, capital, slippagePct?, spreadBps?, walkForward?: { windows, trainRatio } })
+- POST `/api/backtest` - Run a backtest (body: { strategy, startDate, endDate, symbols, capital, slippagePct?, spreadBps?, walkForward?: { windows, trainRatio }, enableMarketBreadth?, enableFOMC?, fomcBlockEntries?, fomcEntryThresholdBoost? })
 
 ### Strategy Profiles
 - GET `/strategy-profiles` - List strategy profiles

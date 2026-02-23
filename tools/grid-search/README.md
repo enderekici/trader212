@@ -39,6 +39,7 @@ Binary is at `./target/release/grid-search`.
 ./tools/grid-search/target/release/grid-search --strategy both     # Both (default)
 ./tools/grid-search/target/release/grid-search --cache-dir ./data/backtest_cache
 ./tools/grid-search/target/release/grid-search --output-dir ./data/backtest_results/grid-wide-rs
+./tools/grid-search/target/release/grid-search --no-context          # Disable market context for A/B
 ```
 
 ### Defaults
@@ -48,6 +49,7 @@ Binary is at `./target/release/grid-search`.
 | `--strategy` | `both` |
 | `--cache-dir` | `./data/backtest_cache` |
 | `--output-dir` | `./data/backtest_results/grid-wide-rs` |
+| `--no-context` | `false` (context enabled) |
 
 ## Grid Dimensions
 
@@ -111,6 +113,7 @@ indicators.rs   — 28 technical indicators (pure Rust, no dependencies)
 candlesticks.rs — 19 candlestick pattern detections
 strategies.rs   — Multi-Strategy (4 strategies, 38 sub-signals) and Legacy scorers
 simulation.rs   — Portfolio simulation engine (SoA position tracking)
+fomc.rs         — FOMC meeting calendar (2024-2028 dates, proximity detection)
 ```
 
 ### Flow
@@ -132,6 +135,7 @@ simulation.rs   — Portfolio simulation engine (SoA position tracking)
 - Commission ($1) per trade
 - Sharpe/Sortino annualized (RF = 5%, 252 trading days)
 - Max drawdown from daily equity curve
+- Market context: breadth-based score adjustment and FOMC proximity detection (opt-in)
 
 ## Tests
 
@@ -139,4 +143,4 @@ simulation.rs   — Portfolio simulation engine (SoA position tracking)
 cargo test
 ```
 
-66 unit tests covering all indicators, candlestick patterns, and edge cases.
+70 unit tests covering all indicators, candlestick patterns, FOMC calendar, and edge cases.

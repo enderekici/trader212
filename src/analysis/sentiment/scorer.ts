@@ -10,6 +10,7 @@ export interface SentimentInput {
   marketauxNews: MarketauxArticle[];
   insiderTransactions: InsiderTx[];
   earnings: EarningsEvent[];
+  finraShortVolumePct?: number | null; // FINRA short volume % (0-100)
 }
 
 export interface ArticleSentiment {
@@ -218,9 +219,26 @@ export function analyzeSentiment(input: SentimentInput): SentimentAnalysis {
     }
   }
 
-  // Combined score: configurable news/insider split (default 70/30)
+  // FINRA short volume scoring
+  let finraScore = 50; // neutral default
+  const shortPct = input.finraShortVolumePct;
+  if (shortPct != null && shortPct > 0) {
+    if (shortPct > 50) {
+      // Very high short volume — bearish pressure
+      finraScore = 35;
+    } else if (shortPct > 40 && newsScore > 55) {
+      // High short % + bullish news = potential short squeeze
+      finraScore = 70;
+    } else if (shortPct > 40) {
+      // High short % alone is mildly bearish
+      finraScore = 40;
+    }
+  }
+
+  // Combined score: configurable news/insider/finra split
   let newsWeight = 0.7;
   let insiderWeight = 0.3;
+  let finraWeight = 0;
   try {
     newsWeight = configManager.get<number>('scoring.sentiment.newsWeight');
   } catch {
@@ -231,7 +249,22 @@ export function analyzeSentiment(input: SentimentInput): SentimentAnalysis {
   } catch {
     /* use defaults */
   }
-  const combinedScore = Math.round(newsScore * newsWeight + insiderScore * insiderWeight);
+  try {
+    finraWeight = configManager.get<number>('scoring.sentiment.finraWeight');
+  } catch {
+    /* use defaults */
+  }
+
+  // If FINRA data is present and has a weight, rebalance the weights
+  let combinedScore: number;
+  if (shortPct != null && finraWeight > 0) {
+    const total = newsWeight + insiderWeight + finraWeight;
+    combinedScore = Math.round(
+      (newsScore * newsWeight + insiderScore * insiderWeight + finraScore * finraWeight) / total,
+    );
+  } else {
+    combinedScore = Math.round(newsScore * newsWeight + insiderScore * insiderWeight);
+  }
   const score = Math.max(0, Math.min(100, combinedScore));
 
   log.debug(

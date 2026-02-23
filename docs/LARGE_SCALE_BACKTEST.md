@@ -65,3 +65,24 @@ The default configuration (`src/config/defaults.ts`) has been updated with these
 ## Future Work
 - **Sector-Specific Tuning:** Future optimization could explore different parameters for high-beta sectors (Tech, Crypto) vs. low-beta sectors (Utilities, Staples).
 - **Dynamic Stops:** While ATR-based stops were not superior in this specific grid, a hybrid approach (Fixed min + ATR buffer) could be explored.
+
+## Market Context Integration (2026-02-23)
+
+The Rust grid search now supports market-level context during simulation:
+
+### Features
+- **Market Breadth**: Pre-computes SMA(50) for all symbols per trading date, calculates % above threshold
+- **FOMC Calendar**: Static FOMC meeting dates 2024-2028 with proximity detection
+- **Score Adjustments**: Applied during simulation (not score pre-computation) to preserve the "compute once, simulate 50K times" architecture
+
+### Usage
+```bash
+# Default: context enabled
+./tools/grid-search/target/release/grid-search --strategy multi
+
+# Disable context for A/B comparison
+./tools/grid-search/target/release/grid-search --strategy multi --no-context
+```
+
+### Architecture
+Context is pre-computed once per date in `precompute_market_context()`, stored as `Vec<DayContext>` in `MarketData`, and applied via `apply_context_adjustment()` during each simulation iteration.

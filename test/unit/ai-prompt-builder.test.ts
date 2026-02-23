@@ -752,6 +752,7 @@ describe('buildAnalysisPrompt', () => {
         spyChange1d: 0,
         vixLevel: 15.25,
         marketTrend: 'neutral',
+        vixTermStructure: null,
       };
 
       const result = buildResearchDataPrompt(data, marketCtx);
@@ -1184,6 +1185,7 @@ describe('buildResearchDataPrompt', () => {
         spyChange1d: 0.5,
         vixLevel: 15.25,
         marketTrend: 'bullish',
+        vixTermStructure: null,
       };
 
       const result = buildResearchDataPrompt(data, marketCtx);

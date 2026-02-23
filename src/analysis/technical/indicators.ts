@@ -394,6 +394,281 @@ export function calcPerfMetrics(candles: OHLCVCandle[]): {
   return { perfWeek, perfMonth, perfQuarter, perfYear, relativeVolume };
 }
 
+// ─── Keltner Channels ───────────────────────────────────────
+
+export interface KeltnerResult {
+  upper: number;
+  middle: number;
+  lower: number;
+}
+
+export function calcKeltnerChannels(
+  highs: number[],
+  lows: number[],
+  closes: number[],
+  period = 20,
+  atrPeriod = 14,
+  multiplier = 2.0,
+): KeltnerResult | null {
+  const middle = calcEMA(closes, period);
+  const atr = calcATR(highs, lows, closes, atrPeriod);
+  if (middle == null || atr == null) return null;
+  return {
+    upper: middle + multiplier * atr,
+    middle,
+    lower: middle - multiplier * atr,
+  };
+}
+
+// ─── Chaikin Money Flow ─────────────────────────────────────
+
+export function calcCMF(
+  highs: number[],
+  lows: number[],
+  closes: number[],
+  volumes: number[],
+  period = 20,
+): number | null {
+  if (closes.length < period) return null;
+
+  let mfvSum = 0;
+  let volSum = 0;
+  for (let i = closes.length - period; i < closes.length; i++) {
+    const hl = highs[i] - lows[i];
+    const mfm = hl > 0 ? (closes[i] - lows[i] - (highs[i] - closes[i])) / hl : 0;
+    mfvSum += mfm * volumes[i];
+    volSum += volumes[i];
+  }
+  return volSum > 0 ? mfvSum / volSum : 0;
+}
+
+// ─── Supertrend ─────────────────────────────────────────────
+
+export interface SupertrendResult {
+  line: number;
+  direction: 1 | -1; // 1 = bullish (price above), -1 = bearish
+}
+
+export function calcSupertrend(
+  highs: number[],
+  lows: number[],
+  closes: number[],
+  period = 10,
+  multiplier = 3.0,
+): SupertrendResult | null {
+  const atr = calcATR(highs, lows, closes, period);
+  if (atr == null || closes.length < period + 1) return null;
+
+  // Compute over the last few bars to determine direction
+  const len = closes.length;
+  let upperBand = (highs[len - 1] + lows[len - 1]) / 2 + multiplier * atr;
+  let lowerBand = (highs[len - 1] + lows[len - 1]) / 2 - multiplier * atr;
+  let direction: 1 | -1 = closes[len - 1] > upperBand ? 1 : -1;
+
+  // Walk back a few bars to stabilize direction
+  const lookback = Math.min(20, len - period);
+  for (let i = len - lookback; i < len; i++) {
+    const mid = (highs[i] + lows[i]) / 2;
+    const ub = mid + multiplier * atr;
+    const lb = mid - multiplier * atr;
+
+    if (direction === 1) {
+      lowerBand = Math.max(lowerBand, lb);
+      if (closes[i] < lowerBand) {
+        direction = -1;
+        upperBand = ub;
+      }
+    } else {
+      upperBand = Math.min(upperBand, ub);
+      if (closes[i] > upperBand) {
+        direction = 1;
+        lowerBand = lb;
+      }
+    }
+  }
+
+  return {
+    line: direction === 1 ? lowerBand : upperBand,
+    direction,
+  };
+}
+
+// ─── TRIX ───────────────────────────────────────────────────
+
+export interface TRIXResult {
+  value: number;
+  prev: number;
+}
+
+export function calcTRIX(closes: number[], period = 14): TRIXResult | null {
+  // TRIX = 1-period % change of triple-smoothed EMA
+  // Need enough data for 3 rounds of EMA + 1 extra value
+  if (closes.length < period * 3 + 1) return null;
+
+  // First EMA
+  const ema1 = EMA.calculate({ values: closes, period });
+  if (ema1.length < period + 1) return null;
+
+  // Second EMA
+  const ema2 = EMA.calculate({ values: ema1, period });
+  if (ema2.length < 2) return null;
+
+  // Third EMA
+  const ema3 = EMA.calculate({ values: ema2, period });
+  if (ema3.length < 2) return null;
+
+  const curr = ema3[ema3.length - 1];
+  const prev = ema3[ema3.length - 2];
+  if (prev === 0) return null;
+
+  return {
+    value: ((curr - prev) / prev) * 100,
+    prev: ema3.length >= 3 ? ((prev - ema3[ema3.length - 3]) / ema3[ema3.length - 3]) * 100 : 0,
+  };
+}
+
+// ─── Elder Ray ──────────────────────────────────────────────
+
+export interface ElderRayResult {
+  bullPower: number;
+  bearPower: number;
+  prevBull: number;
+  prevBear: number;
+}
+
+export function calcElderRay(
+  highs: number[],
+  lows: number[],
+  closes: number[],
+  period = 13,
+): ElderRayResult | null {
+  if (closes.length < period + 1) return null;
+
+  const emaValues = EMA.calculate({ values: closes, period });
+  if (emaValues.length < 2) return null;
+
+  const emaLast = emaValues[emaValues.length - 1];
+  const emaPrev = emaValues[emaValues.length - 2];
+
+  // Align EMA indices with OHLC
+  const offset = closes.length - emaValues.length;
+  const lastIdx = closes.length - 1;
+  const prevIdx = lastIdx - 1;
+
+  return {
+    bullPower: highs[lastIdx] - emaLast,
+    bearPower: lows[lastIdx] - emaLast,
+    prevBull: prevIdx >= offset ? highs[prevIdx] - emaPrev : 0,
+    prevBear: prevIdx >= offset ? lows[prevIdx] - emaPrev : 0,
+  };
+}
+
+// ─── Market Structure ───────────────────────────────────────
+
+/**
+ * Market structure score based on higher-highs/higher-lows vs lower-highs/lower-lows.
+ * Returns a value in [-1, 1]: positive = uptrend structure, negative = downtrend.
+ */
+export function calcMarketStructure(highs: number[], lows: number[], period = 20): number | null {
+  if (highs.length < period) return null;
+
+  const recentH = highs.slice(-period);
+  const recentL = lows.slice(-period);
+
+  let hhCount = 0;
+  let llCount = 0;
+  let lhCount = 0;
+  let hlCount = 0;
+
+  for (let i = 1; i < period; i++) {
+    if (recentH[i] > recentH[i - 1]) hhCount++;
+    else if (recentH[i] < recentH[i - 1]) lhCount++;
+
+    if (recentL[i] > recentL[i - 1]) hlCount++;
+    else if (recentL[i] < recentL[i - 1]) llCount++;
+  }
+
+  const total = period - 1;
+  if (total === 0) return 0;
+
+  const bullish = (hhCount + hlCount) / total;
+  const bearish = (lhCount + llCount) / total;
+
+  return Math.max(-1, Math.min(1, bullish - bearish));
+}
+
+// ─── Squeeze Detection ──────────────────────────────────────
+
+export interface SqueezeResult {
+  squeezing: boolean;
+  justReleased: boolean;
+}
+
+/**
+ * Detects Bollinger Band squeeze (BB inside KC) and release.
+ * Squeezing = BB bands are inside Keltner Channels.
+ * Just released = was squeezing on prior bar, not squeezing now.
+ */
+export function calcSqueezeDetect(
+  highs: number[],
+  lows: number[],
+  closes: number[],
+  bbPeriod = 20,
+  bbMult = 2,
+  kcPeriod = 20,
+  kcAtrPeriod = 14,
+  kcMult = 1.5,
+): SqueezeResult | null {
+  if (closes.length < Math.max(bbPeriod, kcPeriod, kcAtrPeriod) + 2) return null;
+
+  // Current bar
+  const bb = calcBollingerBands(closes, bbPeriod, bbMult);
+  const kc = calcKeltnerChannels(highs, lows, closes, kcPeriod, kcAtrPeriod, kcMult);
+  if (!bb || !kc) return null;
+
+  const currentSqueeze = bb.lower > kc.lower && bb.upper < kc.upper;
+
+  // Previous bar
+  const prevCloses = closes.slice(0, -1);
+  const prevHighs = highs.slice(0, -1);
+  const prevLows = lows.slice(0, -1);
+  const prevBB = calcBollingerBands(prevCloses, bbPeriod, bbMult);
+  const prevKC = calcKeltnerChannels(
+    prevHighs,
+    prevLows,
+    prevCloses,
+    kcPeriod,
+    kcAtrPeriod,
+    kcMult,
+  );
+
+  let prevSqueeze = false;
+  if (prevBB && prevKC) {
+    prevSqueeze = prevBB.lower > prevKC.lower && prevBB.upper < prevKC.upper;
+  }
+
+  return {
+    squeezing: currentSqueeze,
+    justReleased: prevSqueeze && !currentSqueeze,
+  };
+}
+
+// ─── ADL Series ─────────────────────────────────────────────
+
+/**
+ * Returns the full Accumulation/Distribution Line series.
+ * Used for computing ADL vs its SMA for trend divergence.
+ */
+export function calcADLSeries(
+  highs: number[],
+  lows: number[],
+  closes: number[],
+  volumes: number[],
+): number[] {
+  const result = ADL.calculate({ high: highs, low: lows, close: closes, volume: volumes });
+  return result;
+}
+
 // ─── Compute All Indicators ───────────────────────────────
 
 export interface IndicatorSet {

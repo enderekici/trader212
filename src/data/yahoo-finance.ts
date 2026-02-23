@@ -43,11 +43,17 @@ export interface FundamentalData {
   analystSell: number | null;
 }
 
+export interface VixTermStructure {
+  ratio: number; // VIX / VIX3M — >1.0 = backwardation (stress), <0.8 = steep contango
+  signal: 'backwardation' | 'normal' | 'contango';
+}
+
 export interface MarketContext {
   spyPrice: number | null;
   spyChange1d: number | null;
   vixLevel: number | null;
   marketTrend: 'bullish' | 'bearish' | 'neutral';
+  vixTermStructure: VixTermStructure | null;
 }
 
 export interface QuoteData {
@@ -243,10 +249,15 @@ export class YahooFinanceClient {
       spyChange1d: null,
       vixLevel: null,
       marketTrend: 'neutral',
+      vixTermStructure: null,
     };
 
     try {
-      const [spyResult, vixResult] = await Promise.allSettled([yf.quote('SPY'), yf.quote('^VIX')]);
+      const [spyResult, vixResult, vix3mResult] = await Promise.allSettled([
+        yf.quote('SPY'),
+        yf.quote('^VIX'),
+        yf.quote('^VIX3M'),
+      ]);
 
       if (spyResult.status === 'fulfilled' && spyResult.value) {
         const spy = spyResult.value;
@@ -256,6 +267,18 @@ export class YahooFinanceClient {
 
       if (vixResult.status === 'fulfilled' && vixResult.value) {
         ctx.vixLevel = vixResult.value.regularMarketPrice ?? null;
+      }
+
+      // VIX term structure: VIX / VIX3M ratio
+      if (ctx.vixLevel != null && vix3mResult.status === 'fulfilled' && vix3mResult.value) {
+        const vix3m = vix3mResult.value.regularMarketPrice;
+        if (vix3m != null && vix3m > 0) {
+          const ratio = ctx.vixLevel / vix3m;
+          let signal: VixTermStructure['signal'] = 'normal';
+          if (ratio > 1.0) signal = 'backwardation';
+          else if (ratio < 0.8) signal = 'contango';
+          ctx.vixTermStructure = { ratio, signal };
+        }
       }
 
       if (ctx.spyChange1d !== null && ctx.vixLevel !== null) {

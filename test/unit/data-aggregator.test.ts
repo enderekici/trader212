@@ -42,6 +42,7 @@ function createMockYahoo(): {
       spyChange1d: null,
       vixLevel: null,
       marketTrend: 'neutral' as const,
+      vixTermStructure: null,
     }),
     getQuote: vi.fn().mockResolvedValue(null),
   };
@@ -237,6 +238,7 @@ describe('DataAggregator', () => {
         spyChange1d: null,
         vixLevel: null,
         marketTrend: 'neutral',
+        vixTermStructure: null,
       });
     });
 

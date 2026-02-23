@@ -1,3 +1,4 @@
+import { computeMarketBreadth } from '../analysis/market-breadth.js';
 import { calcATR } from '../analysis/technical/indicators.js';
 import type { OHLCVCandle } from '../data/yahoo-finance.js';
 import { getRoiThreshold } from '../execution/roi-table.js';
@@ -9,6 +10,7 @@ import {
   computeSortino,
   computeSQN,
 } from '../monitoring/performance.js';
+import { getFOMCProximity } from '../utils/fomc-calendar.js';
 import { round } from '../utils/helpers.js';
 import { createLogger } from '../utils/logger.js';
 import { BacktestDataLoader } from './data-loader.js';
@@ -20,6 +22,7 @@ import type {
   BacktestTrade,
   Candle,
   EntrySignal,
+  MarketContext,
 } from './types.js';
 
 const log = createLogger('backtest-engine');
@@ -33,9 +36,11 @@ const TRADING_DAYS_PER_YEAR = 252;
  */
 export type ScoreFn = (candles: OHLCVCandle[]) => number;
 
+export type ContextualScoreFn = (candles: OHLCVCandle[], context?: MarketContext) => number;
+
 export interface BacktestEngineOptions {
   config: BacktestConfig;
-  scoreFn?: ScoreFn;
+  scoreFn?: ContextualScoreFn;
   dataLoader?: BacktestDataLoader;
 }
 
@@ -45,8 +50,9 @@ export class BacktestEngine {
   private positions: Map<string, BacktestPosition>;
   private trades: BacktestTrade[];
   private equityCurve: { date: string; equity: number }[];
-  private scoreFn: ScoreFn;
+  private scoreFn: ContextualScoreFn;
   private dataLoader: BacktestDataLoader;
+  private marketContextMap: Map<string, MarketContext>;
 
   constructor(options: BacktestEngineOptions) {
     this.config = options.config;
@@ -55,6 +61,7 @@ export class BacktestEngine {
     this.trades = [];
     this.equityCurve = [];
     this.dataLoader = options.dataLoader ?? new BacktestDataLoader();
+    this.marketContextMap = new Map();
 
     // Default scoreFn: lazy-load the real scorer to avoid circular dependency issues
     this.scoreFn =
@@ -97,6 +104,9 @@ export class BacktestEngine {
       log.warn('No common trading dates found');
       return this.buildResult();
     }
+
+    // Pre-compute market context if enabled
+    this.marketContextMap = this.precomputeMarketContext(allData, tradingDates);
 
     log.info(
       { tradingDays: tradingDates.length, symbols: allData.size },
@@ -164,6 +174,65 @@ export class BacktestEngine {
     );
 
     return this.buildResult();
+  }
+
+  private precomputeMarketContext(
+    allData: Map<string, Candle[]>,
+    tradingDates: string[],
+  ): Map<string, MarketContext> {
+    const contextMap = new Map<string, MarketContext>();
+    const { config } = this;
+    const needsBreadth = config.enableMarketBreadth === true;
+    const needsFomc = config.enableFOMC === true;
+    if (!needsBreadth && !needsFomc) return contextMap;
+
+    for (const date of tradingDates) {
+      let breadthAbove50dPct = 50;
+      let breadthAbove200dPct = 50;
+      let breadthSignal: MarketContext['breadthSignal'] = 'neutral';
+
+      if (needsBreadth) {
+        // Build per-symbol candles up to this date
+        const symbolCandles = new Map<string, { close: number }[]>();
+        for (const [symbol, candles] of allData) {
+          const upTo = candles.filter((c) => c.date <= date);
+          if (upTo.length >= 50) {
+            symbolCandles.set(
+              symbol,
+              upTo.map((c) => ({ close: c.close })),
+            );
+          }
+        }
+        const breadth = computeMarketBreadth(symbolCandles);
+        breadthAbove50dPct = breadth.above50dPct;
+        breadthAbove200dPct = breadth.above200dPct;
+        breadthSignal = breadth.signal;
+      }
+
+      let fomcDaysToNext = 999;
+      let fomcIsPreFOMC = false;
+      let fomcIsFOMCDay = false;
+
+      if (needsFomc) {
+        // Parse YYYY-MM-DD to Date
+        const [y, m, d] = date.split('-').map(Number);
+        const fomc = getFOMCProximity(new Date(y, m - 1, d));
+        fomcDaysToNext = fomc.daysToNext;
+        fomcIsPreFOMC = fomc.isPreFOMC;
+        fomcIsFOMCDay = fomc.isFOMCDay;
+      }
+
+      contextMap.set(date, {
+        breadthAbove50dPct,
+        breadthAbove200dPct,
+        breadthSignal,
+        fomcDaysToNext,
+        fomcIsPreFOMC,
+        fomcIsFOMCDay,
+      });
+    }
+
+    return contextMap;
   }
 
   private buildDateIndex(allData: Map<string, Candle[]>): Map<string, Map<string, Candle>> {
@@ -265,6 +334,17 @@ export class BacktestEngine {
 
   private generateSignals(date: string, allData: Map<string, Candle[]>): EntrySignal[] {
     const signals: EntrySignal[] = [];
+    const context = this.marketContextMap.get(date);
+
+    // Block entries on FOMC day if configured
+    if (context?.fomcIsFOMCDay && this.config.fomcBlockEntries) {
+      return signals;
+    }
+
+    let effectiveThreshold = this.config.entryThreshold;
+    if (context?.fomcIsPreFOMC && this.config.enableFOMC) {
+      effectiveThreshold += this.config.fomcEntryThresholdBoost ?? 0.05;
+    }
 
     for (const [symbol, candles] of allData) {
       // Skip if already in a position
@@ -284,12 +364,12 @@ export class BacktestEngine {
         volume: c.volume,
       }));
 
-      const score = this.scoreFn(ohlcvCandles);
+      const score = this.scoreFn(ohlcvCandles, context);
 
       // Normalize score to 0-1 range (scorer returns 0-100)
       const normalizedScore = score / 100;
 
-      if (normalizedScore >= this.config.entryThreshold) {
+      if (normalizedScore >= effectiveThreshold) {
         const lastCandle = candlesUpToDate[candlesUpToDate.length - 1];
         let atr: number | undefined;
         if (this.config.atrPositionSizing) {
@@ -627,10 +707,10 @@ export async function createBacktestEngine(
   dataLoader?: BacktestDataLoader,
   strategy: 'legacy' | 'multi' = 'legacy',
 ): Promise<BacktestEngine> {
-  let scoreFn: ScoreFn;
+  let scoreFn: ContextualScoreFn;
   if (strategy === 'multi') {
-    const { scoreMultiStrategy } = await import('../analysis/technical/strategies.js');
-    scoreFn = scoreMultiStrategy;
+    const { scoreMultiStrategyWithContext } = await import('../analysis/technical/strategies.js');
+    scoreFn = scoreMultiStrategyWithContext;
   } else {
     const { scoreTechnicals } = await import('../analysis/technical/scorer.js');
     scoreFn = scoreTechnicals;

@@ -137,7 +137,7 @@ function makeStockData(overrides: Partial<StockData> = {}): StockData {
     marketauxNews: [],
     earnings: [],
     insiderTransactions: [],
-    marketContext: { spyPrice: 500, spyChange1d: 0.3, vixLevel: 15, marketTrend: 'neutral' },
+    marketContext: { spyPrice: 500, spyChange1d: 0.3, vixLevel: 15, marketTrend: 'neutral', vixTermStructure: null },
     ...overrides,
   };
 }

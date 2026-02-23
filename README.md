@@ -59,6 +59,7 @@ An autonomous, AI-powered stock trading bot for the [Trading212](https://www.tra
 - **Market Regime Detection** -- Identify bull/bear/sideways markets and adapt strategy parameters
 - **Social Sentiment** -- Aggregate sentiment from Reddit, Twitter, StockTwits
 - **Web Research** -- Finviz/StockAnalysis scraping via Steer headless browser
+- **Market Context** -- Opt-in market breadth (% above SMA50) and FOMC calendar adjustments for backtest score dampening
 - **AI Self-Improvement** -- AI analyzes past decisions, identifies patterns, generates insights
 
 ### Tax & Record Keeping

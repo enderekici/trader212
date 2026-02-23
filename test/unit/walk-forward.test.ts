@@ -125,8 +125,10 @@ describe('WalkForwardAnalyzer', () => {
       const testStart = new Date(w.testStart).getTime();
       const testEnd = new Date(w.testEnd).getTime();
 
-      // trainEnd should equal testStart (contiguous)
-      expect(trainEnd).toBe(testStart);
+      // Test start should be 1 day after train end (no data leakage)
+      const gapMs = testStart - trainEnd;
+      const gapDays = gapMs / 86400000;
+      expect(gapDays).toBeCloseTo(1, 0);
 
       // Verify train duration is ~70% and test is ~30% of window
       const windowDuration = testEnd - trainStart;
@@ -141,7 +143,10 @@ describe('WalkForwardAnalyzer', () => {
     expect(firstTrainCall.startDate).toBe(config.startDate);
     // Window 0 test call
     const firstTestCall = mockedCreateEngine.mock.calls[1][0];
-    expect(firstTestCall.startDate).toBe(firstTrainCall.endDate);
+    const trainEndDate = new Date(firstTrainCall.endDate);
+    const testStartDate = new Date(firstTestCall.startDate);
+    const diff = testStartDate.getTime() - trainEndDate.getTime();
+    expect(diff).toBe(86400000); // 1 day gap
   });
 
   it('aggregates out-of-sample metrics correctly', async () => {
