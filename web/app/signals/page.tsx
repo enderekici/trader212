@@ -188,10 +188,7 @@ function SignalCard({ signal, minConviction }: { signal: Signal; minConviction: 
 
           {/* Reasoning */}
           {signal.reasoning && (
-            <div className="rounded-md bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-              <span className="font-medium text-foreground">Reasoning: </span>
-              {signal.reasoning}
-            </div>
+            <ReasoningBreakdown reasoning={signal.reasoning} />
           )}
 
           {/* Suggestions */}
@@ -282,6 +279,211 @@ function Indicator({
       <span className="text-muted-foreground">{label}: </span>
       <span className="font-medium text-foreground">
         {value != null ? value.toFixed(decimals) : 'N/A'}
+      </span>
+    </div>
+  );
+}
+
+// ── Reasoning parser & renderer ─────────────────────────────────────
+
+interface ParsedReasoning {
+  decision: string;
+  regime: string;
+  conviction: string;
+  riskMult: string;
+  fund: { combined: string; quality: string; value: string; growth: string };
+  sl: string;
+  tp: string;
+  best: string;
+  agree: { long: number; short: number };
+  strategies: Array<{ name: string; direction: string; strength: number; confidence: number }>;
+}
+
+function parseReasoning(raw: string): ParsedReasoning | null {
+  try {
+    const decision = raw.match(/\[(\w+)\]/)?.[1] ?? '';
+    const regime = raw.match(/regime=(\S+)/)?.[1] ?? '';
+    const conviction = raw.match(/conviction=(\d+%)/)?.[1] ?? '';
+    const riskMult = raw.match(/riskMult=(\S+)/)?.[1] ?? '';
+
+    const fundMatch = raw.match(/fund=([\d.]+)\(Q=([\d.]+)\/V=([\d.]+)\/G=([\d.]+)\)/);
+    const fund = fundMatch
+      ? { combined: fundMatch[1], quality: fundMatch[2], value: fundMatch[3], growth: fundMatch[4] }
+      : { combined: '0', quality: '0', value: '0', growth: '0' };
+
+    const sl = raw.match(/SL=([\d.]+%)/)?.[1] ?? '';
+    const tp = raw.match(/TP=([\d.]+%)/)?.[1] ?? '';
+    const best = raw.match(/best=(\w+)/)?.[1] ?? '';
+
+    const agreeMatch = raw.match(/agree=(\d+)L\/(\d+)S/);
+    const agree = agreeMatch
+      ? { long: Number(agreeMatch[1]), short: Number(agreeMatch[2]) }
+      : { long: 0, short: 0 };
+
+    const strategies: ParsedReasoning['strategies'] = [];
+    const stratRegex = /(\w+):(LONG|SHORT)\(str=([\d.]+),conf=([\d.]+)\)/g;
+    let m: RegExpExecArray | null;
+    while ((m = stratRegex.exec(raw)) !== null) {
+      strategies.push({
+        name: m[1],
+        direction: m[2],
+        strength: Number(m[3]),
+        confidence: Number(m[4]),
+      });
+    }
+
+    return { decision, regime, conviction, riskMult, fund, sl, tp, best, agree, strategies };
+  } catch {
+    return null;
+  }
+}
+
+const REGIME_LABELS: Record<string, string> = {
+  strong_bull: 'Strong Bull',
+  bull: 'Bull',
+  bear: 'Bear',
+  strong_bear: 'Strong Bear',
+  sideways: 'Sideways',
+  range_bound: 'Range-Bound',
+  volatile: 'Volatile',
+  unknown: 'Unknown',
+};
+
+const STRATEGY_LABELS: Record<string, string> = {
+  MEAN_REVERSION: 'Mean Reversion',
+  TREND_FOLLOWING: 'Trend Following',
+  MOMENTUM: 'Momentum',
+  BREAKOUT: 'Breakout',
+};
+
+function ReasoningBreakdown({ reasoning }: { reasoning: string }) {
+  const parsed = parseReasoning(reasoning);
+
+  if (!parsed) {
+    return (
+      <div className="rounded-md bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+        {reasoning}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2 text-xs">
+      {/* Row 1: Market context */}
+      <div className="flex items-center gap-3">
+        <span className="rounded bg-muted px-2 py-0.5 text-muted-foreground">
+          Market: <span className="font-medium text-foreground">{REGIME_LABELS[parsed.regime] ?? parsed.regime}</span>
+        </span>
+        {parsed.riskMult !== '1.00' && (
+          <span className="rounded bg-amber-500/10 px-2 py-0.5 text-amber-500">
+            Risk adjusted: {parsed.riskMult}x
+          </span>
+        )}
+        <span className="text-muted-foreground">
+          Stop Loss: <span className="font-medium text-foreground">{parsed.sl}</span>
+        </span>
+        <span className="text-muted-foreground">
+          Take Profit: <span className="font-medium text-foreground">{parsed.tp}</span>
+        </span>
+      </div>
+
+      {/* Row 2: Fundamentals */}
+      <div className="flex items-center gap-2">
+        <span className="text-muted-foreground">Fundamentals:</span>
+        <FundBar label="Quality" value={Number(parsed.fund.quality)} />
+        <FundBar label="Value" value={Number(parsed.fund.value)} />
+        <FundBar label="Growth" value={Number(parsed.fund.growth)} />
+      </div>
+
+      {/* Row 3: Strategy breakdown */}
+      <div className="space-y-1">
+        <div className="flex items-center gap-2">
+          <span className="text-muted-foreground">
+            Strategies: <span className="font-medium text-foreground">{parsed.agree.long} bullish</span>
+            {parsed.agree.short > 0 && (
+              <>, <span className="font-medium text-red-500">{parsed.agree.short} bearish</span></>
+            )}
+          </span>
+          {parsed.best && (
+            <span className="rounded bg-blue-500/10 px-2 py-0.5 text-blue-400">
+              Best: {STRATEGY_LABELS[parsed.best] ?? parsed.best}
+            </span>
+          )}
+        </div>
+        <div className="grid grid-cols-2 gap-1.5">
+          {parsed.strategies.map((s) => (
+            <StrategyBar key={s.name} strategy={s} isBest={s.name === parsed.best} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FundBar({ label, value }: { label: string; value: number }) {
+  const pct = Math.round(value * 100);
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="text-muted-foreground w-12 text-right">{label}</span>
+      <div className="h-1.5 w-16 rounded-full bg-muted overflow-hidden">
+        <div
+          className={cn(
+            'h-full rounded-full',
+            pct >= 70 ? 'bg-emerald-500' : pct >= 40 ? 'bg-amber-500' : 'bg-red-500',
+          )}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <span className={cn(
+        'font-medium w-8',
+        pct >= 70 ? 'text-emerald-500' : pct >= 40 ? 'text-amber-500' : 'text-red-500',
+      )}>
+        {pct}%
+      </span>
+    </div>
+  );
+}
+
+function StrategyBar({
+  strategy,
+  isBest,
+}: {
+  strategy: { name: string; direction: string; strength: number; confidence: number };
+  isBest: boolean;
+}) {
+  const score = Math.round(strategy.strength * strategy.confidence * 100);
+  const isLong = strategy.direction === 'LONG';
+
+  return (
+    <div
+      className={cn(
+        'flex items-center gap-2 rounded px-2 py-1',
+        isBest ? 'bg-blue-500/10 ring-1 ring-blue-500/20' : 'bg-muted/30',
+      )}
+    >
+      <span
+        className={cn(
+          'w-2 h-2 rounded-full',
+          isLong ? 'bg-emerald-500' : 'bg-red-500',
+        )}
+      />
+      <span className="text-muted-foreground w-24">
+        {STRATEGY_LABELS[strategy.name] ?? strategy.name}
+      </span>
+      <div className="h-1.5 flex-1 rounded-full bg-muted overflow-hidden">
+        <div
+          className={cn(
+            'h-full rounded-full',
+            isLong ? 'bg-emerald-500' : 'bg-red-500',
+          )}
+          style={{ width: `${score}%` }}
+        />
+      </div>
+      <span className={cn(
+        'font-medium w-8 text-right',
+        isLong ? 'text-emerald-500' : 'text-red-500',
+      )}>
+        {score}%
       </span>
     </div>
   );
