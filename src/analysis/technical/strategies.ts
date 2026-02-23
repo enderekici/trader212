@@ -701,36 +701,35 @@ export function scoreMultiStrategy(
   }
 
   // Multi-strategy agreement gate
+  let score: number;
+
   if (longStrategies.length >= 2) {
     // Strong LONG consensus: 55-95 range
-    return Math.round(55 + clamp(weightedLong * 2) * 40);
-  }
-
-  if (shortStrategies.length >= 2) {
+    score = 55 + clamp(weightedLong * 2) * 40;
+  } else if (shortStrategies.length >= 2) {
     // Strong SHORT consensus: 5-40 range
-    return Math.round(40 - clamp(weightedShort * 2) * 35);
-  }
-
-  // Single high-conviction strategy
-  if (
+    score = 40 - clamp(weightedShort * 2) * 35;
+  } else if (
     longStrategies.length === 1 &&
     longStrategies[0].strength > 0.35 &&
     longStrategies[0].confidence > 0.4
   ) {
-    return Math.round(50 + clamp(weightedLong * 1.5) * 35);
-  }
-
-  if (
+    // Single high-conviction LONG strategy
+    score = 50 + clamp(weightedLong * 1.5) * 35;
+  } else if (
     shortStrategies.length === 1 &&
     shortStrategies[0].strength > 0.35 &&
     shortStrategies[0].confidence > 0.4
   ) {
-    return Math.round(45 - clamp(weightedShort * 1.5) * 30);
+    // Single high-conviction SHORT strategy
+    score = 45 - clamp(weightedShort * 1.5) * 30;
+  } else {
+    // Neutral — slight bias from weighted scores
+    const netScore = weightedLong - weightedShort;
+    score = 50 + clamp(netScore * 10, -10, 10);
   }
 
-  // Neutral — slight bias from weighted scores
-  const netScore = weightedLong - weightedShort;
-  return Math.round(50 + clamp(netScore * 10, -10, 10));
+  return Math.round(score);
 }
 
 /**

@@ -422,13 +422,13 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
   },
   {
     key: 'risk.defaultStopLossPct',
-    value: '0.12',
+    value: '0.08',
     category: 'risk',
     description: 'Default stop-loss % when ATR unavailable',
   },
   {
     key: 'risk.defaultTakeProfitPct',
-    value: '0.20',
+    value: '0.18',
     category: 'risk',
     description: 'Default take-profit %',
   },
@@ -1210,7 +1210,7 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
   },
   {
     key: 'ai.rules.takeProfitPct',
-    value: '0.20',
+    value: '0.18',
     category: 'ai',
     description: 'Rules engine: take-profit target (grid-search best Sharpe)',
   },

@@ -278,12 +278,13 @@ export class BacktestEngine {
         let trailPct = this.config.stopLossPct;
 
         // Dynamic trailing stops: tighten trail based on unrealized profit tiers
-        if (this.config.dynamicTrailingStops) {
+        // Active by default when trailingStop is on; set dynamicTrailingStops=false to disable
+        if (this.config.dynamicTrailingStops === true) {
           const unrealizedPct =
             (position.highWaterMark - position.entryPrice) / position.entryPrice;
           const tiers = this.config.dynamicTrailingTiers ?? [
-            { profitPct: 0.05, trailPct: 0.05 },
-            { profitPct: 0.1, trailPct: 0.03 },
+            { profitPct: 0.12, trailPct: 0.06 },
+            { profitPct: 0.20, trailPct: 0.05 },
           ];
           // Apply last matching tier (sorted ascending by profitPct)
           const sortedTiers = [...tiers].sort((a, b) => a.profitPct - b.profitPct);
