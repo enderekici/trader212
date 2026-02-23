@@ -13,7 +13,7 @@ export interface Position {
   takeProfit?: number;
   convictionScore?: number;
   stopOrderId?: string;
-  aiExitConditions?: string;
+  exitConditions?: string;
   accountType: string;
   updatedAt?: string;
 }
@@ -33,9 +33,8 @@ export interface Trade {
   stopLoss?: number;
   takeProfit?: number;
   exitReason?: string;
-  aiReasoning?: string;
+  reasoning?: string;
   convictionScore?: number;
-  aiModel?: string;
   accountType: string;
   createdAt?: string;
 }
@@ -74,12 +73,11 @@ export interface Signal {
   technicalScore?: number;
   sentimentScore?: number;
   fundamentalScore?: number;
-  aiScore?: number;
+  decisionScore?: number;
   convictionTotal?: number;
   decision?: 'BUY' | 'SELL' | 'HOLD';
   executed?: boolean;
-  aiReasoning?: string;
-  aiModel?: string;
+  reasoning?: string;
   suggestedStopLossPct?: number;
   suggestedPositionSizePct?: number;
   suggestedTakeProfitPct?: number;
@@ -175,9 +173,8 @@ export interface TradePlan {
   maxLossDollars: number;
   riskRewardRatio: number;
   maxHoldDays: number | null;
-  aiConviction: number;
-  aiReasoning: string | null;
-  aiModel: string | null;
+  conviction: number;
+  reasoning: string | null;
   risks: string[];
   urgency: string | null;
   exitConditions: string | null;

@@ -43,9 +43,7 @@ const MOCK_DAILY_METRICS = { metrics: [] };
 const MOCK_CONFIG = {};
 const MOCK_PAIRLIST = { stocks: [], lastRefreshed: null };
 const MOCK_PAIRLIST_HISTORY = { history: [] };
-const MOCK_RESEARCH = { reports: [] };
 const MOCK_AUDIT = { entries: [] };
-const MOCK_MODEL_STATS = { stats: [] };
 const MOCK_ORDERS = { orders: [], total: 0 };
 const MOCK_TRADE_PLANS = { plans: [] };
 const MOCK_CORRELATION = { symbols: [], matrix: [] };
@@ -62,9 +60,7 @@ function mockApiRoute(url: string): object {
   if (path.startsWith('/api/config')) return MOCK_CONFIG;
   if (path === '/api/pairlist/history') return MOCK_PAIRLIST_HISTORY;
   if (path === '/api/pairlist') return MOCK_PAIRLIST;
-  if (path === '/api/research') return MOCK_RESEARCH;
   if (path === '/api/audit') return MOCK_AUDIT;
-  if (path === '/api/model-stats') return MOCK_MODEL_STATS;
   if (path === '/api/orders') return MOCK_ORDERS;
   if (path === '/api/trade-plans') return MOCK_TRADE_PLANS;
   if (path === '/api/correlation') return MOCK_CORRELATION;
@@ -137,16 +133,6 @@ test.describe('Smoke Tests', () => {
     expect(errors).toHaveLength(0);
   });
 
-  test('Research page loads without errors', async ({ page }) => {
-    const errors: string[] = [];
-    page.on('pageerror', (err) => errors.push(err.message));
-
-    await page.goto('/research');
-    await expect(page.locator('h1:has-text("AI Market Research")')).toBeVisible();
-    await expect(page.locator('text=Run New Research')).toBeVisible();
-    expect(errors).toHaveLength(0);
-  });
-
   test('Analytics page loads without errors', async ({ page }) => {
     const errors: string[] = [];
     page.on('pageerror', (err) => errors.push(err.message));
@@ -186,13 +172,12 @@ test.describe('Smoke Tests', () => {
     const nav = page.locator('nav');
     await expect(nav).toBeVisible();
 
-    // Check all 9 navigation items exist
+    // Check all 8 navigation items exist
     await expect(nav.locator('text=Overview')).toBeVisible();
     await expect(nav.locator('text=Positions')).toBeVisible();
     await expect(nav.locator('text=Trades')).toBeVisible();
     await expect(nav.locator('text=Signals')).toBeVisible();
     await expect(nav.locator('text=Pairlist')).toBeVisible();
-    await expect(nav.locator('text=Research')).toBeVisible();
     await expect(nav.locator('text=Analytics')).toBeVisible();
     await expect(nav.locator('text=Activity')).toBeVisible();
     await expect(nav.locator('text=Settings')).toBeVisible();

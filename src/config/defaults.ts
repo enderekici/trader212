@@ -268,13 +268,13 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
     key: 'ai.includeHistoricalSignals',
     value: 'false',
     category: 'ai',
-    description: 'Include historical signals in prompt',
+    description: 'Include historical signals in decision context',
   },
   {
     key: 'ai.historicalSignalCount',
     value: '5',
     category: 'ai',
-    description: 'Previous signals sent to AI',
+    description: 'Previous signals included in decision context',
   },
 
   // Risk
@@ -455,7 +455,7 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
     key: 'execution.reEvaluatePositions',
     value: 'true',
     category: 'execution',
-    description: 'AI re-evaluates open positions each cycle',
+    description: 'Decision engine re-evaluates open positions each cycle',
   },
   {
     key: 'execution.reEvalIntervalMinutes',
@@ -1031,7 +1031,7 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
     key: 'analysis.confluenceEnabled',
     value: 'false',
     category: 'analysis',
-    description: 'Pre-filter stocks by signal alignment before AI call',
+    description: 'Pre-filter stocks by signal alignment before decision engine',
   },
   {
     key: 'analysis.confluenceMinSignals',
@@ -1052,50 +1052,50 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
     description: 'Min average score across all domains',
   },
 
-  // AI — Conviction Gate
+  // Decision Engine — Conviction Gate
   {
     key: 'ai.minConvictionScore',
     value: '65',
     category: 'ai',
-    description: 'Min AI conviction to execute a BUY',
+    description: 'Min conviction score to execute a BUY',
   },
 
-  // AI — Rules Engine
+  // Decision Engine — Rules
   {
     key: 'ai.rules.buyTechMin',
     value: '55',
     category: 'ai',
-    description: 'Rules engine: min technical score for BUY',
+    description: 'Decision engine: min technical score for BUY',
   },
   {
     key: 'ai.rules.buyFundMin',
     value: '45',
     category: 'ai',
-    description: 'Rules engine: min fundamental score for BUY',
+    description: 'Decision engine: min fundamental score for BUY',
   },
   {
     key: 'ai.rules.buySentMin',
     value: '45',
     category: 'ai',
-    description: 'Rules engine: min sentiment score for BUY',
+    description: 'Decision engine: min sentiment score for BUY',
   },
   {
     key: 'ai.rules.takeProfitPct',
     value: '0.18',
     category: 'ai',
-    description: 'Rules engine: take-profit target (grid-search best Sharpe)',
+    description: 'Decision engine: take-profit target (grid-search best Sharpe)',
   },
   {
     key: 'ai.rules.sellTechMax',
     value: '35',
     category: 'ai',
-    description: 'Rules engine: max technical score for SELL',
+    description: 'Decision engine: max technical score for SELL',
   },
   {
     key: 'ai.rules.sellFundMax',
     value: '30',
     category: 'ai',
-    description: 'Rules engine: max fundamental score for SELL',
+    description: 'Decision engine: max fundamental score for SELL',
   },
 
   // Execution — Paper Trading

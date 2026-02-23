@@ -41,7 +41,7 @@ export default function SignalsPage() {
         <div>
           <h1 className="text-2xl font-bold">Signals</h1>
           <p className="text-sm text-muted-foreground">
-            AI-generated trading signals
+            Trading signals from the decision engine
           </p>
         </div>
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -132,11 +132,11 @@ function SignalCard({ signal }: { signal: Signal }) {
             <Indicator label="VWAP" value={signal.vwap} />
           </div>
 
-          {/* AI reasoning */}
-          {signal.aiReasoning && (
+          {/* Reasoning */}
+          {signal.reasoning && (
             <div className="rounded-md bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-              <span className="font-medium text-foreground">AI: </span>
-              {signal.aiReasoning}
+              <span className="font-medium text-foreground">Reasoning: </span>
+              {signal.reasoning}
             </div>
           )}
 
@@ -151,7 +151,6 @@ function SignalCard({ signal }: { signal: Signal }) {
             {signal.suggestedTakeProfitPct != null && (
               <span>TP: {(signal.suggestedTakeProfitPct * 100).toFixed(1)}%</span>
             )}
-            {signal.aiModel && <span>Model: {signal.aiModel}</span>}
           </div>
         </div>
       )}

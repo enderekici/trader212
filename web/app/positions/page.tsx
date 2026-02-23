@@ -118,11 +118,11 @@ export default function PositionsPage() {
                 )}
               </div>
 
-              {/* AI Reasoning */}
-              {pos.aiExitConditions && (
+              {/* Exit Conditions */}
+              {pos.exitConditions && (
                 <div className="rounded-md bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
                   <span className="font-medium text-foreground">Exit conditions: </span>
-                  {pos.aiExitConditions}
+                  {pos.exitConditions}
                 </div>
               )}
 
