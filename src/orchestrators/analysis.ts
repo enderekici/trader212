@@ -202,6 +202,7 @@ export class AnalysisOrchestrator {
     }
 
     // 6. Apply conviction gate — downgrade BUY to HOLD if conviction is too low
+    // Gate checks decision engine conviction (decisionScore), not the averaged convictionTotal
     let shouldTrade = false;
     let gatedDecision = decision.decision;
     if (decision.decision === 'BUY') {

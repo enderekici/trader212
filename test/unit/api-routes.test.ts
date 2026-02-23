@@ -691,7 +691,7 @@ describe('api/routes', () => {
       const res = mockRes();
       handler(mockReq(), res);
 
-      expect(res.json).toHaveBeenCalledWith({ signals: rows, total: 1 });
+      expect(res.json).toHaveBeenCalledWith({ signals: rows, total: 1, minConviction: 65 });
     });
 
     it('applies filters', () => {
@@ -716,7 +716,7 @@ describe('api/routes', () => {
       const res = mockRes();
       handler(mockReq(), res);
 
-      expect(res.json).toHaveBeenCalledWith({ signals: [], total: 0 });
+      expect(res.json).toHaveBeenCalledWith({ signals: [], total: 0, minConviction: 65 });
     });
 
     it('handles errors', () => {

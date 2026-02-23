@@ -292,7 +292,15 @@ export function createRouter(): Router {
         .where(where)
         .get();
 
-      res.json({ signals: rows, total: countResult?.count ?? 0 });
+      let minConviction = 65;
+      try {
+        const val = configManager.get<number>('ai.minConvictionScore');
+        if (val != null) minConviction = val;
+      } catch {
+        /* use default */
+      }
+
+      res.json({ signals: rows, total: countResult?.count ?? 0, minConviction });
     } catch (err) {
       log.error({ err }, 'Error fetching signals');
       res.status(500).json({ error: 'Failed to fetch signals' });

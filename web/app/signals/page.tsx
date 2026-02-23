@@ -26,6 +26,7 @@ export default function SignalsPage() {
   }, [lastMessage, mutate]);
 
   const signals = [...liveSignals, ...(data?.signals ?? [])];
+  const minConviction = data?.minConviction ?? 65;
 
   // Deduplicate by id
   const seen = new Set<number>();
@@ -44,11 +45,16 @@ export default function SignalsPage() {
             Trading signals from the decision engine
           </p>
         </div>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <Radio
-            className={cn('h-4 w-4', connected ? 'text-emerald-500' : 'text-red-500')}
-          />
-          {connected ? 'Live feed active' : 'Reconnecting...'}
+        <div className="flex items-center gap-4">
+          <span className="rounded bg-muted px-2 py-1 text-xs text-muted-foreground">
+            Min conviction: <span className="font-semibold text-foreground">{minConviction}</span>
+          </span>
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Radio
+              className={cn('h-4 w-4', connected ? 'text-emerald-500' : 'text-red-500')}
+            />
+            {connected ? 'Live feed active' : 'Reconnecting...'}
+          </div>
         </div>
       </div>
 
@@ -60,15 +66,17 @@ export default function SignalsPage() {
         )}
 
         {uniqueSignals.map((signal) => (
-          <SignalCard key={signal.id} signal={signal} />
+          <SignalCard key={signal.id} signal={signal} minConviction={minConviction} />
         ))}
       </div>
     </div>
   );
 }
 
-function SignalCard({ signal }: { signal: Signal }) {
+function SignalCard({ signal, minConviction }: { signal: Signal; minConviction: number }) {
   const [expanded, setExpanded] = useState(false);
+  const conviction = signal.decisionScore ?? 0;
+  const passedGate = conviction >= minConviction;
 
   return (
     <div className="rounded-lg border border-border bg-card">
@@ -77,7 +85,7 @@ function SignalCard({ signal }: { signal: Signal }) {
         onClick={() => setExpanded(!expanded)}
         className="flex w-full items-center justify-between px-4 py-3 text-left"
       >
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
           <span
             className={cn(
               'rounded px-2 py-0.5 text-xs font-bold',
@@ -98,20 +106,66 @@ function SignalCard({ signal }: { signal: Signal }) {
             </span>
           )}
         </div>
-        <div className="flex items-center gap-4 text-xs">
+        <div className="flex items-center gap-3 text-xs">
           <ScorePill label="Tech" value={signal.technicalScore} />
           <ScorePill label="Sent" value={signal.sentimentScore} />
           <ScorePill label="Fund" value={signal.fundamentalScore} />
-          {signal.convictionTotal != null && (
-            <span className="font-semibold text-foreground">
-              Conv: {signal.convictionTotal}
-            </span>
-          )}
+          <span className="text-muted-foreground">|</span>
+          <span
+            className={cn(
+              'font-semibold',
+              passedGate ? 'text-emerald-500' : 'text-foreground',
+            )}
+          >
+            Conviction: {conviction}
+          </span>
+          <span className="text-muted-foreground">
+            / {minConviction}
+          </span>
+          <span
+            className={cn(
+              'rounded px-1.5 py-0.5 text-xs font-medium',
+              passedGate
+                ? 'bg-emerald-500/10 text-emerald-500'
+                : 'bg-red-500/10 text-red-500',
+            )}
+          >
+            {passedGate ? 'PASS' : 'BLOCKED'}
+          </span>
         </div>
       </button>
 
       {expanded && (
         <div className="border-t border-border px-4 py-3 space-y-3">
+          {/* Score breakdown */}
+          <div className="grid grid-cols-5 gap-2 text-xs">
+            <ScoreBox label="Technical" value={signal.technicalScore} />
+            <ScoreBox label="Sentiment" value={signal.sentimentScore} />
+            <ScoreBox label="Fundamental" value={signal.fundamentalScore} />
+            <ScoreBox
+              label="Decision (gate)"
+              value={signal.decisionScore}
+              highlight
+              pass={passedGate}
+            />
+            <ScoreBox label="Average" value={signal.convictionTotal} />
+          </div>
+
+          {/* Gate explanation */}
+          <div
+            className={cn(
+              'rounded-md px-3 py-2 text-xs',
+              passedGate ? 'bg-emerald-500/5 text-emerald-500' : 'bg-red-500/5 text-red-500',
+            )}
+          >
+            Conviction gate: <span className="font-semibold">{conviction}</span>
+            {passedGate ? ' >= ' : ' < '}
+            <span className="font-semibold">{minConviction}</span>
+            {passedGate
+              ? ' — signal passed, trade eligible'
+              : ` — blocked (need ${minConviction - conviction} more)`}
+          </div>
+
           {/* Indicators grid */}
           <div className="grid grid-cols-4 gap-2 text-xs">
             <Indicator label="RSI" value={signal.rsi} />
@@ -172,6 +226,45 @@ function ScorePill({ label, value }: { label: string; value?: number }) {
         {value.toFixed(0)}
       </span>
     </span>
+  );
+}
+
+function ScoreBox({
+  label,
+  value,
+  highlight,
+  pass,
+}: {
+  label: string;
+  value?: number;
+  highlight?: boolean;
+  pass?: boolean;
+}) {
+  return (
+    <div
+      className={cn(
+        'rounded px-2 py-1.5 text-center',
+        highlight
+          ? pass
+            ? 'bg-emerald-500/10 ring-1 ring-emerald-500/30'
+            : 'bg-red-500/10 ring-1 ring-red-500/30'
+          : 'bg-muted/30',
+      )}
+    >
+      <div className="text-muted-foreground text-[10px]">{label}</div>
+      <div
+        className={cn(
+          'font-semibold',
+          highlight
+            ? pass
+              ? 'text-emerald-500'
+              : 'text-red-500'
+            : 'text-foreground',
+        )}
+      >
+        {value != null ? value.toFixed(1) : 'N/A'}
+      </div>
+    </div>
   );
 }
 

@@ -116,6 +116,7 @@ export interface TradesResponse {
 export interface SignalsResponse {
   signals: Signal[];
   total: number;
+  minConviction?: number;
 }
 
 export interface PerformanceResponse {
