@@ -48,8 +48,8 @@ export class PairlistPipeline {
   }
 
   /**
-   * Enrich bare StockInfo objects with price, volume, marketCap, sector from Yahoo Finance.
-   * Uses batch quotes with concurrency limiting and fundamentals cache for sector data.
+   * Enrich bare StockInfo objects with price, volume, marketCap, sector from market data.
+   * Prefers Alpaca snapshots (single batch request) when available, falls back to Yahoo Finance.
    */
   async enrichStocks(stocks: StockInfo[]): Promise<StockInfo[]> {
     const needsEnrichment = stocks.filter((s) => s.price == null);
@@ -57,8 +57,7 @@ export class PairlistPipeline {
 
     log.info({ count: needsEnrichment.length }, 'Enriching pairlist stocks with market data');
 
-    const { YahooFinanceClient } = await import('../data/yahoo-finance.js');
-    const yahoo = new YahooFinanceClient();
+    const symbols = needsEnrichment.map((s) => s.symbol);
     const quoteMap = new Map<
       string,
       {
@@ -70,24 +69,68 @@ export class PairlistPipeline {
       }
     >();
 
-    // Batch-fetch quotes with concurrency limiting
-    const concurrency = 20;
-    const symbols = needsEnrichment.map((s) => s.symbol);
+    // Try Alpaca snapshots first (much more efficient: 1 request per 50 symbols)
+    let alpacaUsed = false;
+    try {
+      let alpacaEnabled = false;
+      try {
+        alpacaEnabled = configManager.get<boolean>('data.alpaca.enabled');
+      } catch {
+        // config not available
+      }
 
-    for (let i = 0; i < symbols.length; i += concurrency) {
-      const batch = symbols.slice(i, i + concurrency);
-      const results = await Promise.allSettled(batch.map((s) => yahoo.getQuote(s)));
+      if (alpacaEnabled && process.env.ALPACA_API_KEY) {
+        const { AlpacaClient } = await import('../data/alpaca.js');
+        const alpaca = new AlpacaClient();
+        const snapshots = await alpaca.getSnapshots(symbols);
 
-      for (let j = 0; j < batch.length; j++) {
-        const result = results[j];
-        if (result.status === 'fulfilled' && result.value) {
-          quoteMap.set(batch[j], {
-            price: result.value.price,
-            volume: result.value.avgVolume,
-            marketCap: result.value.marketCap,
-            dayHigh: result.value.dayHigh,
-            dayLow: result.value.dayLow,
-          });
+        for (const [sym, snap] of snapshots) {
+          const s = snap as {
+            dailyBar?: { h: number; l: number; c: number; v: number };
+            latestTrade?: { p: number };
+          };
+          if (s.dailyBar && s.latestTrade) {
+            quoteMap.set(sym, {
+              price: s.latestTrade.p,
+              volume: s.dailyBar.v,
+              marketCap: null, // not available in snapshots, filled from fundamentals cache
+              dayHigh: s.dailyBar.h,
+              dayLow: s.dailyBar.l,
+            });
+          }
+        }
+
+        alpacaUsed = quoteMap.size > 0;
+        if (alpacaUsed) {
+          log.info({ found: quoteMap.size, total: symbols.length }, 'Enriched via Alpaca snapshots');
+        }
+      }
+    } catch (err) {
+      log.warn({ err }, 'Alpaca enrichment failed, falling back to Yahoo');
+    }
+
+    // Fallback to Yahoo Finance for any symbols not enriched by Alpaca
+    const missingSymbols = symbols.filter((s) => !quoteMap.has(s));
+    if (missingSymbols.length > 0) {
+      const { YahooFinanceClient } = await import('../data/yahoo-finance.js');
+      const yahoo = new YahooFinanceClient();
+      const concurrency = 20;
+
+      for (let i = 0; i < missingSymbols.length; i += concurrency) {
+        const batch = missingSymbols.slice(i, i + concurrency);
+        const results = await Promise.allSettled(batch.map((s) => yahoo.getQuote(s)));
+
+        for (let j = 0; j < batch.length; j++) {
+          const result = results[j];
+          if (result.status === 'fulfilled' && result.value) {
+            quoteMap.set(batch[j], {
+              price: result.value.price,
+              volume: result.value.avgVolume,
+              marketCap: result.value.marketCap,
+              dayHigh: result.value.dayHigh,
+              dayLow: result.value.dayLow,
+            });
+          }
         }
       }
     }

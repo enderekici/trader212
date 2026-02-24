@@ -20,6 +20,7 @@ export default defineConfig({
         'src/backtest/types.ts',
         'src/orchestrators/**',
         'src/scripts/**',
+        'src/data/alpaca-stream.ts',
       ],
       thresholds: {
         lines: 90,

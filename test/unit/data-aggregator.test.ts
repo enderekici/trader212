@@ -24,9 +24,11 @@ vi.mock('../../src/utils/logger.js', () => ({
 }));
 
 import { DataAggregator } from '../../src/data/data-aggregator.js';
+import type { AlpacaClient, AlpacaSnapshot } from '../../src/data/alpaca.js';
 import type { FinnhubClient, FinnhubQuote, EarningsEvent, InsiderTx, FinnhubNews } from '../../src/data/finnhub.js';
 import type { MarketauxClient, MarketauxArticle } from '../../src/data/marketaux.js';
 import type { YahooFinanceClient, OHLCVCandle, FundamentalData, MarketContext, QuoteData } from '../../src/data/yahoo-finance.js';
+import { configManager } from '../../src/config/manager.js';
 
 function createMockYahoo(): {
   getHistoricalData: ReturnType<typeof vi.fn>;
@@ -532,6 +534,181 @@ describe('DataAggregator', () => {
       // Second call - cache expired, should fetch again
       await aggregator.getStockData('AAPL');
       expect(mockYahoo.getFundamentals).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('with Alpaca client', () => {
+    let mockAlpaca: {
+      getHistoricalBars: ReturnType<typeof vi.fn>;
+      getSnapshots: ReturnType<typeof vi.fn>;
+      getLatestQuotes: ReturnType<typeof vi.fn>;
+      getNews: ReturnType<typeof vi.fn>;
+      getLatestBars: ReturnType<typeof vi.fn>;
+    };
+    let alpacaAggregator: DataAggregator;
+
+    beforeEach(() => {
+      mockAlpaca = {
+        getHistoricalBars: vi.fn().mockResolvedValue([]),
+        getSnapshots: vi.fn().mockResolvedValue(new Map()),
+        getLatestQuotes: vi.fn().mockResolvedValue(new Map()),
+        getNews: vi.fn().mockResolvedValue([]),
+        getLatestBars: vi.fn().mockResolvedValue(new Map()),
+      };
+      alpacaAggregator = new DataAggregator(
+        mockYahoo as unknown as YahooFinanceClient,
+        mockFinnhub as unknown as FinnhubClient,
+        mockMarketaux as unknown as MarketauxClient,
+        mockAlpaca as unknown as AlpacaClient,
+      );
+    });
+
+    it('uses Alpaca for candles when enabled', async () => {
+      const mockConfigGet = configManager.get as ReturnType<typeof vi.fn>;
+      mockConfigGet.mockImplementation((key: string) => {
+        if (key === 'data.alpaca.enabled') return true;
+        if (key === 'data.alpaca.newsEnabled') return false;
+        if (key === 'data.alpaca.feed') return 'iex';
+        return undefined;
+      });
+
+      const alpacaCandles: OHLCVCandle[] = [
+        { date: '2024-01-25', open: 148, high: 152, low: 147, close: 150, volume: 50000000 },
+      ];
+      mockAlpaca.getHistoricalBars.mockResolvedValueOnce(alpacaCandles);
+
+      const result = await alpacaAggregator.getStockData('AAPL');
+
+      expect(result.candles).toEqual(alpacaCandles);
+      expect(mockAlpaca.getHistoricalBars).toHaveBeenCalled();
+      expect(mockYahoo.getHistoricalData).not.toHaveBeenCalled();
+    });
+
+    it('falls back to Yahoo when Alpaca candles fail', async () => {
+      const mockConfigGet = configManager.get as ReturnType<typeof vi.fn>;
+      mockConfigGet.mockImplementation((key: string) => {
+        if (key === 'data.alpaca.enabled') return true;
+        if (key === 'data.alpaca.newsEnabled') return false;
+        if (key === 'data.alpaca.feed') return 'iex';
+        return undefined;
+      });
+
+      const yahooCandles: OHLCVCandle[] = [
+        { date: '2024-01-25', open: 148, high: 152, low: 147, close: 150, volume: 50000000 },
+      ];
+      mockAlpaca.getHistoricalBars.mockRejectedValueOnce(new Error('Alpaca down'));
+      mockYahoo.getHistoricalData.mockResolvedValueOnce(yahooCandles);
+
+      const result = await alpacaAggregator.getStockData('AAPL');
+
+      expect(result.candles).toEqual(yahooCandles);
+      expect(mockAlpaca.getHistoricalBars).toHaveBeenCalled();
+      expect(mockYahoo.getHistoricalData).toHaveBeenCalled();
+    });
+
+    it('uses Alpaca snapshot for quote when available', async () => {
+      const mockConfigGet = configManager.get as ReturnType<typeof vi.fn>;
+      mockConfigGet.mockImplementation((key: string) => {
+        if (key === 'data.alpaca.enabled') return true;
+        if (key === 'data.alpaca.newsEnabled') return false;
+        if (key === 'data.alpaca.feed') return 'iex';
+        return undefined;
+      });
+
+      const snapshotMap = new Map<string, AlpacaSnapshot>();
+      snapshotMap.set('AAPL', {
+        latestTrade: { t: '2024-01-25T16:00:00Z', p: 185.5, s: 100 },
+        latestQuote: { bp: 185.4, ap: 185.6, bs: 200, as: 300, t: '2024-01-25T16:00:00Z' },
+        minuteBar: null,
+        dailyBar: { t: '2024-01-25T00:00:00Z', o: 183, h: 186, l: 182, c: 185.5, v: 50000000, n: 1000, vw: 184 },
+        prevDailyBar: { t: '2024-01-24T00:00:00Z', o: 182, h: 184, l: 181, c: 183, v: 45000000, n: 900, vw: 183 },
+      });
+      mockAlpaca.getSnapshots.mockResolvedValueOnce(snapshotMap);
+
+      const result = await alpacaAggregator.getStockData('AAPL');
+
+      expect(result.quote).toEqual({
+        price: 185.5,
+        change: 185.5 - 183,
+        changePercent: ((185.5 - 183) / 183) * 100,
+        dayHigh: 186,
+        dayLow: 182,
+        volume: 50000000,
+        avgVolume: null,
+      });
+    });
+
+    it('falls back to Finnhub quote when Alpaca snapshot has no data', async () => {
+      const mockConfigGet = configManager.get as ReturnType<typeof vi.fn>;
+      mockConfigGet.mockImplementation((key: string) => {
+        if (key === 'data.alpaca.enabled') return true;
+        if (key === 'data.alpaca.newsEnabled') return false;
+        if (key === 'data.alpaca.feed') return 'iex';
+        return undefined;
+      });
+
+      // Alpaca returns empty snapshot
+      mockAlpaca.getSnapshots.mockResolvedValueOnce(new Map());
+      // Finnhub has a quote
+      const finnhubQuote: FinnhubQuote = { c: 150, h: 152, l: 147, o: 148, pc: 145, t: 0 };
+      mockFinnhub.getQuote.mockResolvedValueOnce(finnhubQuote);
+
+      const result = await alpacaAggregator.getStockData('AAPL');
+
+      expect(result.quote?.price).toBe(150);
+      expect(result.quote?.change).toBe(5);
+    });
+
+    it('getQuote uses Alpaca → Finnhub → Yahoo fallback', async () => {
+      const mockConfigGet = configManager.get as ReturnType<typeof vi.fn>;
+      mockConfigGet.mockImplementation((key: string) => {
+        if (key === 'data.alpaca.enabled') return true;
+        if (key === 'data.alpaca.feed') return 'iex';
+        return undefined;
+      });
+
+      const snapshotMap = new Map();
+      snapshotMap.set('AAPL', {
+        latestTrade: { t: '2024-01-25T16:00:00Z', p: 185.5, s: 100 },
+        prevDailyBar: { t: '2024-01-24T00:00:00Z', o: 182, h: 184, l: 181, c: 183, v: 45000000, n: 900, vw: 183 },
+      });
+      mockAlpaca.getSnapshots.mockResolvedValueOnce(snapshotMap);
+
+      const result = await alpacaAggregator.getQuote('AAPL');
+
+      expect(result).toEqual({ price: 185.5, change: 185.5 - 183 });
+      expect(mockFinnhub.getQuote).not.toHaveBeenCalled();
+    });
+
+    it('getQuote falls back to Finnhub when Alpaca fails', async () => {
+      const mockConfigGet = configManager.get as ReturnType<typeof vi.fn>;
+      mockConfigGet.mockImplementation((key: string) => {
+        if (key === 'data.alpaca.enabled') return true;
+        if (key === 'data.alpaca.feed') return 'iex';
+        return undefined;
+      });
+
+      mockAlpaca.getSnapshots.mockRejectedValueOnce(new Error('Alpaca down'));
+      mockFinnhub.getQuote.mockResolvedValueOnce({ c: 150, h: 152, l: 147, o: 148, pc: 145, t: 0 });
+
+      const result = await alpacaAggregator.getQuote('AAPL');
+
+      expect(result).toEqual({ price: 150, change: 5 });
+    });
+
+    it('does not use Alpaca when disabled', async () => {
+      const mockConfigGet = configManager.get as ReturnType<typeof vi.fn>;
+      mockConfigGet.mockImplementation((key: string) => {
+        if (key === 'data.alpaca.enabled') return false;
+        return undefined;
+      });
+
+      mockFinnhub.getQuote.mockResolvedValueOnce({ c: 150, h: 152, l: 147, o: 148, pc: 145, t: 0 });
+
+      const result = await alpacaAggregator.getQuote('AAPL');
+
+      expect(result).toEqual({ price: 150, change: 5 });
+      expect(mockAlpaca.getSnapshots).not.toHaveBeenCalled();
     });
   });
 });

@@ -1,5 +1,7 @@
+import { configManager } from '../config/manager.js';
 import { getFundamentals, setFundamentals } from '../db/repositories/cache.js';
 import { createLogger } from '../utils/logger.js';
+import type { AlpacaClient, AlpacaNewsArticle } from './alpaca.js';
 import type { EarningsEvent, FinnhubClient, FinnhubNews, InsiderTx } from './finnhub.js';
 import { getFinraClient } from './finra.js';
 import type { MarketauxArticle, MarketauxClient } from './marketaux.js';
@@ -36,6 +38,7 @@ export interface StockData {
     totalVolume: number;
     date: string;
   } | null;
+  alpacaNews?: AlpacaNewsArticle[];
 }
 
 /** Lighter data bundle for research — skips Marketaux to conserve daily budget */
@@ -59,11 +62,34 @@ export interface ResearchDataOptions {
 }
 
 export class DataAggregator {
+  private alpaca?: AlpacaClient;
+
   constructor(
     private yahoo: YahooFinanceClient,
     private finnhub: FinnhubClient,
     private marketaux: MarketauxClient,
-  ) {}
+    alpaca?: AlpacaClient,
+  ) {
+    this.alpaca = alpaca;
+  }
+
+  private isAlpacaEnabled(): boolean {
+    if (!this.alpaca) return false;
+    try {
+      return configManager.get<boolean>('data.alpaca.enabled');
+    } catch {
+      return false;
+    }
+  }
+
+  private isAlpacaNewsEnabled(): boolean {
+    if (!this.isAlpacaEnabled()) return false;
+    try {
+      return configManager.get<boolean>('data.alpaca.newsEnabled');
+    } catch {
+      return true;
+    }
+  }
 
   async getStockData(symbol: string): Promise<StockData> {
     const result: StockData = {
@@ -93,6 +119,25 @@ export class DataAggregator {
       .toISOString()
       .split('T')[0];
 
+    const useAlpaca = this.isAlpacaEnabled();
+    // Safe reference — isAlpacaEnabled() guarantees alpaca is defined when useAlpaca is true
+    const alpacaRef = this.alpaca;
+
+    // Core data fetches (same as before, with Alpaca candle fallback)
+    const candlePromise =
+      useAlpaca && alpacaRef
+        ? alpacaRef
+            .getHistoricalBars(
+              symbol,
+              new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+              today,
+            )
+            .catch((err) => {
+              log.warn({ symbol, err }, 'Alpaca candles failed, falling back to Yahoo');
+              return this.yahoo.getHistoricalData(symbol);
+            })
+        : this.yahoo.getHistoricalData(symbol);
+
     const [
       candlesResult,
       finnhubQuoteResult,
@@ -105,7 +150,7 @@ export class DataAggregator {
       yahooQuoteResult,
       finraShortVolumeResult,
     ] = await Promise.allSettled([
-      this.yahoo.getHistoricalData(symbol),
+      candlePromise,
       this.finnhub.getQuote(symbol),
       this.getCachedFundamentals(symbol),
       this.finnhub.getCompanyNews(symbol, thirtyDaysAgo, today),
@@ -117,6 +162,24 @@ export class DataAggregator {
       getFinraClient().getShortData([symbol]),
     ]);
 
+    // Fetch Alpaca snapshot + news in parallel (separate to keep core types clean)
+    let alpacaSnapshot: import('./alpaca.js').AlpacaSnapshot | undefined;
+    let alpacaNews: AlpacaNewsArticle[] | undefined;
+
+    if ((useAlpaca || this.isAlpacaNewsEnabled()) && alpacaRef) {
+      const [snapResult, newsResult] = await Promise.allSettled([
+        useAlpaca ? alpacaRef.getSnapshots([symbol]) : Promise.resolve(new Map()),
+        this.isAlpacaNewsEnabled() ? alpacaRef.getNews([symbol]) : Promise.resolve([]),
+      ]);
+
+      if (useAlpaca && snapResult.status === 'fulfilled') {
+        alpacaSnapshot = snapResult.value.get(symbol);
+      }
+      if (newsResult.status === 'fulfilled' && newsResult.value.length > 0) {
+        alpacaNews = newsResult.value;
+      }
+    }
+
     // Historical candles
     if (candlesResult.status === 'fulfilled') {
       result.candles = candlesResult.value;
@@ -124,13 +187,13 @@ export class DataAggregator {
       log.warn({ symbol, err: candlesResult.reason }, 'Failed to get candles');
     }
 
-    // Build quote from both Finnhub and Yahoo
+    // Build quote: Alpaca snapshot → Finnhub → Yahoo fallback chain
     let dayHigh: number | null = null;
     let dayLow: number | null = null;
     let volume: number | null = null;
     let avgVolume: number | null = null;
 
-    // Yahoo quote provides volume + day range (available even when Finnhub is primary)
+    // Yahoo quote provides volume + day range (available even when others are primary)
     const yahooQ = yahooQuoteResult.status === 'fulfilled' ? yahooQuoteResult.value : null;
     if (yahooQ) {
       dayHigh = yahooQ.dayHigh;
@@ -139,7 +202,25 @@ export class DataAggregator {
       avgVolume = yahooQ.avgVolume;
     }
 
-    if (finnhubQuoteResult.status === 'fulfilled' && finnhubQuoteResult.value) {
+    // Try Alpaca snapshot first
+    let alpacaQuoteUsed = false;
+    if (alpacaSnapshot?.dailyBar && alpacaSnapshot.latestTrade) {
+      const price = alpacaSnapshot.latestTrade.p;
+      const prevClose = alpacaSnapshot.prevDailyBar?.c ?? alpacaSnapshot.dailyBar.o;
+      const change = price - prevClose;
+      result.quote = {
+        price,
+        change,
+        changePercent: prevClose !== 0 ? (change / prevClose) * 100 : 0,
+        dayHigh: alpacaSnapshot.dailyBar.h || dayHigh,
+        dayLow: alpacaSnapshot.dailyBar.l || dayLow,
+        volume: alpacaSnapshot.dailyBar.v || volume,
+        avgVolume,
+      };
+      alpacaQuoteUsed = true;
+    }
+
+    if (!alpacaQuoteUsed && finnhubQuoteResult.status === 'fulfilled' && finnhubQuoteResult.value) {
       const fq = finnhubQuoteResult.value;
       const change = fq.c - fq.pc;
       result.quote = {
@@ -151,7 +232,7 @@ export class DataAggregator {
         volume,
         avgVolume,
       };
-    } else if (yahooQ) {
+    } else if (!alpacaQuoteUsed && yahooQ) {
       result.quote = {
         price: yahooQ.price,
         change: yahooQ.change,
@@ -161,7 +242,7 @@ export class DataAggregator {
         volume,
         avgVolume,
       };
-    } else {
+    } else if (!alpacaQuoteUsed) {
       log.warn({ symbol }, 'All quote sources failed');
     }
 
@@ -194,6 +275,11 @@ export class DataAggregator {
     // Marketaux news
     if (marketauxNewsResult.status === 'fulfilled') {
       result.marketauxNews = marketauxNewsResult.value;
+    }
+
+    // Alpaca news (additive — extra source alongside Finnhub/Marketaux)
+    if (alpacaNews) {
+      result.alpacaNews = alpacaNews;
     }
 
     // Earnings
@@ -248,9 +334,20 @@ export class DataAggregator {
       .toISOString()
       .split('T')[0];
 
+    const useAlpaca = this.isAlpacaEnabled();
+    const alpacaRef = this.alpaca;
+
     // Build fetch list based on options
     const fetches: Promise<unknown>[] = [
-      this.yahoo.getHistoricalData(symbol),
+      useAlpaca && alpacaRef
+        ? alpacaRef
+            .getHistoricalBars(
+              symbol,
+              new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+              today,
+            )
+            .catch(() => this.yahoo.getHistoricalData(symbol))
+        : this.yahoo.getHistoricalData(symbol),
       this.finnhub.getQuote(symbol),
       this.getCachedFundamentals(symbol),
     ];
@@ -351,7 +448,21 @@ export class DataAggregator {
   }
 
   async getQuote(symbol: string): Promise<{ price: number; change: number }> {
-    // Try Finnhub first
+    // Try Alpaca first (if enabled)
+    if (this.isAlpacaEnabled() && this.alpaca) {
+      try {
+        const snapshots = await this.alpaca.getSnapshots([symbol]);
+        const snap = snapshots.get(symbol);
+        if (snap?.latestTrade && snap.prevDailyBar) {
+          const price = snap.latestTrade.p;
+          return { price, change: price - snap.prevDailyBar.c };
+        }
+      } catch {
+        // fall through to Finnhub
+      }
+    }
+
+    // Try Finnhub
     try {
       const fq = await this.finnhub.getQuote(symbol);
       if (fq && fq.c > 0) {

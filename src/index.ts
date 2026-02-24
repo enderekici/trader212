@@ -16,6 +16,8 @@ import type { WebSocketManager } from './api/websocket.js';
 import { minutesToWeekdayCron, Scheduler, timeToCron } from './bot/scheduler.js';
 import { configManager } from './config/manager.js';
 import { getStrategyProfileManager } from './config/strategy-profiles.js';
+import type { AlpacaClient } from './data/alpaca.js';
+import type { AlpacaStream } from './data/alpaca-stream.js';
 import { DataAggregator } from './data/data-aggregator.js';
 import { FinnhubClient } from './data/finnhub.js';
 import { MarketauxClient } from './data/marketaux.js';
@@ -77,6 +79,8 @@ class TradingBot {
   private correlationAnalyzer!: CorrelationAnalyzer;
   private orderReplacer!: OrderReplacer;
   private priceStreamer!: PriceStreamer;
+  private alpacaClient?: AlpacaClient;
+  private alpacaStream?: AlpacaStream;
   private paused = false;
   private startedAt = '';
   private activeStocks: StockInfo[] = [];
@@ -126,8 +130,19 @@ class TradingBot {
     const finnhub = new FinnhubClient();
     const marketaux = new MarketauxClient();
 
+    // 5b. Alpaca client (optional — requires ALPACA_API_KEY + ALPACA_API_SECRET)
+    if (process.env.ALPACA_API_KEY && process.env.ALPACA_API_SECRET) {
+      try {
+        const { AlpacaClient: AlpacaClientImpl } = await import('./data/alpaca.js');
+        this.alpacaClient = new AlpacaClientImpl();
+        log.info('Alpaca client initialized');
+      } catch (err) {
+        log.warn({ err }, 'Failed to initialize Alpaca client — continuing without it');
+      }
+    }
+
     // 6. Data aggregator
-    this.dataAggregator = new DataAggregator(this.yahoo, finnhub, marketaux);
+    this.dataAggregator = new DataAggregator(this.yahoo, finnhub, marketaux, this.alpacaClient);
 
     // 7. Pairlist pipeline
     this.pairlistPipeline = createPairlistPipeline();
@@ -186,6 +201,27 @@ class TradingBot {
     this.priceStreamer.on('price_update', (update) => {
       this.wsManager.broadcast('price_update', update);
     });
+
+    // 12d. Alpaca stream for real-time prices (optional)
+    if (this.alpacaClient) {
+      try {
+        let streamEnabled = false;
+        try {
+          streamEnabled = configManager.get<boolean>('data.alpaca.streamEnabled');
+        } catch {
+          // config not seeded yet or key doesn't exist
+        }
+        if (streamEnabled) {
+          const feed = configManager.get<string>('data.alpaca.feed') as 'iex' | 'sip';
+          const { AlpacaStream: AlpacaStreamImpl } = await import('./data/alpaca-stream.js');
+          this.alpacaStream = new AlpacaStreamImpl(feed);
+          this.priceStreamer.setAlpacaStream(this.alpacaStream);
+          log.info({ feed }, 'Alpaca stream configured for price streamer');
+        }
+      } catch (err) {
+        log.warn({ err }, 'Failed to set up Alpaca stream — using polling');
+      }
+    }
 
     // 10i. Create orchestrators
     this.analysisOrchestrator = new AnalysisOrchestrator({
@@ -447,6 +483,9 @@ class TradingBot {
       }
     } catch (err) {
       log.error({ err }, 'Failed to cancel orders during shutdown');
+    }
+    if (this.alpacaStream) {
+      this.alpacaStream.disconnect();
     }
     this.scheduler.stop();
     await this.apiServer.stop();

@@ -174,6 +174,38 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
     category: 'dataSources',
     description: 'Enable Yahoo Finance data',
   },
+
+  // Alpaca Market Data
+  {
+    key: 'data.alpaca.enabled',
+    value: 'false',
+    category: 'dataSources',
+    description: 'Use Alpaca as primary data source (quotes, bars, news)',
+  },
+  {
+    key: 'data.alpaca.streamEnabled',
+    value: 'false',
+    category: 'dataSources',
+    description: 'Enable Alpaca WebSocket streaming for real-time prices',
+  },
+  {
+    key: 'data.alpaca.feed',
+    value: '"iex"',
+    category: 'dataSources',
+    description: 'Alpaca data feed: iex (free) | sip (paid, all exchanges)',
+  },
+  {
+    key: 'data.alpaca.newsEnabled',
+    value: 'true',
+    category: 'dataSources',
+    description: 'Fetch news from Alpaca (in addition to Finnhub)',
+  },
+  {
+    key: 'data.alpaca.maxStreamSymbols',
+    value: '30',
+    category: 'dataSources',
+    description: 'Max symbols for WebSocket streaming (IEX limit: 30)',
+  },
   {
     key: 'data.earningsBlackoutDays',
     value: '3',

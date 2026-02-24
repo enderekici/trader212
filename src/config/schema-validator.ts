@@ -56,6 +56,11 @@ const dataSchemas = new Map<string, z.ZodType>([
   ['data.earningsBlackoutDays', z.number().int().min(0).max(30)],
   ['data.newsMonitoring.enabled', z.boolean()],
   ['data.newsMonitoring.offHoursIntervalMinutes', z.number().int().min(1).max(1440)],
+  ['data.alpaca.enabled', z.boolean()],
+  ['data.alpaca.streamEnabled', z.boolean()],
+  ['data.alpaca.feed', z.enum(['iex', 'sip'])],
+  ['data.alpaca.newsEnabled', z.boolean()],
+  ['data.alpaca.maxStreamSymbols', z.number().int().min(1).max(200)],
 ]);
 
 // ── Analysis ─────────────────────────────────────────────────────────────────

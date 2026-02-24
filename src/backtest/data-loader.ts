@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import type { AlpacaClient } from '../data/alpaca.js';
 import { YahooFinanceClient } from '../data/yahoo-finance.js';
 import { createLogger } from '../utils/logger.js';
 import type { Candle } from './types.js';
@@ -9,9 +10,11 @@ const CACHE_DIR = './data/backtest_cache';
 
 export class BacktestDataLoader {
   private yahooClient: YahooFinanceClient;
+  private alpacaClient?: AlpacaClient;
 
-  constructor(yahooClient?: YahooFinanceClient) {
+  constructor(yahooClient?: YahooFinanceClient, alpacaClient?: AlpacaClient) {
     this.yahooClient = yahooClient ?? new YahooFinanceClient();
+    this.alpacaClient = alpacaClient;
     if (!fs.existsSync(CACHE_DIR)) {
       fs.mkdirSync(CACHE_DIR, { recursive: true });
     }
@@ -67,18 +70,30 @@ export class BacktestDataLoader {
       log.debug({ symbol }, 'No cache file, skipping (cache-only mode)');
       return [];
     } else {
-      // 3. Fetch from API if no cache
-      // Calculate days from lookback start to end date
-      const totalDays = Math.ceil(
-        (end.getTime() - lookbackStart.getTime()) / (1000 * 60 * 60 * 24),
-      );
+      // 3. Fetch from API if no cache — try Alpaca first, then Yahoo
+      const lookbackStr = lookbackStart.toISOString().split('T')[0];
+      const endStr = end.toISOString().split('T')[0];
+      let rawCandles: { date: string; open: number; high: number; low: number; close: number; volume: number }[] = [];
 
-      log.info({ symbol, startDate, endDate, lookbackDays: totalDays }, 'Fetching from Yahoo');
-
-      const rawCandles = await this.yahooClient.getHistoricalData(symbol, totalDays, end.getTime());
+      if (this.alpacaClient) {
+        try {
+          log.info({ symbol, startDate, endDate }, 'Fetching from Alpaca');
+          rawCandles = await this.alpacaClient.getHistoricalBars(symbol, lookbackStr, endStr);
+        } catch (err) {
+          log.warn({ symbol, err }, 'Alpaca fetch failed, falling back to Yahoo');
+        }
+      }
 
       if (rawCandles.length === 0) {
-        log.warn({ symbol }, 'No data returned from Yahoo Finance');
+        const totalDays = Math.ceil(
+          (end.getTime() - lookbackStart.getTime()) / (1000 * 60 * 60 * 24),
+        );
+        log.info({ symbol, startDate, endDate, lookbackDays: totalDays }, 'Fetching from Yahoo');
+        rawCandles = await this.yahooClient.getHistoricalData(symbol, totalDays, end.getTime());
+      }
+
+      if (rawCandles.length === 0) {
+        log.warn({ symbol }, 'No data returned from any source');
         return [];
       }
 
