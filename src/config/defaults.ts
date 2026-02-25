@@ -30,7 +30,7 @@ export const CONFIG_DEFAULTS: ConfigDefault[] = [
   },
   {
     key: 'pairlist.filters',
-    value: '["volume","price","marketCap","volatility","blacklist","maxPairs"]',
+    value: '["t212","volume","price","marketCap","volatility","blacklist","maxPairs"]',
     category: 'pairlist',
     description: 'Active filter chain',
   },

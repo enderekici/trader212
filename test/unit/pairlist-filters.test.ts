@@ -488,4 +488,70 @@ describe('pairlist/filters', () => {
       expect(filter.name).toBe('performance');
     });
   });
+
+  describe('T212Filter', () => {
+    function makeMockMapper(loaded: boolean, available: Set<string>) {
+      return {
+        isLoaded: () => loaded,
+        isAvailable: (symbol: string) => available.has(symbol),
+      } as import('../../src/data/ticker-mapper.js').TickerMapper;
+    }
+
+    it('filters out stocks not available on T212', async () => {
+      const mapper = makeMockMapper(true, new Set(['AAPL', 'GOOG']));
+      const { T212Filter } = await import('../../src/pairlist/filters.js');
+      const filter = new T212Filter(mapper);
+
+      const stocks = [
+        makeStock({ symbol: 'AAPL' }),
+        makeStock({ symbol: 'MSFT' }),
+        makeStock({ symbol: 'GOOG' }),
+        makeStock({ symbol: 'FAKE' }),
+      ];
+
+      const result = await filter.filter(stocks);
+      expect(result).toHaveLength(2);
+      expect(result.map((s) => s.symbol)).toEqual(['AAPL', 'GOOG']);
+    });
+
+    it('passes all stocks through when mapper is not loaded', async () => {
+      const mapper = makeMockMapper(false, new Set());
+      const { T212Filter } = await import('../../src/pairlist/filters.js');
+      const filter = new T212Filter(mapper);
+
+      const stocks = [makeStock({ symbol: 'AAPL' }), makeStock({ symbol: 'FAKE' })];
+
+      const result = await filter.filter(stocks);
+      expect(result).toHaveLength(2);
+    });
+
+    it('returns empty array when no stocks are available', async () => {
+      const mapper = makeMockMapper(true, new Set());
+      const { T212Filter } = await import('../../src/pairlist/filters.js');
+      const filter = new T212Filter(mapper);
+
+      const stocks = [makeStock({ symbol: 'AAPL' }), makeStock({ symbol: 'MSFT' })];
+
+      const result = await filter.filter(stocks);
+      expect(result).toHaveLength(0);
+    });
+
+    it('returns all stocks when all are available', async () => {
+      const mapper = makeMockMapper(true, new Set(['AAPL', 'MSFT']));
+      const { T212Filter } = await import('../../src/pairlist/filters.js');
+      const filter = new T212Filter(mapper);
+
+      const stocks = [makeStock({ symbol: 'AAPL' }), makeStock({ symbol: 'MSFT' })];
+
+      const result = await filter.filter(stocks);
+      expect(result).toHaveLength(2);
+    });
+
+    it('has correct name property', async () => {
+      const mapper = makeMockMapper(false, new Set());
+      const { T212Filter } = await import('../../src/pairlist/filters.js');
+      const filter = new T212Filter(mapper);
+      expect(filter.name).toBe('t212');
+    });
+  });
 });

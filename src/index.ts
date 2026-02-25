@@ -130,7 +130,7 @@ class TradingBot {
     this.dataAggregator = new DataAggregator(this.yahoo, finnhub, marketaux);
 
     // 7. Pairlist pipeline
-    this.pairlistPipeline = createPairlistPipeline();
+    this.pairlistPipeline = createPairlistPipeline(this.tickerMapper);
 
     // 8. Decision engine
     this.decisionEngine = new DecisionEngine();

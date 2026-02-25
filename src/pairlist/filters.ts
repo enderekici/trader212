@@ -1,5 +1,6 @@
 import { and, isNotNull } from 'drizzle-orm';
 import { configManager } from '../config/manager.js';
+import type { TickerMapper } from '../data/ticker-mapper.js';
 import { getDb } from '../db/index.js';
 import { trades } from '../db/schema.js';
 import { createLogger } from '../utils/logger.js';
@@ -235,6 +236,27 @@ export class SectorFilter implements PairlistFilter {
         },
         'SectorFilter applied',
       );
+    }
+    return filtered;
+  }
+}
+
+export class T212Filter implements PairlistFilter {
+  readonly name = 't212';
+
+  constructor(private tickerMapper: TickerMapper) {}
+
+  async filter(stocks: StockInfo[]): Promise<StockInfo[]> {
+    if (!this.tickerMapper.isLoaded()) {
+      log.warn('TickerMapper not loaded — T212Filter passing all stocks through');
+      return stocks;
+    }
+
+    const filtered = stocks.filter((s) => this.tickerMapper.isAvailable(s.symbol));
+
+    const removed = stocks.length - filtered.length;
+    if (removed > 0) {
+      log.info({ removed, remaining: filtered.length }, 'T212Filter applied');
     }
     return filtered;
   }

@@ -8,6 +8,7 @@ const t212Schemas = new Map<string, z.ZodType>([
 
 // ── Pairlist ─────────────────────────────────────────────────────────────────
 const pairlistFilterEnum = z.enum([
+  't212',
   'volume',
   'price',
   'marketCap',

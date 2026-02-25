@@ -1,4 +1,5 @@
 import { configManager } from '../config/manager.js';
+import type { TickerMapper } from '../data/ticker-mapper.js';
 import type { PairlistFilter } from './filters.js';
 import {
   BlacklistFilter,
@@ -7,23 +8,25 @@ import {
   PerformanceFilter,
   PriceFilter,
   SectorFilter,
+  T212Filter,
   VolatilityFilter,
   VolumeFilter,
 } from './filters.js';
 import { PairlistPipeline } from './pipeline.js';
 
-const filterMap: Record<string, () => PairlistFilter> = {
-  volume: () => new VolumeFilter(),
-  price: () => new PriceFilter(),
-  marketCap: () => new MarketCapFilter(),
-  volatility: () => new VolatilityFilter(),
-  blacklist: () => new BlacklistFilter(),
-  maxPairs: () => new MaxPairsFilter(),
-  performance: () => new PerformanceFilter(),
-  sector: () => new SectorFilter(),
-};
+export function createPairlistPipeline(tickerMapper?: TickerMapper): PairlistPipeline {
+  const filterMap: Record<string, () => PairlistFilter> = {
+    volume: () => new VolumeFilter(),
+    price: () => new PriceFilter(),
+    marketCap: () => new MarketCapFilter(),
+    volatility: () => new VolatilityFilter(),
+    blacklist: () => new BlacklistFilter(),
+    maxPairs: () => new MaxPairsFilter(),
+    performance: () => new PerformanceFilter(),
+    sector: () => new SectorFilter(),
+    ...(tickerMapper ? { t212: () => new T212Filter(tickerMapper) } : {}),
+  };
 
-export function createPairlistPipeline(): PairlistPipeline {
   const filterNames = configManager.get<string[]>('pairlist.filters');
 
   const filters: PairlistFilter[] = [];
@@ -47,6 +50,7 @@ export {
   PerformanceFilter,
   PriceFilter,
   SectorFilter,
+  T212Filter,
   VolatilityFilter,
   VolumeFilter,
 } from './filters.js';
