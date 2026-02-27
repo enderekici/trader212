@@ -119,7 +119,7 @@ export const PositionSchema = z
         totalCost: z.number().optional(),
         currentValue: z.number().optional(),
         unrealizedProfitLoss: z.number().optional(),
-        fxImpact: z.number().optional(),
+        fxImpact: z.number().nullable().optional(),
       })
       .passthrough()
       .optional(),
