@@ -309,7 +309,6 @@ export class PartialExitManager {
       const order = await client.placeMarketOrder({
         ticker: t212Ticker,
         quantity: sharesToSell,
-        timeValidity: 'DAY',
       });
       log.info({ symbol, orderId: order.id, sharesToSell }, 'Partial exit market order placed');
 
@@ -381,7 +380,7 @@ export class PartialExitManager {
             ticker: t212Ticker,
             quantity: newShares,
             stopPrice: newStopLoss,
-            timeValidity: 'GTC',
+            timeValidity: 'GOOD_TILL_CANCEL',
           });
 
           updateOrderStatus(slOrderId, {

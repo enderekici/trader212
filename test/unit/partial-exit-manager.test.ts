@@ -591,7 +591,6 @@ describe('PartialExitManager', () => {
       expect(mockT212Client.placeMarketOrder).toHaveBeenCalledWith({
         ticker: 'AAPL_US_EQ',
         quantity: 50,
-        timeValidity: 'DAY',
       });
 
       // Should cancel old stop and place new one at breakeven
@@ -601,7 +600,7 @@ describe('PartialExitManager', () => {
         ticker: 'AAPL_US_EQ',
         quantity: 50, // Remaining shares
         stopPrice: 100,
-        timeValidity: 'GTC',
+        timeValidity: 'GOOD_TILL_CANCEL',
       });
     });
 

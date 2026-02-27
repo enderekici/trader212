@@ -412,7 +412,6 @@ export class OrderReplacer {
         newT212Order = await client.placeMarketOrder({
           ticker,
           quantity: order.requestedQuantity,
-          timeValidity: 'DAY',
         });
       }
 

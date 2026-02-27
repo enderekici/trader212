@@ -205,7 +205,6 @@ export class OrderManager {
       const order = await client.placeMarketOrder({
         ticker: params.t212Ticker,
         quantity: params.shares,
-        timeValidity: 'DAY',
       });
       log.info({ symbol: params.symbol, orderId: order.id }, 'Market buy order placed');
 
@@ -264,7 +263,7 @@ export class OrderManager {
           ticker: params.t212Ticker,
           quantity: params.shares,
           stopPrice: actualStopLoss,
-          timeValidity: 'GTC',
+          timeValidity: 'GOOD_TILL_CANCEL',
         });
         stopOrderId = String(stopOrder.id);
 
@@ -287,7 +286,6 @@ export class OrderManager {
           await client.placeMarketOrder({
             ticker: params.t212Ticker,
             quantity: params.shares,
-            timeValidity: 'DAY',
           });
           log.warn({ symbol: params.symbol }, 'Position closed after stop-loss failure');
         } catch (closeErr) {
@@ -333,7 +331,7 @@ export class OrderManager {
             ticker: params.t212Ticker,
             quantity: params.shares,
             limitPrice: actualTakeProfit,
-            timeValidity: 'GTC',
+            timeValidity: 'GOOD_TILL_CANCEL',
           });
           takeProfitOrderId = String(tpOrder.id);
 
@@ -429,7 +427,6 @@ export class OrderManager {
           await client.placeMarketOrder({
             ticker: params.t212Ticker,
             quantity: params.shares,
-            timeValidity: 'DAY',
           });
           log.warn(
             { symbol: params.symbol },
@@ -645,7 +642,6 @@ export class OrderManager {
       const order = await client.placeMarketOrder({
         ticker: params.t212Ticker,
         quantity: params.shares,
-        timeValidity: 'DAY',
       });
       log.info({ symbol: params.symbol, orderId: order.id }, 'Market sell order placed');
 

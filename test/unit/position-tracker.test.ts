@@ -223,13 +223,13 @@ describe('PositionTracker', () => {
       ]);
 
       const mockClient = {
-        getPortfolio: vi.fn().mockResolvedValue([]),
+        getPositions: vi.fn().mockResolvedValue([]),
       } as any;
 
       await tracker.syncWithT212(mockClient);
 
       // Auto-reconciles the position (insert trade + delete position)
-      expect(mockClient.getPortfolio).toHaveBeenCalledOnce();
+      expect(mockClient.getPositions).toHaveBeenCalledOnce();
       expect(mockDbRun).toHaveBeenCalled();
     });
 
@@ -239,7 +239,7 @@ describe('PositionTracker', () => {
       ]);
 
       const mockClient = {
-        getPortfolio: vi.fn().mockResolvedValue([]),
+        getPositions: vi.fn().mockResolvedValue([]),
       } as any;
 
       await tracker.syncWithT212(mockClient);
@@ -250,13 +250,13 @@ describe('PositionTracker', () => {
       mockDbAll.mockReturnValueOnce([]);
 
       const mockClient = {
-        getPortfolio: vi.fn().mockResolvedValue([
+        getPositions: vi.fn().mockResolvedValue([
           { ticker: 'GOOG_US_EQ', quantity: 5, currentPrice: 100 },
         ]),
       } as any;
 
       await tracker.syncWithT212(mockClient);
-      expect(mockClient.getPortfolio).toHaveBeenCalledOnce();
+      expect(mockClient.getPositions).toHaveBeenCalledOnce();
     });
 
     it('logs warnings for quantity mismatches', async () => {
@@ -265,13 +265,13 @@ describe('PositionTracker', () => {
       ]);
 
       const mockClient = {
-        getPortfolio: vi.fn().mockResolvedValue([
+        getPositions: vi.fn().mockResolvedValue([
           { ticker: 'AAPL_US_EQ', quantity: 7, currentPrice: 150 },
         ]),
       } as any;
 
       await tracker.syncWithT212(mockClient);
-      expect(mockClient.getPortfolio).toHaveBeenCalledOnce();
+      expect(mockClient.getPositions).toHaveBeenCalledOnce();
     });
 
     it('matches positions using instrument.ticker fallback', async () => {
@@ -280,33 +280,33 @@ describe('PositionTracker', () => {
       ]);
 
       const mockClient = {
-        getPortfolio: vi.fn().mockResolvedValue([
+        getPositions: vi.fn().mockResolvedValue([
           { instrument: { ticker: 'AAPL_US_EQ' }, quantity: 10, currentPrice: 150 },
         ]),
       } as any;
 
       await tracker.syncWithT212(mockClient);
-      expect(mockClient.getPortfolio).toHaveBeenCalledOnce();
+      expect(mockClient.getPositions).toHaveBeenCalledOnce();
     });
 
     it('falls back to empty string when T212 position has no ticker', async () => {
       mockDbAll.mockReturnValueOnce([]);
 
       const mockClient = {
-        getPortfolio: vi.fn().mockResolvedValue([
+        getPositions: vi.fn().mockResolvedValue([
           { quantity: 5, currentPrice: 100 },
         ]),
       } as any;
 
       await tracker.syncWithT212(mockClient);
-      expect(mockClient.getPortfolio).toHaveBeenCalledOnce();
+      expect(mockClient.getPositions).toHaveBeenCalledOnce();
     });
 
-    it('handles getPortfolio error without crashing', async () => {
+    it('handles getPositions error without crashing', async () => {
       mockDbAll.mockReturnValueOnce([]);
 
       const mockClient = {
-        getPortfolio: vi.fn().mockRejectedValue(new Error('API error')),
+        getPositions: vi.fn().mockRejectedValue(new Error('API error')),
       } as any;
 
       await expect(tracker.syncWithT212(mockClient)).resolves.not.toThrow();
@@ -318,13 +318,13 @@ describe('PositionTracker', () => {
       ]);
 
       const mockClient = {
-        getPortfolio: vi.fn().mockResolvedValue([
+        getPositions: vi.fn().mockResolvedValue([
           { ticker: 'AAPL_US_EQ', quantity: 10, currentPrice: 150 },
         ]),
       } as any;
 
       await tracker.syncWithT212(mockClient);
-      expect(mockClient.getPortfolio).toHaveBeenCalledOnce();
+      expect(mockClient.getPositions).toHaveBeenCalledOnce();
     });
 
     it('uses entryPrice as exitPrice when currentPrice is null (line 73)', async () => {
@@ -341,7 +341,7 @@ describe('PositionTracker', () => {
       ]);
 
       const mockClient = {
-        getPortfolio: vi.fn().mockResolvedValue([]),
+        getPositions: vi.fn().mockResolvedValue([]),
       } as any;
 
       await tracker.syncWithT212(mockClient);

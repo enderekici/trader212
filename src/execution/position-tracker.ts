@@ -88,7 +88,7 @@ export class PositionTracker {
     const dbSymbolMap = new Map(dbPositions.map((p) => [p.t212Ticker, p]));
 
     try {
-      const t212Positions = await t212Client.getPortfolio();
+      const t212Positions = await t212Client.getPositions();
       const getTicker = (p: (typeof t212Positions)[number]) =>
         p.ticker ?? p.instrument?.ticker ?? '';
       const t212TickerSet = new Set(t212Positions.map(getTicker));

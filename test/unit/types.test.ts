@@ -299,9 +299,9 @@ describe('Zod Schemas', () => {
   });
 
   describe('TimeInForceSchema', () => {
-    it('accepts DAY and GTC', () => {
+    it('accepts DAY and GOOD_TILL_CANCEL', () => {
       expect(TimeInForceSchema.parse('DAY')).toBe('DAY');
-      expect(TimeInForceSchema.parse('GTC')).toBe('GTC');
+      expect(TimeInForceSchema.parse('GOOD_TILL_CANCEL')).toBe('GOOD_TILL_CANCEL');
     });
 
     it('rejects invalid values', () => {
@@ -317,16 +317,16 @@ describe('Zod Schemas', () => {
       });
       expect(result.quantity).toBe(10);
       expect(result.ticker).toBe('AAPL_US_EQ');
-      expect(result.timeValidity).toBe('DAY');
+      expect(result.extendedHours).toBeUndefined();
     });
 
-    it('accepts custom timeValidity', () => {
+    it('accepts extendedHours', () => {
       const result = MarketOrderRequestSchema.parse({
         quantity: 1,
         ticker: 'TSLA_US_EQ',
-        timeValidity: 'GTC',
+        extendedHours: true,
       });
-      expect(result.timeValidity).toBe('GTC');
+      expect(result.extendedHours).toBe(true);
     });
 
     it('rejects non-positive quantity', () => {

@@ -749,7 +749,6 @@ describe('DCAManager', () => {
       expect(t212Client.placeMarketOrder).toHaveBeenCalledWith({
         ticker: 'AAPL_US_EQ',
         quantity: 10,
-        timeValidity: 'DAY',
       });
       expect(mockDbInstance.set).toHaveBeenCalledWith(
         expect.objectContaining({

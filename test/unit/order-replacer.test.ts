@@ -563,7 +563,6 @@ describe('OrderReplacer', () => {
         expect(mockClient.placeMarketOrder).toHaveBeenCalledWith({
           ticker: 'AAPL_US_EQ',
           quantity: 10,
-          timeValidity: 'DAY',
         });
       });
 

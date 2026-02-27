@@ -85,7 +85,7 @@ describe('Trading212Client', () => {
       mockFetch().mockResolvedValueOnce(
         createMockResponse({ json: { id: 1 } }) as unknown as Response,
       );
-      await client.getAccountInfo();
+      await client.getAccountSummary();
 
       const call = mockFetch().mock.calls[0];
       const requestInit = call[1] as RequestInit;
@@ -100,7 +100,7 @@ describe('Trading212Client', () => {
       mockFetch().mockResolvedValueOnce(
         createMockResponse({ json: { id: 1 } }) as unknown as Response,
       );
-      await colonClient.getAccountInfo();
+      await colonClient.getAccountSummary();
 
       const call = mockFetch().mock.calls[0];
       const requestInit = call[1] as RequestInit;
@@ -124,7 +124,7 @@ describe('Trading212Client', () => {
         }) as unknown as Response,
       );
 
-      await expect(client.getAccountInfo()).rejects.toThrow(RateLimitError);
+      await expect(client.getAccountSummary()).rejects.toThrow(RateLimitError);
     });
 
     it('throws AuthError on 401', async () => {
@@ -136,7 +136,7 @@ describe('Trading212Client', () => {
         }) as unknown as Response,
       );
 
-      await expect(client.getAccountInfo()).rejects.toThrow(AuthError);
+      await expect(client.getAccountSummary()).rejects.toThrow(AuthError);
     });
 
     it('throws ApiError on other error statuses', async () => {
@@ -148,7 +148,7 @@ describe('Trading212Client', () => {
         }) as unknown as Response,
       );
 
-      await expect(client.getAccountInfo()).rejects.toThrow(ApiError);
+      await expect(client.getAccountSummary()).rejects.toThrow(ApiError);
     });
 
     it('parses error JSON with message field', async () => {
@@ -161,7 +161,7 @@ describe('Trading212Client', () => {
       );
 
       try {
-        await client.getAccountInfo();
+        await client.getAccountSummary();
       } catch (err) {
         expect(err).toBeInstanceOf(ApiError);
         expect((err as ApiError).message).toContain('Bad request details');
@@ -178,7 +178,7 @@ describe('Trading212Client', () => {
       );
 
       try {
-        await client.getAccountInfo();
+        await client.getAccountSummary();
       } catch (err) {
         expect(err).toBeInstanceOf(ApiError);
         expect((err as ApiError).message).toContain('Error detail');
@@ -195,7 +195,7 @@ describe('Trading212Client', () => {
       );
 
       try {
-        await client.getAccountInfo();
+        await client.getAccountSummary();
       } catch (err) {
         expect(err).toBeInstanceOf(ApiError);
         expect((err as ApiError).message).toContain('Bad Gateway');
@@ -212,7 +212,7 @@ describe('Trading212Client', () => {
       );
 
       try {
-        await client.getAccountInfo();
+        await client.getAccountSummary();
       } catch (err) {
         expect(err).toBeInstanceOf(ApiError);
         // Falls through to errorText since message and errorMessage are falsy
@@ -236,9 +236,9 @@ describe('Trading212Client', () => {
         }) as unknown as Response,
       );
 
-      await client.getAccountInfo();
+      await client.getAccountSummary();
 
-      const info = client.getRateLimitInfo('/equity/account/info');
+      const info = client.getRateLimitInfo('/equity/account/summary');
       expect(info).toEqual({
         limit: 30,
         period: 10,
@@ -259,9 +259,9 @@ describe('Trading212Client', () => {
         }) as unknown as Response,
       );
 
-      await client.getAccountInfo();
+      await client.getAccountSummary();
 
-      const info = client.getRateLimitInfo('/equity/account/info');
+      const info = client.getRateLimitInfo('/equity/account/summary');
       expect(info).toBeNull();
     });
 
@@ -270,9 +270,9 @@ describe('Trading212Client', () => {
         createMockResponse({ json: { id: 1 } }) as unknown as Response,
       );
 
-      await client.getAccountInfo();
+      await client.getAccountSummary();
 
-      const info = client.getRateLimitInfo('/equity/account/info');
+      const info = client.getRateLimitInfo('/equity/account/summary');
       expect(info).toBeNull();
     });
 
@@ -294,70 +294,55 @@ describe('Trading212Client', () => {
         }) as unknown as Response,
       );
 
-      await client.getAccountInfo();
-      const info = client.getRateLimitInfo('/equity/account/info');
+      await client.getAccountSummary();
+      const info = client.getRateLimitInfo('/equity/account/summary');
       expect(info?.remaining).toBe(1);
     });
   });
 
   describe('Account endpoints', () => {
-    it('getAccountInfo', async () => {
-      const data = { id: 123, currencyCode: 'USD' };
-      mockFetch().mockResolvedValueOnce(
-        createMockResponse({ json: data }) as unknown as Response,
-      );
-
-      const result = await client.getAccountInfo();
-      expect(result.id).toBe(123);
-      expect(mockFetch()).toHaveBeenCalledWith(
-        'https://demo.trading212.com/api/v0/equity/account/info',
-        expect.any(Object),
-      );
-    });
-
-    it('getAccountCash', async () => {
-      const data = { free: 1000, total: 5000 };
-      mockFetch().mockResolvedValueOnce(
-        createMockResponse({ json: data }) as unknown as Response,
-      );
-
-      const result = await client.getAccountCash();
-      expect(result.free).toBe(1000);
-    });
-
     it('getAccountSummary', async () => {
-      const data = { id: 1, totalValue: 10000 };
+      const data = { id: 123, currency: 'USD', totalValue: 10000 };
       mockFetch().mockResolvedValueOnce(
         createMockResponse({ json: data }) as unknown as Response,
       );
 
       const result = await client.getAccountSummary();
+      expect(result.id).toBe(123);
       expect(result.totalValue).toBe(10000);
+      expect(mockFetch()).toHaveBeenCalledWith(
+        'https://demo.trading212.com/api/v0/equity/account/summary',
+        expect.any(Object),
+      );
     });
   });
 
-  describe('Portfolio endpoints', () => {
-    it('getPortfolio', async () => {
+  describe('Positions endpoints', () => {
+    it('getPositions', async () => {
       const data = [{ ticker: 'AAPL_US_EQ', quantity: 10, currentPrice: 150 }];
       mockFetch().mockResolvedValueOnce(
         createMockResponse({ json: data }) as unknown as Response,
       );
 
-      const result = await client.getPortfolio();
+      const result = await client.getPositions();
       expect(result).toHaveLength(1);
       expect(result[0].quantity).toBe(10);
+      expect(mockFetch()).toHaveBeenCalledWith(
+        'https://demo.trading212.com/api/v0/equity/positions',
+        expect.any(Object),
+      );
     });
 
-    it('getPosition', async () => {
-      const data = { ticker: 'AAPL_US_EQ', quantity: 10, currentPrice: 150 };
+    it('getPositions with ticker filter', async () => {
+      const data = [{ ticker: 'AAPL_US_EQ', quantity: 10, currentPrice: 150 }];
       mockFetch().mockResolvedValueOnce(
         createMockResponse({ json: data }) as unknown as Response,
       );
 
-      const result = await client.getPosition('AAPL_US_EQ');
-      expect(result.ticker).toBe('AAPL_US_EQ');
+      const result = await client.getPositions('AAPL_US_EQ');
+      expect(result).toHaveLength(1);
       expect(mockFetch()).toHaveBeenCalledWith(
-        expect.stringContaining('AAPL_US_EQ'),
+        'https://demo.trading212.com/api/v0/equity/positions?ticker=AAPL_US_EQ',
         expect.any(Object),
       );
     });
@@ -408,7 +393,6 @@ describe('Trading212Client', () => {
       const result = await client.placeMarketOrder({
         quantity: 10,
         ticker: 'AAPL_US_EQ',
-        timeValidity: 'DAY',
       });
       expect(result.id).toBe(1);
       const call = mockFetch().mock.calls[0];
@@ -654,16 +638,17 @@ describe('Trading212Client', () => {
         createMockResponse({ json: { id: 123, currencyCode: 'USD' } }) as unknown as Response,
       );
 
-      const result = await client.getAccountInfo();
+      const result = await client.getAccountSummary();
       expect(result.id).toBe(123);
     });
 
     it('throws ZodError when response does not match schema', async () => {
+      // AccountSummary uses .passthrough() with all optional fields, so use getOrders (expects array)
       mockFetch().mockResolvedValueOnce(
-        createMockResponse({ json: { id: 'not-a-number' } }) as unknown as Response,
+        createMockResponse({ json: 'not-an-array' }) as unknown as Response,
       );
 
-      await expect(client.getAccountInfo()).rejects.toThrow();
+      await expect(client.getOrders()).rejects.toThrow();
     });
 
     it('returns raw data when no schema is provided', async () => {
@@ -697,10 +682,10 @@ describe('Trading212Client', () => {
       mockFetch().mockResolvedValueOnce(
         createMockResponse({ json: { id: 1 } }) as unknown as Response,
       );
-      await liveClient.getAccountInfo();
+      await liveClient.getAccountSummary();
 
       expect(mockFetch()).toHaveBeenCalledWith(
-        'https://live.trading212.com/api/v0/equity/account/info',
+        'https://live.trading212.com/api/v0/equity/account/summary',
         expect.any(Object),
       );
     });

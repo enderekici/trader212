@@ -288,7 +288,6 @@ export class DCAManager {
       const order = await t212Client.placeMarketOrder({
         ticker: t212Ticker,
         quantity: shares,
-        timeValidity: 'DAY',
       });
 
       log.info({ symbol, orderId: order.id, dcaRound }, 'DCA buy order placed');

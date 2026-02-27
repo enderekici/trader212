@@ -979,9 +979,9 @@ class TradingBot {
       let cashAvailable = 0;
       let portfolioValue = 0;
       try {
-        const accountCash = await this.t212Client.getAccountCash();
-        cashAvailable = accountCash.free ?? accountCash.availableToTrade ?? 0;
-        portfolioValue = (accountCash.total ?? cashAvailable) + positionsValue;
+        const accountSummary = await this.t212Client.getAccountSummary();
+        cashAvailable = accountSummary.cash?.availableToTrade ?? 0;
+        portfolioValue = accountSummary.totalValue ?? cashAvailable + positionsValue;
         if (portfolioValue <= 0) portfolioValue = cashAvailable + positionsValue;
         this.lastKnownPortfolio = {
           cash: cashAvailable,
